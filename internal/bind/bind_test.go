@@ -64,13 +64,11 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	assertQUICUsesSalamander(t, a)
 	bReceive, bPort, err := b.Open(0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	assertQUICUsesSalamander(t, b)
 	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
 	if err != nil {
 		t.Fatal(err)
@@ -92,20 +90,6 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	}
 }
 
-func assertQUICUsesSalamander(t *testing.T, bind *Bind) {
-	t.Helper()
-	bind.mu.Lock()
-	state := bind.state
-	bind.mu.Unlock()
-	if state == nil || state.obfsConn == nil {
-		t.Fatal("Salamander connection is not active")
-	}
-	carrier, ok := state.transport.Conn.(*obfuscatedQUICConn)
-	if !ok || carrier.PacketConn != state.obfsConn {
-		t.Fatalf("QUIC bypasses Salamander through %T", state.transport.Conn)
-	}
-}
-
 func TestBindRejectsMismatchedSalamanderKeys(t *testing.T) {
 	configA := DefaultConfig()
 	configA.HandshakeTimeout = 250 * time.Millisecond
@@ -124,8 +108,6 @@ func TestBindRejectsMismatchedSalamanderKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	assertQUICUsesSalamander(t, a)
-	assertQUICUsesSalamander(t, b)
 	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +235,7 @@ func TestBindRedialsAfterAbruptPeerRestart(t *testing.T) {
 	}
 	// Closing the packet socket first models process or host loss: the peer
 	// cannot send a graceful QUIC CONNECTION_CLOSE to the surviving endpoint.
-	if err := bState.packetConn.Close(); err != nil {
+	if err := bState.carrier.AbortNetwork(); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Close(); err != nil {

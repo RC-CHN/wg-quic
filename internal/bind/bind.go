@@ -2,27 +2,19 @@ package armorbind
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/netip"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/fec"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
-	"github.com/quic-go/quic-go"
 )
-
-const alpn = "wg-quic/1"
 
 const fecExpiryPoll = 500 * time.Millisecond
 
@@ -54,36 +46,16 @@ type receivedPacket struct {
 	ep   *Endpoint
 }
 
-// obfuscatedQUICConn deliberately exposes only net.PacketConn plus socket
-// buffer tuning to quic-go. Salamander adds a header to every UDP datagram, so
-// forwarding UDP GSO/GRO metadata unchanged would split encoded packets at the
-// pre-obfuscation segment size. Segment-aware offload can be added later
-// without letting QUIC bypass the obfuscation layer in the meantime.
-type obfuscatedQUICConn struct {
-	net.PacketConn
-	udp *net.UDPConn
-}
-
-func (c *obfuscatedQUICConn) SetReadBuffer(bytes int) error {
-	return c.udp.SetReadBuffer(bytes)
-}
-
-func (c *obfuscatedQUICConn) SetWriteBuffer(bytes int) error {
-	return c.udp.SetWriteBuffer(bytes)
-}
-
 type runState struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	listener   *quic.Listener
-	transport  *quic.Transport
-	packetConn net.PacketConn
-	obfsConn   *obfs.SalamanderConn
-	recv       chan receivedPacket
-	cfg        Config
-	mu         sync.Mutex
-	sessions   map[uint64]*session
-	endpoints  map[netip.AddrPort]*Endpoint
+	ctx       context.Context
+	cancel    context.CancelFunc
+	carrier   *quiccarrier.Carrier
+	recv      chan receivedPacket
+	cfg       Config
+	mu        sync.Mutex
+	sessions  map[uint64]*session
+	endpoints map[netip.AddrPort]*Endpoint
+
 	reassembly *reassembler
 	wg         sync.WaitGroup
 }
@@ -178,77 +150,29 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	if b.state != nil {
 		return nil, 0, conn.ErrBindAlreadyOpen
 	}
-	tlsConfig, err := serverTLSConfig()
-	if err != nil {
-		return nil, 0, err
-	}
 	ctx, cancel := context.WithCancel(context.Background())
-	rawConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: int(port)})
+	carrier, err := quiccarrier.Open(port, quiccarrier.Config{
+		HandshakeTimeout: b.cfg.HandshakeTimeout,
+		MaxIdleTimeout:   b.cfg.MaxIdleTimeout,
+		KeepAlivePeriod:  b.cfg.KeepAlivePeriod,
+		Mark:             b.mark.Load(),
+		ObfsMode:         b.cfg.ObfsMode,
+		ObfsKeys:         b.cfg.ObfsKeys,
+		EndpointKeys:     b.obfsResolved,
+	})
 	if err != nil {
-		cancel()
-		return nil, 0, err
-	}
-	if mark := b.mark.Load(); mark != 0 {
-		if err := setSocketMark(rawConn, mark); err != nil {
-			rawConn.Close()
-			cancel()
-			return nil, 0, err
-		}
-	}
-	var transportConn net.PacketConn = rawConn
-	var obfsConn *obfs.SalamanderConn
-	switch b.cfg.ObfsMode {
-	case "none":
-	case "salamander":
-		peers := make([]obfs.PeerKey, 0, len(b.cfg.ObfsKeys)+len(b.obfsResolved))
-		for _, key := range b.cfg.ObfsKeys {
-			peers = append(peers, obfs.PeerKey{Key: key})
-		}
-		for endpoint, key := range b.obfsResolved {
-			peers = append(peers, obfs.PeerKey{Key: key, Endpoint: endpoint})
-		}
-		obfsConn, err = obfs.WrapKeyedSalamander(rawConn, peers)
-		if err != nil {
-			rawConn.Close()
-			cancel()
-			return nil, 0, err
-		}
-		transportConn = &obfuscatedQUICConn{PacketConn: obfsConn, udp: rawConn}
-	default:
-		rawConn.Close()
-		cancel()
-		return nil, 0, fmt.Errorf("unsupported obfuscation mode %q", b.cfg.ObfsMode)
-	}
-	transport := &quic.Transport{Conn: transportConn}
-	listener, err := transport.Listen(tlsConfig, quicConfig(b.cfg))
-	if err != nil {
-		transport.Close()
-		cancel()
-		return nil, 0, err
-	}
-	_, portString, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		listener.Close()
-		transport.Close()
-		cancel()
-		return nil, 0, err
-	}
-	actualPort, err := strconv.ParseUint(portString, 10, 16)
-	if err != nil {
-		listener.Close()
-		transport.Close()
 		cancel()
 		return nil, 0, err
 	}
 	state := &runState{
-		ctx: ctx, cancel: cancel, listener: listener, transport: transport, packetConn: rawConn, obfsConn: obfsConn,
+		ctx: ctx, cancel: cancel, carrier: carrier,
 		recv: make(chan receivedPacket, b.cfg.QueueSize), cfg: b.cfg,
 		sessions: make(map[uint64]*session), endpoints: make(map[netip.AddrPort]*Endpoint), reassembly: newReassembler(),
 	}
 	b.state = state
 	state.wg.Add(1)
 	go b.acceptLoop(state)
-	return []conn.ReceiveFunc{b.receiveFunc(state)}, uint16(actualPort), nil
+	return []conn.ReceiveFunc{b.receiveFunc(state)}, carrier.Port(), nil
 }
 
 func (b *Bind) Close() error {
@@ -260,21 +184,14 @@ func (b *Bind) Close() error {
 		return nil
 	}
 	state.cancel()
-	listenerErr := state.listener.Close()
 	state.mu.Lock()
 	for _, sess := range state.sessions {
 		sess.cancel()
 	}
 	state.mu.Unlock()
-	transportErr := state.transport.Close()
+	carrierErr := state.carrier.Close()
 	state.wg.Wait()
-	if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
-		return listenerErr
-	}
-	if transportErr != nil && !errors.Is(transportErr, net.ErrClosed) {
-		return transportErr
-	}
-	return nil
+	return carrierErr
 }
 
 func (b *Bind) SetMark(mark uint32) error {
@@ -285,7 +202,7 @@ func (b *Bind) SetMark(mark uint32) error {
 	if state == nil {
 		return nil
 	}
-	return setSocketMark(state.packetConn, mark)
+	return state.carrier.SetMark(mark)
 }
 func (b *Bind) BatchSize() int { return 32 }
 
@@ -308,12 +225,7 @@ func (b *Bind) Port() uint16 {
 	if b.state == nil {
 		return 0
 	}
-	_, port, err := net.SplitHostPort(b.state.listener.Addr().String())
-	if err != nil {
-		return 0
-	}
-	v, _ := strconv.ParseUint(port, 10, 16)
-	return uint16(v)
+	return b.state.carrier.Port()
 }
 
 func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
@@ -329,8 +241,8 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 	b.mu.Lock()
 	if key, ok := b.cfg.ObfsEndpointKeys[value]; ok {
 		b.obfsResolved[ep.addr] = key
-		if b.state != nil && b.state.obfsConn != nil {
-			b.state.obfsConn.AssociateEndpoint(ep.addr, key)
+		if b.state != nil {
+			b.state.carrier.AssociateEndpoint(ep.addr, key)
 		}
 	}
 	state := b.state
@@ -425,14 +337,9 @@ func (b *Bind) receiveFunc(state *runState) conn.ReceiveFunc {
 func (b *Bind) acceptLoop(state *runState) {
 	defer state.wg.Done()
 	for {
-		qconn, err := state.listener.Accept(state.ctx)
+		qconn, remote, err := state.carrier.Accept(state.ctx)
 		if err != nil {
 			return
-		}
-		remote, err := addrPort(qconn.RemoteAddr())
-		if err != nil {
-			qconn.CloseWithError(1, err.Error())
-			continue
 		}
 		// Keep an accepted QUIC connection's endpoint identity separate from a
 		// configured outbound endpoint for the same address. If both peers dial
@@ -485,9 +392,7 @@ func (b *Bind) dialSession(sess *session) {
 	defer sess.state.wg.Done()
 	ctx, cancel := context.WithTimeout(sess.ctx, sess.state.cfg.HandshakeTimeout)
 	defer cancel()
-	qconn, err := sess.state.transport.Dial(ctx, net.UDPAddrFromAddrPort(sess.endpoint.addr), &tls.Config{
-		InsecureSkipVerify: true, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13,
-	}, quicConfig(sess.state.cfg))
+	qconn, err := sess.state.carrier.Dial(ctx, sess.endpoint.addr)
 	if err != nil {
 		sess.close()
 		return
@@ -516,7 +421,7 @@ type session struct {
 	priority   chan []byte
 	control    chan []byte
 	mu         sync.Mutex
-	conn       *quic.Conn
+	conn       *quiccarrier.Connection
 	readyOnce  sync.Once
 	closeOnce  sync.Once
 	closed     atomic.Bool
@@ -524,7 +429,7 @@ type session struct {
 	fecDecoder *fec.Decoder
 }
 
-func (s *session) setConn(qconn *quic.Conn) {
+func (s *session) setConn(qconn *quiccarrier.Connection) {
 	s.mu.Lock()
 	s.conn = qconn
 	s.mu.Unlock()
@@ -537,7 +442,7 @@ func (s *session) close() {
 		s.cancel()
 		s.mu.Lock()
 		if s.conn != nil {
-			s.conn.CloseWithError(0, "")
+			s.conn.CloseWithError("")
 		}
 		s.mu.Unlock()
 		s.state.mu.Lock()
@@ -758,40 +663,4 @@ func (s *session) deliverFrame(frame []byte) {
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
 	}
-}
-
-func quicConfig(cfg Config) *quic.Config {
-	return &quic.Config{
-		EnableDatagrams: true, HandshakeIdleTimeout: cfg.HandshakeTimeout, MaxIdleTimeout: cfg.MaxIdleTimeout,
-		KeepAlivePeriod: cfg.KeepAlivePeriod, MaxIncomingStreams: -1, MaxIncomingUniStreams: -1,
-	}
-}
-
-func serverTLSConfig() (*tls.Config, error) {
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	template := x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), NotBefore: now.Add(-time.Minute), NotAfter: now.Add(24 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature}
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, privateKey.Public(), privateKey)
-	if err != nil {
-		return nil, err
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{{Certificate: [][]byte{certDER}, PrivateKey: privateKey}},
-		NextProtos:   []string{alpn}, MinVersion: tls.VersionTLS13,
-	}, nil
-}
-
-func addrPort(addr net.Addr) (netip.AddrPort, error) {
-	udp, ok := addr.(*net.UDPAddr)
-	if !ok {
-		return netip.AddrPort{}, fmt.Errorf("unexpected remote address %T", addr)
-	}
-	ip, ok := netip.AddrFromSlice(udp.IP)
-	if !ok {
-		return netip.AddrPort{}, errors.New("remote address has invalid IP")
-	}
-	return netip.AddrPortFrom(ip.Unmap(), uint16(udp.Port)), nil
 }

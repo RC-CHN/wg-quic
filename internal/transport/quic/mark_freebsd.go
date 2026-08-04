@@ -1,6 +1,6 @@
 //go:build freebsd
 
-package armorbind
+package quic
 
 import (
 	"fmt"
@@ -10,9 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// FreeBSD exposes WireGuard's fwmark-equivalent metadata as SO_USER_COOKIE.
-// This matches upstream wireguard-go's StdNetBind behavior. Routing around a
-// full-tunnel default still uses explicit endpoint routes.
 const soUserCookie = 0x1015
 
 func setSocketMark(connection net.PacketConn, mark uint32) error {

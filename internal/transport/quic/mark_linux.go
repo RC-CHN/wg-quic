@@ -1,6 +1,6 @@
 //go:build linux
 
-package armorbind
+package quic
 
 import (
 	"fmt"

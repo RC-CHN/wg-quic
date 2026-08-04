@@ -1,6 +1,6 @@
 //go:build !linux && !freebsd
 
-package armorbind
+package quic
 
 import "net"
 
