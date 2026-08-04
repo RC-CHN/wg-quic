@@ -80,8 +80,9 @@ func DeriveWireGuardKey(localPrivate, remotePublic, preshared []byte) (Key, erro
 	return key, nil
 }
 
-// SalamanderConn preserves UDP's PacketConn and OOB-capable methods so
-// quic-go can continue to use ECN and batched UDP optimizations.
+// SalamanderConn provides UDP PacketConn and OOB-capable methods. ArmorBind
+// currently gives quic-go a narrow PacketConn view because GSO/GRO metadata
+// must be rewritten when obfuscation changes each datagram's length.
 type SalamanderConn struct {
 	*net.UDPConn
 

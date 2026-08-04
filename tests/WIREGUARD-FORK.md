@@ -83,6 +83,13 @@ WireGuard PresharedKeys. Its pinned upper-layer behavior matrix covers:
   Salamander transport;
 - cryptokey routing from one WireGuard device to two distinct peers.
 
+The Salamander round-trip additionally asserts that `quic.Transport.Conn`
+resolves to the obfuscating PacketConn rather than the raw UDP socket. The
+adapter intentionally disables QUIC GSO/GRO and ECN OOB paths until their
+segment metadata can be rewritten for Salamander's per-datagram header. A
+negative integration test configures different Salamander keys and requires
+the QUIC handshake and plaintext delivery to fail.
+
 The extended large-packet and concurrent behavior matrix currently runs on
 Linux and FreeBSD. Windows is intentionally behind those targets: its native CI
 still executes every Windows-applicable fork test, the ArmorBind round-trip,

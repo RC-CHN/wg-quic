@@ -64,11 +64,13 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
+	assertQUICUsesSalamander(t, a)
 	bReceive, bPort, err := b.Open(0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer b.Close()
+	assertQUICUsesSalamander(t, b)
 	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +89,69 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	got, _ = receiveOne(t, aReceive[0])
 	if !bytes.Equal(got, payload) {
 		t.Fatal("obfuscated reply changed in transit")
+	}
+}
+
+func assertQUICUsesSalamander(t *testing.T, bind *Bind) {
+	t.Helper()
+	bind.mu.Lock()
+	state := bind.state
+	bind.mu.Unlock()
+	if state == nil || state.obfsConn == nil {
+		t.Fatal("Salamander connection is not active")
+	}
+	carrier, ok := state.transport.Conn.(*obfuscatedQUICConn)
+	if !ok || carrier.PacketConn != state.obfsConn {
+		t.Fatalf("QUIC bypasses Salamander through %T", state.transport.Conn)
+	}
+}
+
+func TestBindRejectsMismatchedSalamanderKeys(t *testing.T) {
+	configA := DefaultConfig()
+	configA.HandshakeTimeout = 250 * time.Millisecond
+	configA.ObfsMode = "salamander"
+	configA.ObfsKeys = []obfs.Key{{0x42}}
+	configB := configA
+	configB.ObfsKeys = []obfs.Key{{0x43}}
+	a, b := New(configA), New(configB)
+	_, _, err := a.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	bReceive, bPort, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	assertQUICUsesSalamander(t, a)
+	assertQUICUsesSalamander(t, b)
+	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send([][]byte{[]byte("must remain unreadable")}, aToB); err != nil {
+		t.Fatal(err)
+	}
+
+	received := make(chan error, 1)
+	go func() {
+		packets := [][]byte{make([]byte, 65535)}
+		sizes := make([]int, 1)
+		eps := make([]conn.Endpoint, 1)
+		n, err := bReceive[0](packets, sizes, eps)
+		if err == nil && n != 0 {
+			err = errors.New("mismatched Salamander key delivered plaintext")
+		}
+		received <- err
+	}()
+	select {
+	case err := <-received:
+		if err == nil {
+			t.Fatal("mismatched Salamander key unexpectedly completed QUIC")
+		}
+		t.Fatalf("receive returned before the negative-test window: %v", err)
+	case <-time.After(750 * time.Millisecond):
 	}
 }
 

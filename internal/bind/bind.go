@@ -54,6 +54,24 @@ type receivedPacket struct {
 	ep   *Endpoint
 }
 
+// obfuscatedQUICConn deliberately exposes only net.PacketConn plus socket
+// buffer tuning to quic-go. Salamander adds a header to every UDP datagram, so
+// forwarding UDP GSO/GRO metadata unchanged would split encoded packets at the
+// pre-obfuscation segment size. Segment-aware offload can be added later
+// without letting QUIC bypass the obfuscation layer in the meantime.
+type obfuscatedQUICConn struct {
+	net.PacketConn
+	udp *net.UDPConn
+}
+
+func (c *obfuscatedQUICConn) SetReadBuffer(bytes int) error {
+	return c.udp.SetReadBuffer(bytes)
+}
+
+func (c *obfuscatedQUICConn) SetWriteBuffer(bytes int) error {
+	return c.udp.SetWriteBuffer(bytes)
+}
+
 type runState struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -195,6 +213,7 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 			cancel()
 			return nil, 0, err
 		}
+		transportConn = &obfuscatedQUICConn{PacketConn: obfsConn, udp: rawConn}
 	default:
 		rawConn.Close()
 		cancel()
