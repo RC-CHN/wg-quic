@@ -27,6 +27,9 @@ Initial local changes:
 3. `device/pools_test.go` formats `atomic.Uint32.Load()` rather than copying the
    `atomic.Uint32` value into `testing.Errorf`, fixing the Go vet `copylocks`
    diagnostic without changing test behavior.
+4. `device.NewDeviceWithOptions` can disable automatic device Up/Down changes
+   from TUN events. wg-quic uses this mode so its quick management process can
+   prepare endpoint route leases before activating the outer transport.
 
 From this point, wg-quic production code and tests use this directory rather
 than downloading `golang.zx2c4.com/wireguard`. Future upstream synchronization

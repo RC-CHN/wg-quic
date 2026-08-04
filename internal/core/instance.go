@@ -36,6 +36,7 @@ type Instance struct {
 	peerOrder  []string
 
 	mu            sync.Mutex
+	prepared      bool
 	up            bool
 	controlServer *control.Server
 	closeOnce     sync.Once
@@ -81,7 +82,9 @@ func newInstance(cfg *config.Config, name string, host platform.DeviceHost, debu
 		logLevel = device.LogLevelVerbose
 	}
 	logger := device.NewLogger(logLevel, fmt.Sprintf("(%s) ", name))
-	dev := device.NewDevice(tdev, bind, logger)
+	dev := device.NewDeviceWithOptions(tdev, bind, logger, device.Options{
+		DisableTUNEventStateTransitions: true,
+	})
 	if err := wgdevice.Configure(dev, cfg); err != nil {
 		dev.Close()
 		return nil, fmt.Errorf("configure WireGuard device: %w", err)
@@ -112,19 +115,64 @@ func (i *Instance) Up(ctx context.Context) error {
 	if i.up {
 		return errors.New("wg-quic core instance is already up")
 	}
-	if err := i.device.Up(); err != nil {
-		return fmt.Errorf("bring WireGuard device up: %w", err)
+	if err := i.prepareLocked(ctx); err != nil {
+		return err
+	}
+	if err := i.activateLocked(); err != nil {
+		server := i.controlServer
+		i.controlServer = nil
+		i.prepared = false
+		if server != nil {
+			_ = server.Close()
+		}
+		return err
+	}
+	return nil
+}
+
+// Prepare exposes the local control plane after creating the TUN, but leaves
+// the WireGuard device down. quick uses this state to install endpoint route
+// leases and numeric endpoints before any outer packet can be sent.
+func (i *Instance) Prepare(ctx context.Context) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.prepareLocked(ctx)
+}
+
+func (i *Instance) prepareLocked(ctx context.Context) error {
+	if i.prepared {
+		return nil
 	}
 	server, err := control.StartHandler(ctx, i.controlPath, control.Handler{
 		Status:          i.status,
 		SetPeerEndpoint: i.setPeerEndpoint,
 		RedialPeer:      i.redialPeer,
+		Activate:        i.activate,
 	})
 	if err != nil {
-		_ = i.device.Down()
 		return fmt.Errorf("start local control socket: %w", err)
 	}
 	i.controlServer = server
+	i.prepared = true
+	return nil
+}
+
+func (i *Instance) activate() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.activateLocked()
+}
+
+func (i *Instance) activateLocked() error {
+	if !i.prepared {
+		return errors.New("wg-quic core instance is not prepared")
+	}
+	if i.up {
+		return nil
+	}
+	if err := i.device.Up(); err != nil {
+		return fmt.Errorf("bring WireGuard device up: %w", err)
+	}
 	i.up = true
 	return nil
 }
@@ -148,6 +196,8 @@ func (i *Instance) Close() error {
 		i.mu.Lock()
 		server := i.controlServer
 		i.controlServer = nil
+		i.prepared = false
+		i.up = false
 		i.mu.Unlock()
 		if server != nil {
 			i.closeErr = server.Close()
@@ -174,6 +224,15 @@ func (i *Instance) Stats() armorbind.Stats {
 }
 
 func (i *Instance) status() control.Status {
+	i.mu.Lock()
+	state := "down"
+	if i.prepared {
+		state = "prepared"
+	}
+	if i.up {
+		state = "up"
+	}
+	i.mu.Unlock()
 	i.endpointMu.RLock()
 	peers := make([]control.PeerStatus, 0, len(i.peerOrder))
 	for _, publicKey := range i.peerOrder {
@@ -181,7 +240,7 @@ func (i *Instance) status() control.Status {
 	}
 	i.endpointMu.RUnlock()
 	return control.Status{
-		Interface: i.name, State: "up", ListenPort: i.bind.Port(),
+		Interface: i.name, State: state, ListenPort: i.bind.Port(),
 		Carrier: i.cfg.Transport.Carrier, FECMode: i.cfg.Transport.FEC,
 		ObfsMode: i.cfg.Transport.Obfs, Peers: peers, Stats: i.bind.Stats(),
 	}

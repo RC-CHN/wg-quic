@@ -81,6 +81,48 @@ func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	}
 }
 
+func TestInstancePreparedStateDefersNetworkActivation(t *testing.T) {
+	host := &testDeviceHost{
+		tunnel:      tuntest.NewChannelTUN(),
+		controlPath: testControlPath(t, "wg0"),
+	}
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		},
+		Transport: config.DefaultTransport(),
+	}
+	instance, err := New(cfg, "wg0", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client := control.NewClient(host.controlPath)
+	status, err := client.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "prepared" || status.ListenPort != 0 {
+		t.Fatalf("prepared core status = %#v", status)
+	}
+	if err := client.Activate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Activate(); err != nil {
+		t.Fatalf("idempotent activate failed: %v", err)
+	}
+	status, err = client.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "up" || status.ListenPort == 0 {
+		t.Fatalf("activated core status = %#v", status)
+	}
+}
+
 func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	privateKey := bytes.Repeat([]byte{0x31}, 32)
 	remotePrivate := bytes.Repeat([]byte{0x42}, 32)

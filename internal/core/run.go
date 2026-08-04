@@ -12,9 +12,10 @@ import (
 )
 
 type RunOptions struct {
-	Name   string
-	FwMark *uint32
-	Debug  bool
+	Name           string
+	FwMark         *uint32
+	Debug          bool
+	DeferEndpoints bool
 }
 
 // Run starts only the userspace data plane. It does not assign addresses,
@@ -27,6 +28,11 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 	if options.FwMark != nil {
 		cfg.Interface.FwMark = *options.FwMark
 	}
+	if options.DeferEndpoints {
+		for i := range cfg.Peers {
+			cfg.Peers[i].Endpoint = ""
+		}
+	}
 	name := InterfaceName(configPath, options.Name)
 	instance, err := newInstance(cfg, name, platform.Current(), options.Debug)
 	if err != nil {
@@ -36,10 +42,17 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 	if options.Debug {
 		logDebugConfiguration(configPath, name, cfg)
 	}
-	if err := instance.Up(ctx); err != nil {
-		return err
+	if options.DeferEndpoints {
+		if err := instance.Prepare(ctx); err != nil {
+			return err
+		}
+		log.Printf("wg-quic core interface %s is prepared for endpoint activation", name)
+	} else {
+		if err := instance.Up(ctx); err != nil {
+			return err
+		}
+		log.Printf("wg-quic core interface %s is up on UDP port %d", name, instance.ListenPort())
 	}
-	log.Printf("wg-quic core interface %s is up on UDP port %d", name, instance.ListenPort())
 	if options.Debug {
 		go logDebugStats(ctx, name, instance)
 	}

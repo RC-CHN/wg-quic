@@ -93,6 +93,9 @@ func parseRunArgs(args []string) (string, core.RunOptions, error) {
 		case "--debug":
 			options.Debug = true
 			i++
+		case "--defer-endpoints":
+			options.DeferEndpoints = true
+			i++
 		case "--name", "--fwmark":
 			if i+1 >= len(args) {
 				return "", core.RunOptions{}, fmt.Errorf("%s requires a value", args[i])
@@ -118,7 +121,7 @@ func parseRunArgs(args []string) (string, core.RunOptions, error) {
 
 func usage() error {
 	fmt.Fprintln(os.Stderr, `Usage:
-  wg-quic run CONFIG [--name INTERFACE] [--fwmark MARK] [--debug]
+  wg-quic run CONFIG [--name INTERFACE] [--fwmark MARK] [--debug] [--defer-endpoints]
   wg-quic check CONFIG
   wg-quic show [INTERFACE] [--json]
   wg-quic genkey

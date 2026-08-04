@@ -89,6 +89,8 @@ type Device struct {
 	ipcMutex sync.RWMutex
 	closed   chan struct{}
 	log      *Logger
+
+	tunEventStateTransitions atomic.Bool
 }
 
 // deviceState represents the state of a Device.
@@ -281,9 +283,20 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
 	return nil
 }
 
+type Options struct {
+	// DisableTUNEventStateTransitions leaves Up/Down lifecycle control to the
+	// embedding process while still processing MTU events.
+	DisableTUNEventStateTransitions bool
+}
+
 func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+	return NewDeviceWithOptions(tunDevice, bind, logger, Options{})
+}
+
+func NewDeviceWithOptions(tunDevice tun.Device, bind conn.Bind, logger *Logger, options Options) *Device {
 	device := new(Device)
 	device.state.state.Store(uint32(deviceStateDown))
+	device.tunEventStateTransitions.Store(!options.DisableTUNEventStateTransitions)
 	device.closed = make(chan struct{})
 	device.log = logger
 	device.net.bind = bind

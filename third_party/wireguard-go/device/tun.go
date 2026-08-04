@@ -38,16 +38,22 @@ func (device *Device) RoutineTUNEventReader() {
 			}
 		}
 
-		if event&tun.EventUp != 0 {
-			device.log.Verbosef("Interface up requested")
-			device.Up()
-		}
-
-		if event&tun.EventDown != 0 {
-			device.log.Verbosef("Interface down requested")
-			device.Down()
-		}
+		device.handleTUNStateEvent(event)
 	}
 
 	device.log.Verbosef("Routine: event worker - stopped")
+}
+
+func (device *Device) handleTUNStateEvent(event tun.Event) {
+	if !device.tunEventStateTransitions.Load() {
+		return
+	}
+	if event&tun.EventUp != 0 {
+		device.log.Verbosef("Interface up requested")
+		device.Up()
+	}
+	if event&tun.EventDown != 0 {
+		device.log.Verbosef("Interface down requested")
+		device.Down()
+	}
 }

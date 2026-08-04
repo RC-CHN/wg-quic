@@ -41,6 +41,7 @@ type Handler struct {
 	Status          func() Status
 	SetPeerEndpoint func(SetPeerEndpointRequest) error
 	RedialPeer      func(string) error
+	Activate        func() error
 }
 
 // Client is the transport-independent core control surface used by quick.
@@ -49,6 +50,7 @@ type Client interface {
 	Status() (Status, error)
 	SetPeerEndpoint(SetPeerEndpointRequest) error
 	RedialPeer(publicKey string) error
+	Activate() error
 }
 
 type LocalClient struct {
@@ -157,6 +159,14 @@ func dispatch(handler Handler, req request) response {
 			return response{Error: err.Error()}
 		}
 		return response{}
+	case "activate":
+		if handler.Activate == nil {
+			return response{Error: "activate is not supported"}
+		}
+		if err := handler.Activate(); err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{}
 	default:
 		return response{Error: fmt.Sprintf("unsupported control operation %q", req.Operation)}
 	}
@@ -206,6 +216,11 @@ func RedialPeer(path, publicKey string) error {
 func (c *LocalClient) RedialPeer(publicKey string) error {
 	var resp response
 	return c.call(request{Operation: "redial_peer", PublicKey: publicKey}, &resp)
+}
+
+func (c *LocalClient) Activate() error {
+	var resp response
+	return c.call(request{Operation: "activate"}, &resp)
 }
 
 func (c *LocalClient) call(req request, resp *response) error {

@@ -34,6 +34,7 @@ func TestControlCommands(t *testing.T) {
 	path := testControlPath(t, "wg0")
 	var got SetPeerEndpointRequest
 	var redial string
+	var activated bool
 	server, err := StartHandler(ctx, path, Handler{
 		Status: func() Status {
 			return Status{Interface: "wg0", State: "up"}
@@ -44,6 +45,10 @@ func TestControlCommands(t *testing.T) {
 		},
 		RedialPeer: func(publicKey string) error {
 			redial = publicKey
+			return nil
+		},
+		Activate: func() error {
+			activated = true
 			return nil
 		},
 	})
@@ -66,6 +71,12 @@ func TestControlCommands(t *testing.T) {
 	}
 	if redial != "peer" {
 		t.Fatalf("redial peer = %q, want peer", redial)
+	}
+	if err := NewClient(path).Activate(); err != nil {
+		t.Fatal(err)
+	}
+	if !activated {
+		t.Fatal("activate handler was not called")
 	}
 }
 
