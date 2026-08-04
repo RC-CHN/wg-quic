@@ -6,3 +6,6 @@
 /build/
 /dist/
 /tests/container/build/
+/tests/benchmark/build/
+/tests/benchmark/.generated/
+/tests/benchmark/results/

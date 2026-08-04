@@ -1,0 +1,17 @@
+[Interface]
+# Benchmark-only key. Never use it outside this isolated fixture.
+PrivateKey = oM2T7kxTUzzy74OhpqIfzgMSsyg9F19TBkksKUfcxkY=
+Address = 10.88.0.1/32
+ListenPort = 51820
+MTU = @MTU@
+
+# wg-quic: carrier=quic
+# wg-quic: congestion=auto
+# wg-quic: fec=@FEC@
+# wg-quic: obfs=@OBFS@
+
+[Peer]
+PublicKey = IMmmkZOkcoM8nTU8QQPTEreFZj0CIjIGvkQRxrk6sjA=
+PresharedKey = MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=
+AllowedIPs = 10.88.0.2/32
+Endpoint = 172.30.0.3:51820

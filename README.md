@@ -58,6 +58,22 @@ make test-quic
 make build
 ```
 
+Controlled performance and loss measurements use a separate two-node fixture
+that keeps all TUN, route, and `tc netem` state inside containers:
+
+```sh
+make benchmark-smoke
+make benchmark-ceiling
+make benchmark-loss
+make benchmark-profiles
+make benchmark-bandwidth
+```
+
+It supports asymmetric custom links, built-in LAN/Wi-Fi/cellular/satellite
+profiles, runtime link changes, outer-path baselines, per-interval results, and
+FEC/CPU/wire counters. See
+[`tests/benchmark/README.md`](tests/benchmark/README.md).
+
 The container test leaves the host route table and DNS untouched. It creates
 isolated privileged nodes with separate Linux network namespaces and real TUN
 devices. The GitHub Actions gate covers IPv4 and IPv6 inner/outer paths,

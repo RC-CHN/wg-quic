@@ -1,0 +1,25 @@
+services:
+  a:
+    image: wg-quic-bench:local
+    privileged: true
+    volumes:
+      - ${WGQ_BENCH_CONFIG_DIR}/a.conf:/etc/wg-quic/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.30.0.2
+
+  b:
+    image: wg-quic-bench:local
+    privileged: true
+    volumes:
+      - ${WGQ_BENCH_CONFIG_DIR}/b.conf:/etc/wg-quic/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.30.0.3
+
+networks:
+  outer:
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
