@@ -10,7 +10,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const controlPipeSecurityDescriptor = "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)"
+// Let Windows assign the pipe owner to the creating process. Forcing
+// LocalSystem as owner makes elevated foreground diagnostics fail even though
+// the DACL correctly grants access only to LocalSystem and Administrators.
+const controlPipeSecurityDescriptor = "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
 
 func listen(path string) (net.Listener, func() error, error) {
 	descriptor, err := windows.SecurityDescriptorFromString(controlPipeSecurityDescriptor)
