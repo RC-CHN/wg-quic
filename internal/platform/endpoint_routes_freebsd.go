@@ -132,9 +132,6 @@ func (m *freeBSDEndpointRouteLeaser) release(ctx context.Context, address netip.
 func (m *freeBSDEndpointRouteLeaser) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed {
-		return nil
-	}
 	m.closed = true
 	var errs []error
 	for address, entry := range m.entries {

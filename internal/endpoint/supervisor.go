@@ -534,14 +534,15 @@ func exponentialBackoff(minimum, maximum time.Duration, exponent int) time.Durat
 
 func (s *Supervisor) Close(ctx context.Context) error {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
-	}
 	s.closed = true
 	s.mu.Unlock()
 	s.Stop()
-	return errors.Join(s.releaseAll(ctx), s.routes.Close())
+	if err := s.releaseAll(ctx); err != nil {
+		// Keep the route manager open and every failed lease reachable. A
+		// subsequent Close call can retry the exact same ownership release.
+		return err
+	}
+	return s.routes.Close()
 }
 
 // Stop ends scheduled refresh work without releasing route leases. quick uses
@@ -564,21 +565,25 @@ func (s *Supervisor) releaseAll(ctx context.Context) error {
 }
 
 func (s *Supervisor) releaseAllLocked(ctx context.Context) error {
-	var leases []RouteLease
+	var errs []error
 	for index := len(s.order) - 1; index >= 0; index-- {
 		state := s.peers[s.order[index]]
-		if state.lease != nil {
-			leases = append(leases, state.lease)
+		if state.lease == nil {
+			continue
+		}
+		if err := state.lease.Release(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
 			state.lease = nil
 		}
 	}
-	leases = append(leases, s.extraLeases...)
-	s.extraLeases = nil
-	var errs []error
-	for _, lease := range leases {
+	failedExtra := s.extraLeases[:0]
+	for _, lease := range s.extraLeases {
 		if err := lease.Release(ctx); err != nil {
 			errs = append(errs, err)
+			failedExtra = append(failedExtra, lease)
 		}
 	}
+	s.extraLeases = failedExtra
 	return errors.Join(errs...)
 }

@@ -84,3 +84,39 @@ func TestFreeBSDRouteLeaseRetriesFailedRelease(t *testing.T) {
 		t.Fatalf("route delete attempts = %d, want 2", deleteAttempts)
 	}
 }
+
+func TestFreeBSDRouteLeaserCloseRetriesFailedCleanup(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.11")
+	deleteAttempts := 0
+	manager := &freeBSDEndpointRouteLeaser{
+		need4:   true,
+		entries: make(map[netip.Addr]*freeBSDEndpointRouteEntry),
+		defaultGateway: func(context.Context, bool) (freeBSDGateway, error) {
+			return freeBSDGateway{address: "192.0.2.1"}, nil
+		},
+		runCommand: func(_ context.Context, _ string, args ...string) error {
+			if slices.Contains(args, "delete") {
+				deleteAttempts++
+				if deleteAttempts == 1 {
+					return errors.New("temporary route deletion failure")
+				}
+			}
+			return nil
+		},
+	}
+	if _, err := manager.AcquireEndpointRoute(context.Background(), address); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err == nil {
+		t.Fatal("first Close unexpectedly succeeded")
+	}
+	if manager.entries[address] == nil {
+		t.Fatal("failed Close discarded the route entry")
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatalf("retry Close: %v", err)
+	}
+	if manager.entries[address] != nil || deleteAttempts != 2 {
+		t.Fatalf("retry cleanup entry=%#v attempts=%d", manager.entries[address], deleteAttempts)
+	}
+}

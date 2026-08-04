@@ -327,6 +327,35 @@ func TestSupervisorRetriesFailedCandidateRouteReleaseOnClose(t *testing.T) {
 	}
 }
 
+func TestSupervisorCloseRetainsFailedActiveRouteLeaseForRetry(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.11")
+	resolver := &fakeResolver{responses: map[string][]Resolution{}}
+	routes := &fakeRouteLeaser{
+		nextReleaseErrors: []error{errors.New("temporary route delete failure")},
+	}
+	core := &fakeCoreControl{}
+	supervisor := testSupervisor(t, resolver, routes, core, address.String()+":443")
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := supervisor.Close(context.Background()); err == nil {
+		t.Fatal("first Close unexpectedly consumed a failed route release")
+	}
+	if routes.leases[0].released || routes.closed {
+		t.Fatal("failed Close released ownership or closed its route manager")
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatalf("retry Close: %v", err)
+	}
+	if routes.leases[0].releaseCalls != 2 || !routes.leases[0].released {
+		t.Fatalf("active lease was not retried: %#v", routes.leases[0])
+	}
+	if !routes.closed {
+		t.Fatal("successful Close did not close the route manager")
+	}
+}
+
 func TestSupervisorDoesNotResolveNumericEndpoint(t *testing.T) {
 	resolver := &fakeResolver{responses: map[string][]Resolution{}}
 	routes := &fakeRouteLeaser{}
