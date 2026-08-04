@@ -412,17 +412,21 @@ func (m *windowsRouteManager) migrateRecord(
 	}
 	if err != nil {
 		return windowsRouteKey{}, 0, false, m.restoreMigration(
-			ctx, ledger, index, previous,
+			ctx, ledger, index, previous, oldExists,
 			fmt.Errorf("re-evaluate Windows route for endpoint %s: %w", endpoint, err),
 		)
 	}
 	if selected.Key == previous.Key {
-		changed := selected.InterfaceIndex != previous.InterfaceIndex ||
+		changed := !oldExists ||
+			selected.InterfaceIndex != previous.InterfaceIndex ||
 			selected.Metric != previous.Metric ||
 			addrString(selected.BestSource) != previous.BestSource
-		if previous.Ownership == windowsRouteManaged && oldExists {
+		if previous.Ownership == windowsRouteManaged {
 			if err := m.system.CreateRoute(ctx, selected); err != nil {
-				return windowsRouteKey{}, 0, false, fmt.Errorf("restore unchanged Windows endpoint route: %w", err)
+				return windowsRouteKey{}, 0, false, m.restoreMigration(
+					ctx, ledger, index, previous, oldExists,
+					fmt.Errorf("restore unchanged Windows endpoint route: %w", err),
+				)
 			}
 		}
 		restoreWindowsRouteRecord(record, previous)
@@ -440,7 +444,7 @@ func (m *windowsRouteManager) migrateRecord(
 	}
 	if other := routeRecordIndex(ledger.Routes, selected.Key); other >= 0 && other != index {
 		return windowsRouteKey{}, 0, false, m.restoreMigration(
-			ctx, ledger, index, previous,
+			ctx, ledger, index, previous, oldExists,
 			fmt.Errorf("selected Windows endpoint route already has ledger record %d", other),
 		)
 	}
@@ -453,13 +457,15 @@ func (m *windowsRouteManager) migrateRecord(
 	record.State = windowsRoutePendingMigrateAdd
 	record.Previous = &previous
 	if err := m.saveLedger(ledger); err != nil {
-		return windowsRouteKey{}, 0, false, m.restoreMigration(ctx, ledger, index, previous, err)
+		return windowsRouteKey{}, 0, false, m.restoreMigration(
+			ctx, ledger, index, previous, oldExists, err,
+		)
 	}
 
 	newExists, err := m.system.RouteExists(ctx, selected.Key)
 	if err != nil {
 		return windowsRouteKey{}, 0, false, m.restoreMigration(
-			ctx, ledger, index, previous,
+			ctx, ledger, index, previous, oldExists,
 			fmt.Errorf("check migrated Windows endpoint route: %w", err),
 		)
 	}
@@ -468,7 +474,7 @@ func (m *windowsRouteManager) migrateRecord(
 	} else {
 		if err := m.system.CreateRoute(ctx, selected); err != nil {
 			return windowsRouteKey{}, 0, false, m.restoreMigration(
-				ctx, ledger, index, previous,
+				ctx, ledger, index, previous, oldExists,
 				fmt.Errorf("create migrated Windows endpoint route: %w", err),
 			)
 		}
@@ -490,10 +496,11 @@ func (m *windowsRouteManager) restoreMigration(
 	ledger *windowsRouteLedger,
 	index int,
 	previous windowsRouteSnapshot,
+	restoreKernelRoute bool,
 	cause error,
 ) error {
 	var errs []error
-	if previous.Ownership == windowsRouteManaged {
+	if restoreKernelRoute && previous.Ownership == windowsRouteManaged {
 		exists, err := m.system.RouteExists(ctx, previous.Key)
 		if err != nil {
 			errs = append(errs, err)
@@ -823,10 +830,20 @@ func (m *windowsRouteManager) reconcile(
 			return false, fmt.Errorf("route %s is pending deletion but still has live owners", record.Key.Destination)
 		case record.State == windowsRouteActive &&
 			record.Ownership == windowsRouteManaged && !exists:
-			if err := m.system.CreateRoute(ctx, selectedWindowsRoute(snapshotWindowsRoute(*record))); err != nil {
-				return false, fmt.Errorf("restore disappeared managed route %s: %w", record.Key.Destination, err)
+			prefix, err := netip.ParsePrefix(record.Key.Destination)
+			if err != nil {
+				return false, fmt.Errorf("parse disappeared managed route %s: %w", record.Key.Destination, err)
 			}
-			changed = true
+			_, _, routeChanged, err := m.migrateRecord(
+				ctx, ledger, i, prefix.Addr().Unmap(), false,
+			)
+			if err != nil {
+				return false, fmt.Errorf(
+					"re-evaluate disappeared managed route %s: %w",
+					record.Key.Destination, err,
+				)
+			}
+			changed = changed || routeChanged
 		}
 		i++
 	}

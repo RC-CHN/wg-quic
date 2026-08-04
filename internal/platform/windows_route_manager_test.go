@@ -440,6 +440,81 @@ func TestWindowsRouteLeaseReportsBestSourceChangeOnSamePath(t *testing.T) {
 	}
 }
 
+func TestWindowsRouteLeaseReevaluatesDisappearedManagedRoute(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.29")
+	oldRoute := testWindowsSelectedRoute(endpoint, 42, 10)
+	newRoute := testWindowsSelectedRoute(endpoint, 43, 5)
+	newRoute.Key.NextHop = "198.51.100.1"
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delete(system.routes, oldRoute.Key)
+	system.selected[endpoint] = newRoute
+	bestCallsBefore := system.bestCalls
+	refreshable := lease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	changed, err := refreshable.Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("disappeared route did not request a transport refresh")
+	}
+	if system.bestCalls == bestCallsBefore {
+		t.Fatal("disappeared route was restored without consulting GetBestRoute2")
+	}
+	if _, exists := system.routes[oldRoute.Key]; exists {
+		t.Fatal("stale route snapshot was recreated after route selection changed")
+	}
+	if _, exists := system.routes[newRoute.Key]; !exists {
+		t.Fatal("newly selected route was not installed")
+	}
+	record := store.ledger.Routes[0]
+	if record.Key != newRoute.Key || record.Revision != 2 {
+		t.Fatalf("recovered route record = %#v", record)
+	}
+}
+
+func TestWindowsRouteLeaseDoesNotRestoreDisappearedRouteWhenSelectionFails(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.33")
+	oldRoute := testWindowsSelectedRoute(endpoint, 44, 10)
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delete(system.routes, oldRoute.Key)
+	system.bestErr = errors.New("network unavailable")
+	createdBefore := len(system.created)
+	refreshable := lease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	if changed, err := refreshable.Refresh(context.Background()); err == nil || changed {
+		t.Fatalf("failed refresh changed=%t err=%v", changed, err)
+	}
+	if len(system.created) != createdBefore {
+		t.Fatal("failed route selection recreated a stale route snapshot")
+	}
+	if _, exists := system.routes[oldRoute.Key]; exists {
+		t.Fatal("stale route exists after failed route selection")
+	}
+}
+
 func TestWindowsRouteManagerRecoversInterruptedMigrations(t *testing.T) {
 	t.Run("remove phase restores old managed route", func(t *testing.T) {
 		endpoint := netip.MustParseAddr("192.0.2.27")
