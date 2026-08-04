@@ -153,6 +153,19 @@ AllowedIPs = 10.0.0.2/32
 	}
 }
 
+func TestRejectsZeroEndpointPort(t *testing.T) {
+	input := `[Interface]
+PrivateKey = ` + testKey(1) + `
+[Peer]
+PublicKey = ` + testKey(2) + `
+Endpoint = vpn.example.test:0
+`
+	_, err := Parse(strings.NewReader(input))
+	if err == nil || !strings.Contains(err.Error(), "port must be between 1 and 65535") {
+		t.Fatalf("zero endpoint port error = %v", err)
+	}
+}
+
 // The imported wireguard-go netns suite sends 130,560 AllowedIPs through UAPI
 // to catch implementations that truncate large requests or responses. wg-quic
 // intentionally exposes a file-oriented CLI instead of stock wg(8) UAPI, so

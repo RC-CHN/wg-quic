@@ -16,6 +16,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/devicehost"
+	"github.com/RC-CHN/wg-quic/internal/peerendpoint"
 	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	"github.com/RC-CHN/wg-quic/internal/wgdevice"
@@ -65,6 +66,24 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 	if err := host.ValidateInterfaceName(name); err != nil {
 		return nil, err
 	}
+	configuredEndpoints := make(map[string]netip.AddrPort, len(cfg.Peers))
+	for index, peer := range cfg.Peers {
+		if peer.Endpoint == "" {
+			continue
+		}
+		spec, err := peerendpoint.Parse(peer.Endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("Peer %d Endpoint: %w", index+1, err)
+		}
+		endpoint, numeric := spec.AddrPort()
+		if !numeric {
+			return nil, fmt.Errorf(
+				"Peer %d Endpoint %q is a hostname; run wg-quic-quick to resolve and supervise hostnames",
+				index+1, peer.Endpoint,
+			)
+		}
+		configuredEndpoints[peer.PublicKey] = endpoint
+	}
 	transportConfig, err := buildTransportConfiguration(cfg)
 	if err != nil {
 		return nil, err
@@ -86,7 +105,11 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 	dev := device.NewDeviceWithOptions(tdev, bind, logger, device.Options{
 		DisableTUNEventStateTransitions: true,
 	})
-	if err := wgdevice.Configure(dev, cfg); err != nil {
+	deviceConfig := cfg.Clone()
+	for index := range deviceConfig.Peers {
+		deviceConfig.Peers[index].Endpoint = ""
+	}
+	if err := wgdevice.Configure(dev, deviceConfig); err != nil {
 		dev.Close()
 		return nil, fmt.Errorf("configure WireGuard device: %w", err)
 	}
@@ -100,12 +123,19 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 		runtime := &peerRuntime{
 			status: control.PeerStatus{PublicKey: peer.PublicKey},
 		}
-		if endpoint, err := netip.ParseAddrPort(peer.Endpoint); err == nil {
-			runtime.status.Endpoint = canonicalEndpoint(endpoint).String()
-		}
 		runtime.obfsKey, runtime.hasObfsKey = transportConfig.PeerKeys[peer.PublicKey]
 		instance.peers[peer.PublicKey] = runtime
 		instance.peerOrder = append(instance.peerOrder, peer.PublicKey)
+	}
+	for _, peer := range cfg.Peers {
+		endpoint, ok := configuredEndpoints[peer.PublicKey]
+		if !ok {
+			continue
+		}
+		if err := instance.installPeerEndpoint(peer.PublicKey, endpoint, 1); err != nil {
+			instance.Close()
+			return nil, fmt.Errorf("install Peer endpoint: %w", err)
+		}
 	}
 	return instance, nil
 }
@@ -239,7 +269,7 @@ func (i *Instance) status() control.Status {
 	for _, publicKey := range i.peerOrder {
 		peer := i.peers[publicKey].status
 		peer.Session = string(armorbind.EndpointSessionIdle)
-		if endpoint, valid := parseCanonicalEndpoint(peer.Endpoint); valid {
+		if endpoint, err := peerendpoint.ParseNumeric(peer.Endpoint); err == nil {
 			peer.Session = string(i.bind.EndpointSessionState(endpoint))
 		}
 		peers = append(peers, peer)
@@ -253,15 +283,15 @@ func (i *Instance) status() control.Status {
 }
 
 func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error {
-	endpoint, err := netip.ParseAddrPort(update.Endpoint)
+	endpoint, err := peerendpoint.ParseNumeric(update.Endpoint)
 	if err != nil {
 		return fmt.Errorf("parse numeric peer endpoint: %w", err)
 	}
-	endpoint = canonicalEndpoint(endpoint)
-	if endpoint.Port() == 0 {
-		return errors.New("peer endpoint port must not be zero")
-	}
-	if update.Generation == 0 {
+	return i.installPeerEndpoint(update.PublicKey, endpoint, update.Generation)
+}
+
+func (i *Instance) installPeerEndpoint(publicKey string, endpoint netip.AddrPort, generation uint64) error {
+	if generation == 0 {
 		return errors.New("peer endpoint generation must be greater than zero")
 	}
 	i.mu.Lock()
@@ -270,43 +300,46 @@ func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error 
 
 	i.endpointMu.Lock()
 	defer i.endpointMu.Unlock()
-	peer, ok := i.peers[update.PublicKey]
+	peer, ok := i.peers[publicKey]
 	if !ok {
 		return errors.New("peer public key is not configured")
 	}
-	if update.Generation < peer.status.Generation {
+	if generation < peer.status.Generation {
 		return fmt.Errorf(
 			"stale peer endpoint generation %d; active generation is %d",
-			update.Generation, peer.status.Generation,
+			generation, peer.status.Generation,
 		)
 	}
-	if update.Generation == peer.status.Generation {
+	if generation == peer.status.Generation {
 		if peer.status.Endpoint == endpoint.String() {
 			return nil
 		}
-		return fmt.Errorf("peer endpoint generation %d conflicts with the active endpoint", update.Generation)
+		return fmt.Errorf("peer endpoint generation %d conflicts with the active endpoint", generation)
 	}
 
-	var release func()
+	var (
+		release func()
+		err     error
+	)
 	if peer.hasObfsKey {
 		release, err = i.bind.AcquireEndpointKey(endpoint, peer.obfsKey)
 		if err != nil {
 			return err
 		}
 	}
-	if err := wgdevice.SetPeerEndpoint(i.device, update.PublicKey, endpoint); err != nil {
+	if err := wgdevice.SetPeerEndpoint(i.device, publicKey, endpoint); err != nil {
 		if release != nil {
 			release()
 		}
 		return fmt.Errorf("update WireGuard peer endpoint: %w", err)
 	}
 
-	oldEndpoint, oldEndpointValid := parseCanonicalEndpoint(peer.status.Endpoint)
+	oldEndpoint, oldEndpointErr := peerendpoint.ParseNumeric(peer.status.Endpoint)
 	oldRelease := peer.releaseAssociation
 	peer.releaseAssociation = release
 	peer.status.Endpoint = endpoint.String()
-	peer.status.Generation = update.Generation
-	if oldEndpointValid && oldEndpoint != endpoint {
+	peer.status.Generation = generation
+	if oldEndpointErr == nil && oldEndpoint != endpoint {
 		i.bind.RetireEndpoint(oldEndpoint)
 	}
 	if oldRelease != nil {
@@ -316,7 +349,7 @@ func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error 
 		// The endpoint update is already committed. Readiness is reported
 		// separately through peer session status, so a probe failure must not
 		// turn a successful update into an ambiguous control response.
-		_ = wgdevice.ProbePeer(i.device, update.PublicKey)
+		_ = wgdevice.ProbePeer(i.device, publicKey)
 	}
 	return nil
 }
@@ -328,25 +361,13 @@ func (i *Instance) redialPeer(publicKey string) error {
 		i.endpointMu.RUnlock()
 		return errors.New("peer public key is not configured")
 	}
-	endpoint, valid := parseCanonicalEndpoint(peer.status.Endpoint)
+	endpoint, err := peerendpoint.ParseNumeric(peer.status.Endpoint)
 	i.endpointMu.RUnlock()
-	if !valid {
+	if err != nil {
 		return errors.New("peer does not have an active numeric endpoint")
 	}
 	i.bind.RedialEndpoint(endpoint)
 	return nil
-}
-
-func canonicalEndpoint(endpoint netip.AddrPort) netip.AddrPort {
-	return netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
-}
-
-func parseCanonicalEndpoint(value string) (netip.AddrPort, bool) {
-	endpoint, err := netip.ParseAddrPort(value)
-	if err != nil {
-		return netip.AddrPort{}, false
-	}
-	return canonicalEndpoint(endpoint), true
 }
 
 func InterfaceMTU(cfg *config.Config) int {

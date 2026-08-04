@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"net/netip"
-	"strconv"
 	"sync"
 	"time"
+
+	"github.com/RC-CHN/wg-quic/internal/peerendpoint"
 )
 
 type Options struct {
@@ -45,6 +45,7 @@ type peerState struct {
 	spec         PeerSpec
 	host         string
 	port         uint16
+	address      netip.Addr
 	dynamic      bool
 	active       netip.AddrPort
 	generation   uint64
@@ -83,21 +84,14 @@ func NewSupervisor(
 		}
 		state := &peerState{spec: spec}
 		if spec.Endpoint != "" {
-			host, portText, err := net.SplitHostPort(spec.Endpoint)
+			parsed, err := peerendpoint.Parse(spec.Endpoint)
 			if err != nil {
 				return nil, fmt.Errorf("Peer %d Endpoint: %w", index+1, err)
 			}
-			port, err := strconv.ParseUint(portText, 10, 16)
-			if err != nil || port == 0 {
-				return nil, fmt.Errorf("Peer %d Endpoint has an invalid port", index+1)
-			}
-			state.host = host
-			state.port = uint16(port)
-			if address, err := netip.ParseAddr(host); err == nil {
-				state.host = address.Unmap().String()
-			} else {
-				state.dynamic = true
-			}
+			state.host = parsed.Host
+			state.port = parsed.Port
+			state.address = parsed.Address
+			state.dynamic = parsed.Dynamic()
 		}
 		result.peers[spec.PublicKey] = state
 		result.order = append(result.order, spec.PublicKey)
@@ -409,11 +403,7 @@ func peerIdentifier(publicKey string) string {
 
 func (s *Supervisor) resolve(ctx context.Context, state *peerState) (Resolution, error) {
 	if !state.dynamic {
-		address, err := netip.ParseAddr(state.host)
-		if err != nil {
-			return Resolution{}, err
-		}
-		return Resolution{Addresses: []netip.Addr{address.Unmap()}}, nil
+		return Resolution{Addresses: []netip.Addr{state.address}}, nil
 	}
 	resolution, err := s.resolver.Resolve(ctx, state.host)
 	if err != nil {

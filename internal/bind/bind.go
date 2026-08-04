@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RC-CHN/wg-quic/internal/peerendpoint"
 	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/fec"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
@@ -29,7 +30,6 @@ type Config struct {
 	FECFlushDeadline time.Duration
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
-	ObfsEndpointKeys map[string]obfs.Key
 	Debugf           func(format string, args ...any)
 }
 
@@ -71,7 +71,6 @@ type Bind struct {
 	mark         atomic.Uint32
 	stats        bindStats
 	obfsResolved map[netip.AddrPort]obfs.Key
-	obfsStatic   map[netip.AddrPort]obfs.Key
 	obfsDynamic  map[netip.AddrPort]endpointKeyLease
 }
 
@@ -135,14 +134,8 @@ func New(cfg Config) *Bind {
 		cfg.ObfsMode = defaults.ObfsMode
 	}
 	cfg.ObfsKeys = append([]obfs.Key(nil), cfg.ObfsKeys...)
-	endpointKeys := make(map[string]obfs.Key, len(cfg.ObfsEndpointKeys))
-	for endpoint, key := range cfg.ObfsEndpointKeys {
-		endpointKeys[endpoint] = key
-	}
-	cfg.ObfsEndpointKeys = endpointKeys
 	return &Bind{
 		cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key),
-		obfsStatic:  make(map[netip.AddrPort]obfs.Key),
 		obfsDynamic: make(map[netip.AddrPort]endpointKeyLease),
 	}
 }
@@ -277,22 +270,16 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 }
 
 func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
-	addrPort, err := netip.ParseAddrPort(value)
+	addrPort, err := peerendpoint.ParseNumeric(value)
 	if err != nil {
 		return nil, fmt.Errorf("endpoint must be a numeric IP address: %w", err)
 	}
 	ep := &Endpoint{
 		owner: b,
-		addr:  netip.AddrPortFrom(addrPort.Addr().Unmap(), addrPort.Port()),
+		addr:  addrPort,
 	}
 	b.mu.Lock()
-	if key, ok := b.cfg.ObfsEndpointKeys[value]; ok {
-		b.obfsResolved[ep.addr] = key
-		b.obfsStatic[ep.addr] = key
-		if b.state != nil {
-			b.state.carrier.AssociateEndpoint(ep.addr, key)
-		}
-	}
+	_, associated := b.obfsResolved[ep.addr]
 	state := b.state
 	b.mu.Unlock()
 	if state != nil {
@@ -304,7 +291,7 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		}
 		state.mu.Unlock()
 	}
-	b.debugf("resolved peer endpoint: configured=%q resolved=%s obfs_key_associated=%t", value, ep.addr, b.cfg.ObfsMode == "salamander")
+	b.debugf("resolved peer endpoint: configured=%q resolved=%s obfs_key_associated=%t", value, ep.addr, associated)
 	return ep, nil
 }
 
@@ -312,15 +299,11 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 // peer's Salamander key. The returned release function is reference-counted so
 // multiple peers or endpoint generations can safely share the same tuple.
 func (b *Bind) AcquireEndpointKey(endpoint netip.AddrPort, key obfs.Key) (func(), error) {
-	endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
-	if !endpoint.IsValid() || endpoint.Port() == 0 {
-		return nil, errors.New("valid numeric endpoint is required")
+	endpoint, err := peerendpoint.Canonical(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("valid numeric endpoint is required: %w", err)
 	}
 	b.mu.Lock()
-	if static, ok := b.obfsResolved[endpoint]; ok && static != key {
-		b.mu.Unlock()
-		return nil, fmt.Errorf("endpoint %s is already associated with a different obfuscation key", endpoint)
-	}
 	lease, ok := b.obfsDynamic[endpoint]
 	if ok && lease.key != key {
 		b.mu.Unlock()
@@ -356,14 +339,6 @@ func (b *Bind) releaseEndpointKey(endpoint netip.AddrPort, key obfs.Key) {
 		return
 	}
 	delete(b.obfsDynamic, endpoint)
-	if static, permanent := b.obfsStatic[endpoint]; permanent {
-		b.obfsResolved[endpoint] = static
-		if state := b.state; state != nil {
-			state.carrier.AssociateEndpoint(endpoint, static)
-		}
-		b.mu.Unlock()
-		return
-	}
 	delete(b.obfsResolved, endpoint)
 	state := b.state
 	if state != nil {

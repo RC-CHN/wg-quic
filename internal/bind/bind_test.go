@@ -55,6 +55,14 @@ func TestBindRejectsHostnameResolution(t *testing.T) {
 	}
 }
 
+func TestBindRejectsZeroEndpointPort(t *testing.T) {
+	bind := New(DefaultConfig())
+	if _, err := bind.ParseEndpoint("192.0.2.1:0"); err == nil ||
+		!strings.Contains(err.Error(), "between 1 and 65535") {
+		t.Fatalf("zero-port endpoint error = %v", err)
+	}
+}
+
 func TestBindRoundTripAndClose(t *testing.T) {
 	var debug bytes.Buffer
 	configA := DefaultConfig()

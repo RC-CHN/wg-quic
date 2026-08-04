@@ -28,7 +28,6 @@ func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, er
 	if err != nil {
 		return result, fmt.Errorf("decode local WireGuard private key: %w", err)
 	}
-	result.Bind.ObfsEndpointKeys = make(map[string]obfs.Key)
 	for i, peer := range cfg.Peers {
 		remotePublic, err := decodeWireGuardKey(peer.PublicKey)
 		if err != nil {
@@ -47,12 +46,6 @@ func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, er
 		}
 		result.Bind.ObfsKeys = append(result.Bind.ObfsKeys, key)
 		result.PeerKeys[peer.PublicKey] = key
-		if peer.Endpoint != "" {
-			if existing, ok := result.Bind.ObfsEndpointKeys[peer.Endpoint]; ok && existing != key {
-				return result, fmt.Errorf("Peer %d reuses endpoint %q with a different obfuscation key", i+1, peer.Endpoint)
-			}
-			result.Bind.ObfsEndpointKeys[peer.Endpoint] = key
-		}
 	}
 	return result, nil
 }

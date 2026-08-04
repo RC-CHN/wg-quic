@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,12 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer instance.Close()
+	initial := instance.status()
+	if len(initial.Peers) != 1 ||
+		initial.Peers[0].Endpoint != "192.0.2.1:443" ||
+		initial.Peers[0].Generation != 1 {
+		t.Fatalf("initial peer endpoint did not use the runtime activation path: %#v", initial.Peers)
+	}
 	if err := instance.Up(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -186,5 +193,37 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	conflict.Endpoint = "192.0.2.99:443"
 	if err := control.SetPeerEndpoint(host.controlPath, conflict); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("conflicting update error = %v, want generation conflict", err)
+	}
+}
+
+type noTUNHost struct {
+	createCalled bool
+}
+
+func (*noTUNHost) ValidateInterfaceName(string) error { return nil }
+func (*noTUNHost) ControlPath(string) string          { return "" }
+func (h *noTUNHost) CreateTUN(string, int) (tun.Device, error) {
+	h.createCalled = true
+	return nil, errors.New("CreateTUN must not be called")
+}
+
+func TestCoreRejectsHostnameEndpointBeforeCreatingTUN(t *testing.T) {
+	host := &noTUNHost{}
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		},
+		Peers: []config.Peer{{
+			PublicKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
+			Endpoint:  "vpn.example.test:443",
+		}},
+		Transport: config.DefaultTransport(),
+	}
+	_, err := New(cfg, "wg0", host)
+	if err == nil || !strings.Contains(err.Error(), "run wg-quic-quick") {
+		t.Fatalf("hostname endpoint error = %v", err)
+	}
+	if host.createCalled {
+		t.Fatal("core created TUN before rejecting its unsupported hostname endpoint")
 	}
 }

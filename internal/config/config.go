@@ -8,11 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/netip"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/RC-CHN/wg-quic/internal/peerendpoint"
 )
 
 type Config struct {
@@ -299,11 +300,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		if peer.Endpoint != "" {
-			_, port, err := net.SplitHostPort(peer.Endpoint)
-			if err != nil {
-				return fmt.Errorf("Peer %d Endpoint: %w", i+1, err)
-			}
-			if _, err := parseUint16(port); err != nil {
+			if _, err := peerendpoint.Parse(peer.Endpoint); err != nil {
 				return fmt.Errorf("Peer %d Endpoint: %w", i+1, err)
 			}
 		}
