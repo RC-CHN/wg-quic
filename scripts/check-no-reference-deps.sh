@@ -58,7 +58,7 @@ if [ "$quic_module" != "github.com/quic-go/quic-go" ]; then
 fi
 
 quick_dependencies=$(go list -deps ./cmd/wg-quic-quick)
-for forbidden in core bind transport/fec transport/obfs transport/quic wgdevice; do
+for forbidden in core devicehost bind transport/fec transport/obfs transport/quic wgdevice; do
 	if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/$forbidden\$"; then
 		echo "wg-quic-quick depends on data-plane package internal/$forbidden" >&2
 		exit 1
