@@ -29,6 +29,7 @@ type PeerStatus struct {
 	PublicKey  string `json:"public_key"`
 	Endpoint   string `json:"endpoint,omitempty"`
 	Generation uint64 `json:"generation"`
+	Session    string `json:"session"`
 }
 
 type SetPeerEndpointRequest struct {

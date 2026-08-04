@@ -30,6 +30,8 @@ Initial local changes:
 4. `device.NewDeviceWithOptions` can disable automatic device Up/Down changes
    from TUN events. wg-quic uses this mode so its quick management process can
    prepare endpoint route leases before activating the outer transport.
+5. `device.ProbePeer` exposes the existing handshake initiation path to the
+   embedding core after a runtime endpoint update.
 
 From this point, wg-quic production code and tests use this directory rather
 than downloading `golang.zx2c4.com/wireguard`. Future upstream synchronization

@@ -117,6 +117,14 @@ type Stats struct {
 	ActiveSessions uint64 `json:"active_sessions"`
 }
 
+type EndpointSessionState string
+
+const (
+	EndpointSessionIdle        EndpointSessionState = "idle"
+	EndpointSessionDialing     EndpointSessionState = "dialing"
+	EndpointSessionEstablished EndpointSessionState = "established"
+)
+
 func New(cfg Config) *Bind {
 	defaults := DefaultConfig()
 	if cfg.QueueSize <= 0 {
@@ -254,6 +262,35 @@ func (b *Bind) Port() uint16 {
 		return 0
 	}
 	return b.state.carrier.Port()
+}
+
+func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionState {
+	endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return EndpointSessionIdle
+	}
+	state.mu.Lock()
+	ep := state.endpoints[endpoint]
+	state.mu.Unlock()
+	if ep == nil {
+		return EndpointSessionIdle
+	}
+	ep.mu.Lock()
+	session := ep.session
+	ep.mu.Unlock()
+	if session == nil || session.closed.Load() {
+		return EndpointSessionIdle
+	}
+	session.mu.Lock()
+	established := session.conn != nil
+	session.mu.Unlock()
+	if established {
+		return EndpointSessionEstablished
+	}
+	return EndpointSessionDialing
 }
 
 func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {

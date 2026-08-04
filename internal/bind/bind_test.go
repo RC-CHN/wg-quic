@@ -74,6 +74,9 @@ func TestBindRoundTripAndClose(t *testing.T) {
 	if !bytes.Equal(got, payload) {
 		t.Fatal("payload changed in transit")
 	}
+	if state := a.EndpointSessionState(aToB.(*Endpoint).addr); state != EndpointSessionEstablished {
+		t.Fatalf("outbound endpoint session state = %q, want established", state)
+	}
 	if err := b.Send([][]byte{payload}, source); err != nil {
 		t.Fatal(err)
 	}

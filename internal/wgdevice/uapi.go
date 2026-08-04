@@ -21,19 +21,37 @@ func Configure(dev *device.Device, cfg *config.Config) error {
 // SetPeerEndpoint performs the one canonical WireGuard UAPI update used by
 // every management frontend. Callers retain ownership of DNS and route policy.
 func SetPeerEndpoint(dev *device.Device, publicKey string, endpoint netip.AddrPort) error {
-	key, err := base64.StdEncoding.Strict().DecodeString(publicKey)
+	key, err := decodePeerPublicKey(publicKey)
 	if err != nil {
-		return fmt.Errorf("decode peer public key: %w", err)
-	}
-	if len(key) != 32 {
-		return fmt.Errorf("decode peer public key: got %d bytes, want 32", len(key))
+		return err
 	}
 	if !endpoint.IsValid() || endpoint.Port() == 0 {
 		return fmt.Errorf("valid numeric peer endpoint is required")
 	}
 	uapi := fmt.Sprintf(
 		"public_key=%s\nupdate_only=true\nendpoint=%s\n",
-		hex.EncodeToString(key), endpoint,
+		hex.EncodeToString(key[:]), endpoint,
 	)
 	return dev.IpcSet(uapi)
+}
+
+func ProbePeer(dev *device.Device, publicKey string) error {
+	key, err := decodePeerPublicKey(publicKey)
+	if err != nil {
+		return err
+	}
+	return dev.ProbePeer(key)
+}
+
+func decodePeerPublicKey(value string) (device.NoisePublicKey, error) {
+	var result device.NoisePublicKey
+	key, err := base64.StdEncoding.Strict().DecodeString(value)
+	if err != nil {
+		return result, fmt.Errorf("decode peer public key: %w", err)
+	}
+	if len(key) != len(result) {
+		return result, fmt.Errorf("decode peer public key: got %d bytes, want %d", len(key), len(result))
+	}
+	copy(result[:], key)
+	return result, nil
 }

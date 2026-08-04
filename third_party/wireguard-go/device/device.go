@@ -6,6 +6,7 @@
 package device
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -356,6 +357,20 @@ func (device *Device) LookupPeer(pk NoisePublicKey) *Peer {
 	defer device.peers.RUnlock()
 
 	return device.peers.keyMap[pk]
+}
+
+// ProbePeer initiates a fresh handshake for an existing peer. Embedders use
+// this after an atomic endpoint update so path validation does not depend on
+// application traffic or a configured persistent keepalive.
+func (device *Device) ProbePeer(publicKey NoisePublicKey) error {
+	if !device.isUp() {
+		return errors.New("device is not up")
+	}
+	peer := device.LookupPeer(publicKey)
+	if peer == nil {
+		return errors.New("peer is not configured")
+	}
+	return peer.SendHandshakeInitiation(false)
 }
 
 func (device *Device) RemovePeer(key NoisePublicKey) {

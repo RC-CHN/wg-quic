@@ -236,7 +236,12 @@ func (i *Instance) status() control.Status {
 	i.endpointMu.RLock()
 	peers := make([]control.PeerStatus, 0, len(i.peerOrder))
 	for _, publicKey := range i.peerOrder {
-		peers = append(peers, i.peers[publicKey].status)
+		peer := i.peers[publicKey].status
+		peer.Session = string(armorbind.EndpointSessionIdle)
+		if endpoint, valid := parseCanonicalEndpoint(peer.Endpoint); valid {
+			peer.Session = string(i.bind.EndpointSessionState(endpoint))
+		}
+		peers = append(peers, peer)
 	}
 	i.endpointMu.RUnlock()
 	return control.Status{
@@ -258,6 +263,9 @@ func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error 
 	if update.Generation == 0 {
 		return errors.New("peer endpoint generation must be greater than zero")
 	}
+	i.mu.Lock()
+	up := i.up
+	i.mu.Unlock()
 
 	i.endpointMu.Lock()
 	defer i.endpointMu.Unlock()
@@ -302,6 +310,12 @@ func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error 
 	}
 	if oldRelease != nil {
 		oldRelease()
+	}
+	if up {
+		// The endpoint update is already committed. Readiness is reported
+		// separately through peer session status, so a probe failure must not
+		// turn a successful update into an ambiguous control response.
+		_ = wgdevice.ProbePeer(i.device, update.PublicKey)
 	}
 	return nil
 }
