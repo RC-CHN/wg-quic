@@ -1,0 +1,71 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: ./scripts/check-no-reference-deps.sh
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: ./scripts/test-upstream-wireguard.sh
+      - run: shellcheck scripts/*.sh tests/container/*.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Project tests
+        run: go test ./...
+      - name: All Windows-applicable upstream wireguard-go tests
+        shell: pwsh
+        run: |
+          $expected = "v0.0.0-20260522210424-ecfc5a8d5446"
+          $actual = go list -m -f '{{.Version}}' golang.zx2c4.com/wireguard
+          if ($actual -ne $expected) {
+            throw "wireguard-go version mismatch: got $actual, want $expected"
+          }
+          go test -count=1 golang.zx2c4.com/wireguard/...
+      - name: Build Windows CLI
+        run: go build ./cmd/wg-quic
+
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native FreeBSD tests
+        uses: vmactions/freebsd-vm@v1.5.2
+        with:
+          release: "14"
+          usesh: true
+          copyback: false
+          prepare: pkg install -y go
+          run: |
+            go version
+            ./scripts/check-no-reference-deps.sh
+            go test ./...
+            ./scripts/test-upstream-wireguard.sh
+            go build ./cmd/wg-quic
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: sudo modprobe tun
+      - run: ./tests/container/test.sh

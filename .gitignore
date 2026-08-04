@@ -1,0 +1,6 @@
+# Local design notes and source-reference checkouts.
+/design/
+/references/
+
+# Generated test and build artifacts.
+/tests/container/build/

@@ -1,0 +1,47 @@
+services:
+  a:
+    image: wg-quic-e2e:local
+    privileged: true
+    volumes:
+      - ./a.conf:/etc/wireguard/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.2
+
+  b:
+    image: wg-quic-e2e:local
+    privileged: true
+    volumes:
+      - ./b.conf:/etc/wireguard/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.3
+        ipv6_address: fd00:29::3
+
+  a6:
+    image: wg-quic-e2e:local
+    privileged: true
+    volumes:
+      - ./a6.conf:/etc/wireguard/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.4
+        ipv6_address: fd00:29::4
+
+  b6:
+    image: wg-quic-e2e:local
+    privileged: true
+    volumes:
+      - ./b6.conf:/etc/wireguard/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.5
+        ipv6_address: fd00:29::5
+
+networks:
+  outer:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+        - subnet: fd00:29::/64

@@ -1,0 +1,8 @@
+The Salamander profile is a locally maintained, key-derived construction
+inspired by the public salt-and-BLAKE2b design of Hysteria 2 Salamander:
+https://github.com/apernet/hysteria
+
+It is not source-copied from Hysteria, does not depend on the reference
+checkout, and is intentionally not wire-compatible with Hysteria: wg-quic
+adds a per-packet peer-selection hint and derives its key from the existing
+WireGuard key material.
