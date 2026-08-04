@@ -134,6 +134,18 @@ func TestEffectiveMTUHasOneDefault(t *testing.T) {
 	}
 }
 
+func TestClassifyDNSHasOneSharedProjection(t *testing.T) {
+	got := ClassifyDNS([]string{
+		"1.1.1.1", "2001:4860:4860::8888", "corp.example", "~internal.example",
+	})
+	if strings.Join(got.Servers, ",") != "1.1.1.1,2001:4860:4860::8888" {
+		t.Fatalf("DNS servers = %#v", got.Servers)
+	}
+	if strings.Join(got.Domains, ",") != "corp.example,~internal.example" {
+		t.Fatalf("DNS domains = %#v", got.Domains)
+	}
+}
+
 func TestRejectsUnknownDirective(t *testing.T) {
 	input := `[Interface]
 PrivateKey = ` + testKey(1) + `

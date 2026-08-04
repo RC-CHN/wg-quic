@@ -4,12 +4,11 @@ import (
 	"context"
 	"io"
 	"log"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/devicehost"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
 type RunOptions struct {
@@ -35,7 +34,7 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 			cfg.Peers[i].Endpoint = ""
 		}
 	}
-	name := InterfaceName(configPath, options.Name)
+	name := platformenv.InterfaceName(configPath, options.Name)
 	instance, err := newInstance(cfg, name, devicehost.Current(), options.Debug)
 	if err != nil {
 		return err
@@ -111,11 +110,4 @@ func logDebugStats(ctx context.Context, name string, instance *Instance) {
 			)
 		}
 	}
-}
-
-func InterfaceName(configPath, requestedName string) string {
-	if requestedName != "" {
-		return requestedName
-	}
-	return strings.TrimSuffix(filepath.Base(configPath), filepath.Ext(configPath))
 }

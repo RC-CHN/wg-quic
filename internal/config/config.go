@@ -53,6 +53,11 @@ type Transport struct {
 	Obfs       string
 }
 
+type DNSSettings struct {
+	Servers []string
+	Domains []string
+}
+
 const DefaultMTU = 1380
 
 // EffectiveMTU is the single policy source for the configured or automatic
@@ -63,6 +68,20 @@ func (cfg *Config) EffectiveMTU() int {
 		return cfg.Interface.MTU
 	}
 	return DefaultMTU
+}
+
+// ClassifyDNS implements the shared wg-quick DNS field semantics. Platform
+// backends own how these two projections are applied, not how they are parsed.
+func ClassifyDNS(values []string) DNSSettings {
+	var result DNSSettings
+	for _, value := range values {
+		if _, err := netip.ParseAddr(value); err == nil {
+			result.Servers = append(result.Servers, value)
+		} else {
+			result.Domains = append(result.Domains, value)
+		}
+	}
+	return result
 }
 
 func (cfg *Config) Clone() *Config {

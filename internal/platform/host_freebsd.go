@@ -151,14 +151,8 @@ func configureFreeBSDDNS(ctx context.Context, name string, cfg *config.Config, s
 	if err != nil {
 		return errors.New("DNS is configured, but resolvconf is not installed")
 	}
-	var servers, domains []string
-	for _, value := range cfg.Interface.DNS {
-		if _, err := netip.ParseAddr(value); err == nil {
-			servers = append(servers, value)
-		} else {
-			domains = append(domains, value)
-		}
-	}
+	dns := config.ClassifyDNS(cfg.Interface.DNS)
+	servers, domains := dns.Servers, dns.Domains
 	var input strings.Builder
 	for _, server := range servers {
 		fmt.Fprintf(&input, "nameserver %s\n", server)

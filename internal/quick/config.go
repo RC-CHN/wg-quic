@@ -9,6 +9,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
 func ResolveConfig(input, requestedName string, host platform.Host) (path, name string, err error) {
@@ -23,18 +24,11 @@ func ResolveConfig(input, requestedName string, host platform.Host) (path, name 
 		}
 		path = host.ConfigPath(input)
 	}
-	name = interfaceName(path, requestedName)
+	name = platformenv.InterfaceName(path, requestedName)
 	if err := host.ValidateInterfaceName(name); err != nil {
 		return "", "", err
 	}
 	return path, name, nil
-}
-
-func interfaceName(configPath, requestedName string) string {
-	if requestedName != "" {
-		return requestedName
-	}
-	return strings.TrimSuffix(filepath.Base(configPath), filepath.Ext(configPath))
 }
 
 func Check(input string) error {

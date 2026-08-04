@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -224,14 +223,8 @@ func configureLinuxDNS(ctx context.Context, name string, cfg *config.Config, sta
 	if len(cfg.Interface.DNS) == 0 {
 		return nil
 	}
-	var servers, domains []string
-	for _, value := range cfg.Interface.DNS {
-		if _, err := netip.ParseAddr(value); err == nil {
-			servers = append(servers, value)
-		} else {
-			domains = append(domains, value)
-		}
-	}
+	dns := config.ClassifyDNS(cfg.Interface.DNS)
+	servers, domains := dns.Servers, dns.Domains
 	if path, err := exec.LookPath("resolvectl"); err == nil {
 		if len(servers) != 0 {
 			if err := run(ctx, path, append([]string{"dns", name}, servers...)...); err != nil {

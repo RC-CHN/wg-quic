@@ -1,6 +1,6 @@
 //go:build linux || freebsd
 
-package core
+package platformenv
 
 import "testing"
 
@@ -13,5 +13,8 @@ func TestInterfaceNameFromUnixPathFormats(t *testing.T) {
 		if got := InterfaceName(path, ""); got != want {
 			t.Errorf("InterfaceName(%q) = %q, want %q", path, got, want)
 		}
+	}
+	if got := InterfaceName("ignored.conf", "explicit"); got != "explicit" {
+		t.Fatalf("explicit interface name = %q", got)
 	}
 }

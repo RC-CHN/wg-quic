@@ -2,7 +2,6 @@ package platform
 
 import (
 	"fmt"
-	"net/netip"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
@@ -73,14 +72,8 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 }
 
 func windowsDNSOperation(base string, values []string) (windowsOperation, error) {
-	var servers, domains []string
-	for _, value := range values {
-		if _, err := netip.ParseAddr(value); err == nil {
-			servers = append(servers, value)
-		} else {
-			domains = append(domains, value)
-		}
-	}
+	dns := config.ClassifyDNS(values)
+	servers, domains := dns.Servers, dns.Domains
 	if len(domains) > 1 {
 		return windowsOperation{}, fmt.Errorf("Windows supports at most one connection-specific DNS suffix, got %d", len(domains))
 	}
