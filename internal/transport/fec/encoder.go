@@ -3,6 +3,7 @@ package fec
 import (
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 
 	"github.com/klauspost/reedsolomon"
 )
@@ -12,16 +13,23 @@ const (
 	MaxDataShards     = 32
 	MaxParityShards   = 8
 	MaxFrameSize      = 4096
+	// QUIC loss counters provide the primary wake-up signal while protection is
+	// bypassed. Keep an occasional end-to-end FEC probe as a safety net without
+	// taxing high-rate healthy paths.
+	healthyProbeFrames = 4096
 )
 
 type Encoder struct {
-	epoch       uint16
-	groupID     uint64
-	maxData     int
-	controller  *Controller
-	data        [][]byte
-	groupParity int
-	nextEpoch   bool
+	epoch         uint16
+	epochSnapshot atomic.Uint32
+	groupID       uint64
+	maxData       int
+	controller    *Controller
+	codecs        map[codecDimensions]reedsolomon.Encoder
+	data          [][]byte
+	groupParity   int
+	lastParity    int
+	unprotected   int
 }
 
 func NewEncoder(maxData int, controller *Controller) *Encoder {
@@ -31,7 +39,12 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 	if controller == nil {
 		controller = NewController()
 	}
-	return &Encoder{epoch: 1, maxData: maxData, controller: controller}
+	encoder := &Encoder{
+		epoch: 1, maxData: maxData, controller: controller,
+		codecs: make(map[codecDimensions]reedsolomon.Encoder), lastParity: -1,
+	}
+	encoder.epochSnapshot.Store(1)
+	return encoder
 }
 
 func (e *Encoder) Add(frame []byte) ([][]byte, error) {
@@ -39,15 +52,27 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 		return nil, errors.New("invalid FEC data frame length")
 	}
 	if len(e.data) == 0 {
-		if e.nextEpoch {
+		targetParity := e.controller.CurrentParity()
+		if targetParity == 0 && e.unprotected < healthyProbeFrames {
+			e.unprotected++
+			return [][]byte{frame}, nil
+		}
+		if e.lastParity >= 0 && targetParity != e.lastParity {
 			e.epoch++
 			if e.epoch == 0 {
 				e.epoch = 1
 			}
-			e.nextEpoch = false
+			e.epochSnapshot.Store(uint32(e.epoch))
 		}
+		e.lastParity = targetParity
 		e.groupID++
 		e.groupParity = e.controller.Parity(MaxDataShards)
+		if e.groupParity == 0 {
+			// Probe after a run of raw healthy-path frames. Most frames avoid
+			// all FEC allocation, framing, close, and feedback work.
+			e.groupParity = 1
+			e.unprotected = 0
+		}
 	}
 	shard := make([]byte, 2+len(frame))
 	binary.BigEndian.PutUint16(shard[:2], uint16(len(frame)))
@@ -94,7 +119,7 @@ func (e *Encoder) Flush() ([][]byte, error) {
 		for i := k; i < k+r; i++ {
 			shards[i] = make([]byte, shardSize)
 		}
-		codec, err := reedsolomon.New(k, r, reedsolomon.WithAutoGoroutines(shardSize))
+		codec, err := cachedCodec(e.codecs, k, r, shardSize)
 		if err != nil {
 			return nil, err
 		}
@@ -116,9 +141,15 @@ func (e *Encoder) Flush() ([][]byte, error) {
 }
 
 func (e *Encoder) Observe(feedback Feedback) {
-	if feedback.Epoch == e.epoch {
-		if e.controller.Observe(feedback) {
-			e.nextEpoch = true
-		}
+	if uint32(feedback.Epoch) == e.epochSnapshot.Load() {
+		e.controller.Observe(feedback)
 	}
+}
+
+func (e *Encoder) ObserveTransport(packetsSent, packetsLost uint64) {
+	e.controller.ObserveTransport(packetsSent, packetsLost)
+}
+
+func (e *Encoder) Stats() (parity int, lossEstimatePPM uint64) {
+	return e.controller.CurrentParity(), e.controller.LossEstimatePPM()
 }

@@ -99,6 +99,38 @@ func TestSalamanderUsesFreshSaltAndHint(t *testing.T) {
 	}
 }
 
+func TestSalamanderEncodesEachGSOSegmentIndependently(t *testing.T) {
+	key := Key{9}
+	payload := bytes.Repeat([]byte{0x42}, 2900)
+	encoded := make([]byte, EncodedLength(len(payload))+2*SalamanderHeaderSize)
+	n, err := encodeSegments(payload, encoded, key, 1200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded = encoded[:n]
+	segments := []int{1216, 1216, 516}
+	offset := 0
+	decoded := make([]byte, 0, len(payload))
+	udp := listenUDP(t)
+	defer udp.Close()
+	connection, err := WrapKeyedSalamander(udp, []PeerKey{{Key: key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range segments {
+		output := make([]byte, size-SalamanderHeaderSize)
+		plain, _, ok := connection.decode(encoded[offset:offset+size], output)
+		if !ok {
+			t.Fatal("failed to decode GSO segment")
+		}
+		decoded = append(decoded, output[:plain]...)
+		offset += size
+	}
+	if !bytes.Equal(decoded, payload) {
+		t.Fatal("GSO segment round trip changed payload")
+	}
+}
+
 func TestSalamanderLearnsPassivePeerAddress(t *testing.T) {
 	udp := listenUDP(t)
 	defer udp.Close()
@@ -130,11 +162,49 @@ func TestSalamanderConfiguredEndpointSelectsPeer(t *testing.T) {
 	}
 }
 
-func listenUDP(t *testing.T) *net.UDPConn {
+func listenUDP(t testing.TB) *net.UDPConn {
 	t.Helper()
 	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+func BenchmarkSalamanderEncode(b *testing.B) {
+	key := Key{9}
+	payload := bytes.Repeat([]byte{0x42}, 1300)
+	output := make([]byte, EncodedLength(len(payload)))
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := encode(payload, output, key); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSalamanderDecode(b *testing.B) {
+	udp := listenUDP(b)
+	defer udp.Close()
+	key := Key{9}
+	connection, err := WrapKeyedSalamander(udp, []PeerKey{{Key: key}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte{0x42}, 1300)
+	encoded := make([]byte, EncodedLength(len(payload)))
+	if _, err := encode(payload, encoded, key); err != nil {
+		b.Fatal(err)
+	}
+	output := make([]byte, len(payload))
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, ok := connection.decode(encoded, output); !ok {
+			b.Fatal("decode failed")
+		}
+	}
 }

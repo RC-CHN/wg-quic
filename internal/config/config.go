@@ -58,7 +58,7 @@ type DNSSettings struct {
 	Domains []string
 }
 
-const DefaultMTU = 1380
+const DefaultMTU = 1280
 
 // EffectiveMTU is the single policy source for the configured or automatic
 // tunnel MTU. Platform code may apply this value to distinct OS surfaces, but
@@ -281,7 +281,7 @@ func parseDirective(cfg *Config, peer *Peer, directive string) error {
 		}
 		cfg.Transport.Carrier = value
 	case "congestion":
-		if value != "auto" {
+		if value != "auto" && value != "reno" && value != "cubic" && value != "model" {
 			return fmt.Errorf("unsupported congestion mode %q", value)
 		}
 		cfg.Transport.Congestion = value

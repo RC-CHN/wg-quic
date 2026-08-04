@@ -9,7 +9,7 @@ import (
 
 const (
 	frameHeaderSize = 21
-	maxFragmentData = 1000
+	maxFragmentData = 4075
 	maxFragments    = 128
 	maxDatagramSize = 65535
 	reassemblyTTL   = 3 * time.Second
@@ -26,16 +26,23 @@ type fragment struct {
 }
 
 func fragmentPacket(packet []byte, packetID uint64) ([][]byte, error) {
+	return fragmentPacketSized(packet, packetID, maxFragmentData)
+}
+
+func fragmentPacketSized(packet []byte, packetID uint64, fragmentData int) ([][]byte, error) {
 	if len(packet) == 0 || len(packet) > maxDatagramSize {
 		return nil, fmt.Errorf("invalid WireGuard datagram size %d", len(packet))
 	}
-	count := (len(packet) + maxFragmentData - 1) / maxFragmentData
+	if fragmentData <= 0 || fragmentData > maxFragmentData {
+		return nil, fmt.Errorf("invalid fragment payload size %d", fragmentData)
+	}
+	count := (len(packet) + fragmentData - 1) / fragmentData
 	if count > maxFragments {
 		return nil, fmt.Errorf("datagram needs %d fragments, maximum is %d", count, maxFragments)
 	}
 	frames := make([][]byte, 0, count)
-	for i, off := 0, 0; off < len(packet); i, off = i+1, off+maxFragmentData {
-		end := min(off+maxFragmentData, len(packet))
+	for i, off := 0, 0; off < len(packet); i, off = i+1, off+fragmentData {
+		end := min(off+fragmentData, len(packet))
 		frame := make([]byte, frameHeaderSize+end-off)
 		copy(frame[:4], frameMagic[:])
 		frame[4] = 1

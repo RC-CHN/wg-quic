@@ -85,6 +85,52 @@ func TestControllerIncreasesFastAndDecreasesSlowly(t *testing.T) {
 	}
 }
 
+func TestControllerLeavesHealthyFastPathOnRecoveredProbeLoss(t *testing.T) {
+	controller := NewController()
+	controller.setParity(0)
+	if !controller.Observe(Feedback{Total: 8, Missing: 1, Recovered: 1}) {
+		t.Fatal("recovered probe loss did not change the controller")
+	}
+	if got := controller.Parity(8); got != 1 {
+		t.Fatalf("parity after recovered probe loss = %d, want 1", got)
+	}
+}
+
+func TestControllerTargetsMinimumUsefulParity(t *testing.T) {
+	tests := []struct {
+		loss float64
+		want int
+	}{
+		{loss: 0, want: 0},
+		{loss: 0.005, want: 1},
+		{loss: 0.02, want: 2},
+		{loss: 0.05, want: 3},
+		{loss: 0.10, want: 4},
+	}
+	for _, test := range tests {
+		if got := parityForLoss(DefaultDataShards, test.loss); got != test.want {
+			t.Errorf("parityForLoss(8, %.3f) = %d, want %d", test.loss, got, test.want)
+		}
+	}
+}
+
+func TestControllerUsesTransportLossWhileFECIsBypassed(t *testing.T) {
+	controller := NewController()
+	controller.setParity(0)
+	if controller.ObserveTransport(100, 0) {
+		t.Fatal("initial transport snapshot changed parity")
+	}
+	if !controller.ObserveTransport(228, 8) {
+		t.Fatal("transport loss did not leave the zero-parity fast path")
+	}
+	if got := controller.CurrentParity(); got != 1 {
+		t.Fatalf("parity after transport loss = %d, want 1", got)
+	}
+	if got := controller.LossEstimatePPM(); got == 0 {
+		t.Fatal("transport loss did not update the loss estimate")
+	}
+}
+
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()
@@ -171,5 +217,89 @@ func TestEncoderMovesToNewEpochWhenParityChanges(t *testing.T) {
 	}
 	if parsedThird.epoch == parsed.epoch {
 		t.Fatal("encoder kept the old epoch after changing parity")
+	}
+}
+
+func TestEncoderBypassesFECAndPeriodicallyProbesOnHealthyPath(t *testing.T) {
+	controller := NewController()
+	controller.setParity(0)
+	encoder := NewEncoder(DefaultDataShards, controller)
+	frame := []byte("healthy")
+	for i := 0; i < healthyProbeFrames; i++ {
+		packets, err := encoder.Add(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(packets) != 1 || !bytes.Equal(packets[0], frame) {
+			t.Fatalf("healthy frame %d was FEC framed: %#v", i, packets)
+		}
+	}
+	packets, err := encoder.Add(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packets) != 1 {
+		t.Fatalf("probe first shard produced %d packets, want 1", len(packets))
+	}
+	if kind, ok := PacketKind(packets[0]); !ok || kind != KindData {
+		t.Fatalf("probe packet kind = %v, handled=%t", kind, ok)
+	}
+}
+
+func BenchmarkEncoderGroup(b *testing.B) {
+	for _, parity := range []int{0, 1, 2, 4} {
+		b.Run(string(rune('0'+parity))+"-parity", func(b *testing.B) {
+			controller := NewController()
+			controller.setParity(parity)
+			encoder := NewEncoder(DefaultDataShards, controller)
+			frame := bytes.Repeat([]byte{1}, 1000)
+			b.SetBytes(DefaultDataShards * int64(len(frame)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				for range DefaultDataShards {
+					if _, err := encoder.Add(frame); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDecoderRecovery(b *testing.B) {
+	controller := NewController()
+	controller.setParity(2)
+	encoder := NewEncoder(DefaultDataShards, controller)
+	frame := bytes.Repeat([]byte{1}, 1000)
+	var encoded [][]byte
+	for range DefaultDataShards {
+		packets, err := encoder.Add(frame)
+		if err != nil {
+			b.Fatal(err)
+		}
+		encoded = append(encoded, packets...)
+	}
+	var packets [][]byte
+	for _, packet := range encoded {
+		parsed, _, err := parsePacket(packet)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if parsed.kind == KindData && parsed.index == 3 {
+			continue
+		}
+		packets = append(packets, packet)
+	}
+	b.SetBytes(DefaultDataShards * int64(len(frame)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		decoder := NewDecoder()
+		for _, packet := range packets {
+			if _, err := decoder.Handle(time.Now(), packet); err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 }

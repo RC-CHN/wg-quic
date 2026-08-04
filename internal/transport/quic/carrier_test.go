@@ -31,8 +31,8 @@ func TestCarrierRoutesQUICThroughSalamander(t *testing.T) {
 	defer server.Close()
 
 	for name, carrier := range map[string]*Carrier{"client": client, "server": server} {
-		adapter, ok := carrier.transport.Conn.(*obfuscatedConn)
-		if !ok || adapter.PacketConn != carrier.obfsConn {
+		adapter, ok := carrier.transport.Conn.(*obfs.SalamanderConn)
+		if !ok || adapter != carrier.obfsConn {
 			t.Fatalf("%s QUIC transport bypasses Salamander through %T", name, carrier.transport.Conn)
 		}
 	}

@@ -6,7 +6,7 @@ ListenPort = 51820
 MTU = @MTU@
 
 # wg-quic: carrier=quic
-# wg-quic: congestion=auto
+# wg-quic: congestion=@CONGESTION@
 # wg-quic: fec=@FEC@
 # wg-quic: obfs=@OBFS@
 

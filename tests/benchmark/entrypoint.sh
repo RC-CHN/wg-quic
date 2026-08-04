@@ -7,6 +7,10 @@ if [ ! -c /dev/net/tun ]; then
 fi
 
 sysctl -q net.ipv6.conf.all.disable_ipv6=0
+if [ "${WGQ_BENCH_DISABLE_OFFLOADS:-0}" = 1 ]; then
+	ethtool -K eth0 tso off gso off gro off \
+		tx-udp-segmentation off rx-udp-gro-forwarding off >/dev/null
+fi
 
 case "${WGQ_BENCH_TRANSPORT:-wg-quic}" in
 wg-quic)

@@ -178,6 +178,10 @@ type Config struct {
 	Allow0RTT bool
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
+	// CongestionControl selects the sender congestion controller. Supported
+	// values are "reno", "cubic", and experimental controllers added by this
+	// pinned fork. The empty value preserves the upstream Reno default.
+	CongestionControl string
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-09.
 	EnableStreamResetPartialDelivery bool

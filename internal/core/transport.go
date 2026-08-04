@@ -20,6 +20,7 @@ func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, er
 		PeerKeys: make(map[string]obfs.Key, len(cfg.Peers)),
 	}
 	result.Bind.FECMode = cfg.Transport.FEC
+	result.Bind.CongestionMode = cfg.Transport.Congestion
 	result.Bind.ObfsMode = cfg.Transport.Obfs
 	if result.Bind.ObfsMode == "none" {
 		return result, nil

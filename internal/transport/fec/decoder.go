@@ -36,12 +36,14 @@ type receiveGroup struct {
 type Decoder struct {
 	groups    map[uint64]*receiveGroup
 	completed map[uint64]time.Time
+	codecs    map[codecDimensions]reedsolomon.Encoder
 }
 
 func NewDecoder() *Decoder {
 	return &Decoder{
 		groups:    make(map[uint64]*receiveGroup),
 		completed: make(map[uint64]time.Time),
+		codecs:    make(map[codecDimensions]reedsolomon.Encoder),
 	}
 }
 
@@ -196,7 +198,7 @@ func (d *Decoder) tryComplete(group *receiveGroup) ([][]byte, *Feedback, bool, e
 			copy(shards[group.k+i], shard)
 		}
 	}
-	codec, err := reedsolomon.New(group.k, group.r, reedsolomon.WithAutoGoroutines(shardSize))
+	codec, err := cachedCodec(d.codecs, group.k, group.r, shardSize)
 	if err != nil {
 		return nil, nil, false, err
 	}

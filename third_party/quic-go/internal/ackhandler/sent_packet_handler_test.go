@@ -108,11 +108,12 @@ func TestSentPacketHandlerSendAndAcknowledge(t *testing.T) {
 }
 
 func testSentPacketHandlerSendAndAcknowledge(t *testing.T, encLevel protocol.EncryptionLevel) {
+	stats := &utils.ConnectionStats{}
 	sph := NewSentPacketHandler(
 		0,
 		1200,
 		utils.NewRTTStats(),
-		&utils.ConnectionStats{},
+		stats,
 		false,
 		false,
 		nil,
@@ -142,6 +143,10 @@ func testSentPacketHandlerSendAndAcknowledge(t *testing.T, encLevel protocol.Enc
 	)
 	require.NoError(t, err)
 	require.Equal(t, []protocol.PacketNumber{pns[0], pns[1], pns[2], pns[3], pns[4], pns[7], pns[8], pns[9]}, packets.Acked)
+	require.EqualValues(t, 8*1200, stats.BytesAcked.Load())
+	require.EqualValues(t, 8, stats.PacketsAcked.Load())
+	require.EqualValues(t, sph.(*sentPacketHandler).getBytesInFlight(), stats.BytesInFlight.Load())
+	require.NotZero(t, stats.CongestionWindow.Load())
 
 	// ACKs that don't acknowledge new packets are ok
 	_, err = sph.ReceivedAck(

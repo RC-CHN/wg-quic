@@ -25,6 +25,7 @@ type Config struct {
 	HandshakeTimeout time.Duration
 	MaxIdleTimeout   time.Duration
 	KeepAlivePeriod  time.Duration
+	CongestionMode   string
 	FECMode          string
 	FECDataShards    int
 	FECFlushDeadline time.Duration
@@ -39,6 +40,7 @@ func DefaultConfig() Config {
 		HandshakeTimeout: 4 * time.Second,
 		MaxIdleTimeout:   15 * time.Second,
 		KeepAlivePeriod:  5 * time.Second,
+		CongestionMode:   "model",
 		FECMode:          "auto", FECDataShards: fec.DefaultDataShards, FECFlushDeadline: 2 * time.Millisecond, ObfsMode: "none",
 	}
 }
@@ -46,6 +48,11 @@ func DefaultConfig() Config {
 type receivedPacket struct {
 	data []byte
 	ep   *Endpoint
+}
+
+type outboundPacket struct {
+	data []byte
+	id   uint64
 }
 
 type runState struct {
@@ -121,6 +128,9 @@ func New(cfg Config) *Bind {
 	if cfg.KeepAlivePeriod <= 0 {
 		cfg.KeepAlivePeriod = defaults.KeepAlivePeriod
 	}
+	if cfg.CongestionMode == "" || cfg.CongestionMode == "auto" {
+		cfg.CongestionMode = defaults.CongestionMode
+	}
 	if cfg.FECMode == "" {
 		cfg.FECMode = defaults.FECMode
 	}
@@ -157,6 +167,7 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		HandshakeTimeout: b.cfg.HandshakeTimeout,
 		MaxIdleTimeout:   b.cfg.MaxIdleTimeout,
 		KeepAlivePeriod:  b.cfg.KeepAlivePeriod,
+		CongestionMode:   b.cfg.CongestionMode,
 		Mark:             b.mark.Load(),
 		ObfsMode:         b.cfg.ObfsMode,
 		ObfsKeys:         b.cfg.ObfsKeys,
@@ -219,7 +230,7 @@ func (b *Bind) SetMark(mark uint32) error {
 func (b *Bind) BatchSize() int { return 32 }
 
 func (b *Bind) Stats() telemetry.Stats {
-	return telemetry.Stats{
+	stats := telemetry.Stats{
 		WGTxPackets: b.stats.wgTxPackets.Load(), WGTxBytes: b.stats.wgTxBytes.Load(),
 		WGRxPackets: b.stats.wgRxPackets.Load(), WGRxBytes: b.stats.wgRxBytes.Load(),
 		WireTxPackets: b.stats.wireTxPackets.Load(), WireTxBytes: b.stats.wireTxBytes.Load(),
@@ -228,6 +239,77 @@ func (b *Bind) Stats() telemetry.Stats {
 		FECParityTx: b.stats.fecParityTx.Load(), FECRawLost: b.stats.fecRawLost.Load(),
 		FECRecovered: b.stats.fecRecovered.Load(), FECUnrecovered: b.stats.fecUnrecovered.Load(),
 		ActiveSessions: b.stats.activeSessions.Load(),
+	}
+	b.addQUICStats(&stats)
+	return stats
+}
+
+func (b *Bind) addQUICStats(stats *telemetry.Stats) {
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	sessions := make([]*session, 0, len(state.sessions))
+	for _, sess := range state.sessions {
+		sessions = append(sessions, sess)
+	}
+	state.mu.Unlock()
+	for _, sess := range sessions {
+		if sess.fecEncoder != nil {
+			parity, lossEstimatePPM := sess.fecEncoder.Stats()
+			stats.FECCurrentParityShards = max(stats.FECCurrentParityShards, uint64(parity))
+			stats.FECLossEstimatePPM = max(stats.FECLossEstimatePPM, lossEstimatePPM)
+		}
+		sess.mu.Lock()
+		conn := sess.conn
+		sess.mu.Unlock()
+		if conn == nil {
+			continue
+		}
+		current := conn.Stats()
+		stats.QUICBytesAcked += current.BytesAcked
+		stats.QUICPacketsAcked += current.PacketsAcked
+		stats.QUICBytesLost += current.BytesLost
+		stats.QUICPacketsLost += current.PacketsLost
+		stats.QUICCongestionWindowBytes += current.CongestionWindow
+		stats.QUICBytesInFlight += current.BytesInFlight
+		stats.QUICBandwidthEstimateBps += current.BandwidthEstimate
+		stats.QUICPacingRateBps += current.PacingRate
+		stats.QUICPathRTTUs = max(
+			stats.QUICPathRTTUs,
+			uint64(current.PropagationRTT/time.Microsecond),
+		)
+		stats.QUICQueueDelayUs = max(
+			stats.QUICQueueDelayUs,
+			uint64(current.QueueDelay/time.Microsecond),
+		)
+		stats.QUICFECRecoverableLossPPM = max(
+			stats.QUICFECRecoverableLossPPM,
+			current.FECRecoverableLossPPM,
+		)
+		stats.QUICFECResidualLossPPM = max(
+			stats.QUICFECResidualLossPPM,
+			current.FECResidualLossPPM,
+		)
+		stats.QUICCongestionModelState = max(
+			stats.QUICCongestionModelState,
+			current.CongestionModelState,
+		)
+		minRTTUs := uint64(current.MinRTT / time.Microsecond)
+		if minRTTUs != 0 && (stats.QUICMinRTTUs == 0 || minRTTUs < stats.QUICMinRTTUs) {
+			stats.QUICMinRTTUs = minRTTUs
+		}
+		stats.QUICSmoothedRTTUs = max(
+			stats.QUICSmoothedRTTUs,
+			uint64(current.SmoothedRTT/time.Microsecond),
+		)
+		stats.QUICLatestRTTUs = max(
+			stats.QUICLatestRTTUs,
+			uint64(current.LatestRTT/time.Microsecond),
+		)
 	}
 }
 
@@ -404,26 +486,27 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 	}
 	sess := b.sessionForEndpoint(state, ep)
 	for _, buf := range bufs {
+		if len(buf) == 0 || len(buf) > maxDatagramSize {
+			return fmt.Errorf("invalid WireGuard datagram size %d", len(buf))
+		}
 		b.stats.wgTxPackets.Add(1)
 		b.stats.wgTxBytes.Add(uint64(len(buf)))
 		queue := sess.send
 		if priorityWireGuardDatagram(buf) {
 			queue = sess.priority
 		}
-		frames, err := fragmentPacket(buf, b.nextPacket.Add(1))
-		if err != nil {
-			return err
+		packet := outboundPacket{
+			data: append([]byte(nil), buf...),
+			id:   b.nextPacket.Add(1),
 		}
-		for _, frame := range frames {
-			select {
-			case queue <- frame:
-			case <-state.ctx.Done():
-				return net.ErrClosed
-			default:
-				b.stats.queueDrops.Add(1)
-				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
-				return errors.New("wg-quic send queue is full")
-			}
+		select {
+		case queue <- packet:
+		case <-state.ctx.Done():
+			return net.ErrClosed
+		default:
+			b.stats.queueDrops.Add(1)
+			b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
+			return errors.New("wg-quic send queue is full")
 		}
 	}
 	return nil
@@ -515,8 +598,8 @@ func (b *Bind) newSession(state *runState, ep *Endpoint) *session {
 	ctx, cancel := context.WithCancel(state.ctx)
 	sess := &session{
 		id: b.nextSession.Add(1), state: state, endpoint: ep, ctx: ctx, cancel: cancel,
-		ready: make(chan struct{}), send: make(chan []byte, state.cfg.QueueSize),
-		priority: make(chan []byte, max(64, state.cfg.QueueSize/8)),
+		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
+		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
 		control:  make(chan []byte, 64),
 	}
 	sess.fecDecoder = fec.NewDecoder()
@@ -556,22 +639,23 @@ func (b *Bind) runSession(sess *session) {
 }
 
 type session struct {
-	id         uint64
-	state      *runState
-	endpoint   *Endpoint
-	ctx        context.Context
-	cancel     context.CancelFunc
-	ready      chan struct{}
-	send       chan []byte
-	priority   chan []byte
-	control    chan []byte
-	mu         sync.Mutex
-	conn       *quiccarrier.Connection
-	readyOnce  sync.Once
-	closeOnce  sync.Once
-	closed     atomic.Bool
-	fecEncoder *fec.Encoder
-	fecDecoder *fec.Decoder
+	id                  uint64
+	state               *runState
+	endpoint            *Endpoint
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	ready               chan struct{}
+	send                chan outboundPacket
+	priority            chan outboundPacket
+	control             chan []byte
+	mu                  sync.Mutex
+	conn                *quiccarrier.Connection
+	readyOnce           sync.Once
+	closeOnce           sync.Once
+	closed              atomic.Bool
+	fecEncoder          *fec.Encoder
+	fecDecoder          *fec.Decoder
+	fecPathSampleFrames uint32
 }
 
 func (s *session) setConn(qconn *quiccarrier.Connection) {
@@ -655,6 +739,11 @@ func (s *session) sendLoop() {
 		if s.fecEncoder == nil {
 			return sendPackets([][]byte{frame})
 		}
+		s.fecPathSampleFrames++
+		if s.fecPathSampleFrames%32 == 0 {
+			stats := qconn.Stats()
+			s.fecEncoder.ObserveTransport(stats.PacketsSent, stats.PacketsLost)
+		}
 		packets, err := s.fecEncoder.Add(frame)
 		if err != nil || !sendPackets(packets) {
 			return false
@@ -665,6 +754,23 @@ func (s *session) sendLoop() {
 			}
 		} else {
 			stopTimer()
+		}
+		return true
+	}
+	sendWGPacket := func(packet outboundPacket) bool {
+		fragmentData := qconn.MaxDatagramPayloadSize() - frameHeaderSize
+		if s.fecEncoder != nil {
+			fragmentData -= fec.DataPacketOverhead
+		}
+		fragmentData = min(fragmentData, maxFragmentData)
+		frames, err := fragmentPacketSized(packet.data, packet.id, fragmentData)
+		if err != nil {
+			return false
+		}
+		for _, frame := range frames {
+			if !sendFrame(frame) {
+				return false
+			}
 		}
 		return true
 	}
@@ -679,20 +785,20 @@ func (s *session) sendLoop() {
 		default:
 		}
 		select {
-		case frame := <-s.priority:
-			if !sendFrame(frame) {
+		case packet := <-s.priority:
+			if !sendWGPacket(packet) {
 				return
 			}
 			continue
 		default:
 		}
 		select {
-		case frame := <-s.priority:
-			if !sendFrame(frame) {
+		case packet := <-s.priority:
+			if !sendWGPacket(packet) {
 				return
 			}
-		case frame := <-s.send:
-			if !sendFrame(frame) {
+		case packet := <-s.send:
+			if !sendWGPacket(packet) {
 				return
 			}
 		case control := <-s.control:
@@ -771,6 +877,11 @@ func (s *session) receiveLoop() {
 		if result.Handled {
 			if result.ObservedFeedback != nil && s.fecEncoder != nil {
 				s.fecEncoder.Observe(*result.ObservedFeedback)
+				qconn.ObserveFECFeedback(
+					uint64(result.ObservedFeedback.Total),
+					uint64(result.ObservedFeedback.Missing),
+					uint64(result.ObservedFeedback.Recovered),
+				)
 			}
 			s.sendFECFeedback(result.SendFeedback)
 			for _, frame := range result.Frames {

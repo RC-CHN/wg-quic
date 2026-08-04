@@ -68,13 +68,18 @@ make benchmark-ceiling
 make benchmark-loss
 make benchmark-profiles
 make benchmark-bandwidth
+make benchmark-protocol
 ```
 
 It compares direct userspace WireGuard with all four wg-quic FEC/obfuscation
 combinations, and supports asymmetric custom links, built-in
 LAN/Wi-Fi/cellular/satellite profiles, runtime link changes, outer-path
-baselines, per-interval results, and FEC/CPU/wire counters. See
-[`tests/benchmark/README.md`](tests/benchmark/README.md).
+baselines, per-interval controller sampling, protocol signature drop/police
+controls, and FEC/QUIC/CPU/wire counters. See
+[`tests/benchmark/README.md`](tests/benchmark/README.md). The product goals,
+success metrics, current limitations, and candidate transport changes for
+degraded links are recorded in
+[`docs/DEGRADED-LINK-DESIGN.md`](docs/DEGRADED-LINK-DESIGN.md).
 
 The container test leaves the host route table and DNS untouched. It creates
 isolated privileged nodes with separate Linux network namespaces and real TUN

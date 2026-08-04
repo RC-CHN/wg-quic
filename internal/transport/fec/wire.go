@@ -7,6 +7,9 @@ import (
 
 const headerSize = 24
 
+// DataPacketOverhead is the FEC header plus the encoded source-length prefix.
+const DataPacketOverhead = headerSize + 2
+
 var magic = [4]byte{'W', 'G', 'Q', 'F'}
 
 type Kind uint8

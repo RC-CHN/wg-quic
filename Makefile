@@ -1,7 +1,7 @@
 VERSION ?= $(shell test -f VERSION && sed -n '1p' VERSION || echo 0.1.0-dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
-.PHONY: benchmark-bandwidth benchmark-ceiling benchmark-loss benchmark-profiles benchmark-smoke benchmark-transports build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-quic test-transport test-container
+.PHONY: benchmark-bandwidth benchmark-ceiling benchmark-loss benchmark-profiles benchmark-protocol benchmark-smoke benchmark-transports build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-quic test-transport test-container
 
 build:
 	mkdir -p build
@@ -63,3 +63,6 @@ benchmark-profiles:
 
 benchmark-bandwidth:
 	./tests/benchmark/run.sh matrix bandwidth
+
+benchmark-protocol:
+	./tests/benchmark/run.sh matrix protocol

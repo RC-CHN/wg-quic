@@ -29,6 +29,7 @@ type Config struct {
 	MaxIdleTimeout   time.Duration
 	KeepAlivePeriod  time.Duration
 	Mark             uint32
+	CongestionMode   string
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
 	EndpointKeys     map[netip.AddrPort]obfs.Key
@@ -40,22 +41,6 @@ type Carrier struct {
 	packetConn *net.UDPConn
 	obfsConn   *obfs.SalamanderConn
 	cfg        Config
-}
-
-// obfuscatedConn deliberately exposes only net.PacketConn plus socket buffer
-// tuning to quic-go. Salamander changes datagram length, so raw UDP GSO/GRO
-// metadata must stay hidden until segment-aware rewriting is implemented.
-type obfuscatedConn struct {
-	net.PacketConn
-	udp *net.UDPConn
-}
-
-func (c *obfuscatedConn) SetReadBuffer(bytes int) error {
-	return c.udp.SetReadBuffer(bytes)
-}
-
-func (c *obfuscatedConn) SetWriteBuffer(bytes int) error {
-	return c.udp.SetWriteBuffer(bytes)
 }
 
 func Open(port uint16, cfg Config) (*Carrier, error) {
@@ -96,7 +81,7 @@ func Open(port uint16, cfg Config) (*Carrier, error) {
 			rawConn.Close()
 			return nil, err
 		}
-		transportConn = &obfuscatedConn{PacketConn: obfsConn, udp: rawConn}
+		transportConn = obfsConn
 	default:
 		rawConn.Close()
 		return nil, fmt.Errorf("unsupported obfuscation mode %q", cfg.ObfsMode)
@@ -131,6 +116,18 @@ func (c *Connection) CloseWithError(message string) error {
 
 func (c *Connection) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+func (c *Connection) Stats() quicgo.ConnectionStats {
+	return c.conn.ConnectionStats()
+}
+
+func (c *Connection) MaxDatagramPayloadSize() int {
+	return int(c.conn.MaxDatagramPayloadSize())
+}
+
+func (c *Connection) ObserveFECFeedback(total, missing, recovered uint64) {
+	c.conn.ObserveFECFeedback(total, missing, recovered)
 }
 
 func (c *Carrier) Accept(ctx context.Context) (*Connection, netip.AddrPort, error) {
@@ -206,6 +203,7 @@ func quicConfig(cfg Config) *quicgo.Config {
 		EnableDatagrams: true, HandshakeIdleTimeout: cfg.HandshakeTimeout,
 		MaxIdleTimeout: cfg.MaxIdleTimeout, KeepAlivePeriod: cfg.KeepAlivePeriod,
 		MaxIncomingStreams: -1, MaxIncomingUniStreams: -1,
+		CongestionControl: cfg.CongestionMode,
 	}
 }
 

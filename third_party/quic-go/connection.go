@@ -320,6 +320,7 @@ var newConnection = func(
 		s.perspective,
 		s.qlogger,
 		s.logger,
+		s.config.CongestionControl,
 	)
 	s.maxPayloadSizeEstimate.Store(uint32(estimateMaxPayloadSize(protocol.ByteCount(s.config.InitialPacketSize))))
 	statelessResetToken := statelessResetter.GetStatelessResetToken(srcConnID)
@@ -449,6 +450,7 @@ var newClientConnection = func(
 		s.perspective,
 		s.qlogger,
 		s.logger,
+		s.config.CongestionControl,
 	)
 	s.maxPayloadSizeEstimate.Store(uint32(estimateMaxPayloadSize(protocol.ByteCount(s.config.InitialPacketSize))))
 	oneRTTStream := newCryptoStream()
@@ -808,6 +810,12 @@ type ConnectionStats struct {
 	// PacketsSent is the number of packets sent on the underlying connection,
 	// including those that are determined to have been lost.
 	PacketsSent uint64
+	// BytesAcked is the number of congestion-controlled bytes acknowledged by
+	// the peer.
+	BytesAcked uint64
+	// PacketsAcked is the number of congestion-controlled packets acknowledged
+	// by the peer.
+	PacketsAcked uint64
 	// BytesReceived is the number of total bytes received on the underlying
 	// connection, including duplicate data for streams. Does not include UDP or
 	// any other outer framing.
@@ -815,15 +823,37 @@ type ConnectionStats struct {
 	// PacketsReceived is the number of total packets received on the underlying
 	// connection, including packets that were not processable.
 	PacketsReceived uint64
-	// BytesLost is the number of bytes lost on the underlying connection (does
-	// not monotonically increase, because packets that are declared lost can
-	// subsequently be received). Does not include UDP or any other outer
-	// framing.
+	// BytesLost is the cumulative number of bytes declared lost by congestion
+	// control. Does not include UDP or any other outer framing.
 	BytesLost uint64
-	// PacketsLost is the number of packets lost on the underlying connection
-	// (does not monotonically increase, because packets that are declared lost
-	// can subsequently be received).
+	// PacketsLost is the cumulative number of congestion-controlled packets
+	// declared lost on the underlying connection.
 	PacketsLost uint64
+	// CongestionWindow is the sender's current congestion window in bytes.
+	CongestionWindow uint64
+	// BytesInFlight is the sender's current congestion-controlled flight size.
+	BytesInFlight uint64
+	// BandwidthEstimate is the controller's current delivery-capacity estimate
+	// in bits per second.
+	BandwidthEstimate uint64
+	// PacingRate is the controller's current total wire pacing budget in bits
+	// per second. It includes both payload and FEC parity packets.
+	PacingRate uint64
+	// PropagationRTT is the controller's current path-local baseline RTT. The
+	// model controller can move this value upward after a sustained access-path
+	// change, unlike the connection-lifetime MinRTT.
+	PropagationRTT time.Duration
+	// QueueDelay is the smoothed RTT above PropagationRTT.
+	QueueDelay time.Duration
+	// FECRecoverableLossPPM is the recent share of protected data shards that
+	// were missing but recovered, in parts per million.
+	FECRecoverableLossPPM uint64
+	// FECResidualLossPPM is the recent share of protected data shards that
+	// remained unrecovered, in parts per million.
+	FECResidualLossPPM uint64
+	// CongestionModelState is 0 during startup and 1 during steady probing.
+	// It is meaningful when the model controller is selected.
+	CongestionModelState uint64
 }
 
 func (c *Conn) ConnectionStats() ConnectionStats {
@@ -833,13 +863,39 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		SmoothedRTT:   c.rttStats.SmoothedRTT(),
 		MeanDeviation: c.rttStats.MeanDeviation(),
 
-		BytesSent:       c.connStats.BytesSent.Load(),
-		PacketsSent:     c.connStats.PacketsSent.Load(),
-		BytesReceived:   c.connStats.BytesReceived.Load(),
-		PacketsReceived: c.connStats.PacketsReceived.Load(),
-		BytesLost:       c.connStats.BytesLost.Load(),
-		PacketsLost:     c.connStats.PacketsLost.Load(),
+		BytesSent:             c.connStats.BytesSent.Load(),
+		PacketsSent:           c.connStats.PacketsSent.Load(),
+		BytesAcked:            c.connStats.BytesAcked.Load(),
+		PacketsAcked:          c.connStats.PacketsAcked.Load(),
+		BytesReceived:         c.connStats.BytesReceived.Load(),
+		PacketsReceived:       c.connStats.PacketsReceived.Load(),
+		BytesLost:             c.connStats.BytesLost.Load(),
+		PacketsLost:           c.connStats.PacketsLost.Load(),
+		CongestionWindow:      c.connStats.CongestionWindow.Load(),
+		BytesInFlight:         c.connStats.BytesInFlight.Load(),
+		BandwidthEstimate:     c.connStats.BandwidthEstimate.Load(),
+		PacingRate:            c.connStats.PacingRate.Load(),
+		PropagationRTT:        time.Duration(c.connStats.PropagationRTT.Load()),
+		QueueDelay:            time.Duration(c.connStats.QueueDelay.Load()),
+		FECRecoverableLossPPM: c.connStats.FECRecoverableLossPPM.Load(),
+		FECResidualLossPPM:    c.connStats.FECResidualLossPPM.Load(),
+		CongestionModelState:  c.connStats.CongestionModelState.Load(),
 	}
+}
+
+// ObserveFECFeedback supplies application-level loss outcomes to the model
+// congestion controller. All values are cumulative inputs: total is the count
+// of protected data shards, missing is the subset not received directly, and
+// recovered is the subset reconstructed by FEC.
+func (c *Conn) ObserveFECFeedback(total, missing, recovered uint64) {
+	if total == 0 {
+		return
+	}
+	missing = min(missing, total)
+	recovered = min(recovered, missing)
+	c.connStats.FECObservedData.Add(total)
+	c.connStats.FECObservedMissing.Add(missing)
+	c.connStats.FECObservedRecovered.Add(recovered)
 }
 
 // Time when the connection should time out
@@ -3030,18 +3086,30 @@ func (c *Conn) SendDatagram(p []byte) error {
 	}
 
 	f := &wire.DatagramFrame{DataLenPresent: true}
-	// The payload size estimate is conservative.
-	// Under many circumstances we could send a few more bytes.
-	maxDataLen := min(
-		f.MaxDataLen(c.peerParams.MaxDatagramFrameSize, c.version),
-		protocol.ByteCount(c.maxPayloadSizeEstimate.Load()),
-	)
+	maxDataLen := c.maxDatagramPayloadSize(f)
 	if protocol.ByteCount(len(p)) > maxDataLen {
 		return &DatagramTooLargeError{MaxDatagramPayloadSize: int64(maxDataLen)}
 	}
 	f.Data = make([]byte, len(p))
 	copy(f.Data, p)
 	return c.datagramQueue.Add(f)
+}
+
+// MaxDatagramPayloadSize returns a conservative payload limit for a DATAGRAM
+// submitted at the current path MTU.
+func (c *Conn) MaxDatagramPayloadSize() int64 {
+	if !c.supportsDatagrams() {
+		return 0
+	}
+	return int64(c.maxDatagramPayloadSize(&wire.DatagramFrame{DataLenPresent: true}))
+}
+
+func (c *Conn) maxDatagramPayloadSize(frame *wire.DatagramFrame) protocol.ByteCount {
+	// Under many circumstances we could send a few more bytes.
+	return min(
+		frame.MaxDataLen(c.peerParams.MaxDatagramFrameSize, c.version),
+		protocol.ByteCount(c.maxPayloadSizeEstimate.Load()),
+	)
 }
 
 // ReceiveDatagram gets a message received in a QUIC datagram, as specified in RFC 9221.

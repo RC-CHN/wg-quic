@@ -64,6 +64,7 @@ type cubicSender struct {
 var (
 	_ SendAlgorithm               = &cubicSender{}
 	_ SendAlgorithmWithDebugInfos = &cubicSender{}
+	_ SendAlgorithmWithStats      = &cubicSender{}
 )
 
 // NewCubicSender makes a new cubic sender
@@ -171,6 +172,13 @@ func (c *cubicSender) GetCongestionWindow() protocol.ByteCount {
 	return c.congestionWindow
 }
 
+func (c *cubicSender) Stats() SenderStats {
+	return SenderStats{
+		CongestionWindow: c.congestionWindow,
+		PropagationRTT:   c.rttStats.MinRTT(),
+	}
+}
+
 func (c *cubicSender) MaybeExitSlowStart() {
 	if c.InSlowStart() &&
 		c.hybridSlowStart.ShouldExitSlowStart(c.rttStats.LatestRTT(), c.rttStats.MinRTT(), c.GetCongestionWindow()/c.maxDatagramSize) {
@@ -197,8 +205,10 @@ func (c *cubicSender) OnPacketAcked(
 }
 
 func (c *cubicSender) OnCongestionEvent(packetNumber protocol.PacketNumber, lostBytes, priorInFlight protocol.ByteCount) {
-	c.connStats.PacketsLost.Add(1)
-	c.connStats.BytesLost.Add(uint64(lostBytes))
+	if lostBytes > 0 {
+		c.connStats.PacketsLost.Add(1)
+		c.connStats.BytesLost.Add(uint64(lostBytes))
+	}
 
 	// TCP NewReno (RFC6582) says that once a loss occurs, any losses in packets
 	// already sent should be treated as a single loss event, since it's expected.

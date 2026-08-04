@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -80,9 +81,9 @@ func DeriveWireGuardKey(localPrivate, remotePublic, preshared []byte) (Key, erro
 	return key, nil
 }
 
-// SalamanderConn provides UDP PacketConn and OOB-capable methods. ArmorBind
-// currently gives quic-go a narrow PacketConn view because GSO/GRO metadata
-// must be rewritten when obfuscation changes each datagram's length.
+// SalamanderConn provides UDP PacketConn and OOB-capable methods. GSO segment
+// sizes are rewritten on send because obfuscation changes every datagram's
+// length, and ReadBatch decodes every received segment before quic-go sees it.
 type SalamanderConn struct {
 	*net.UDPConn
 
@@ -92,10 +93,13 @@ type SalamanderConn struct {
 	cacheMu sync.RWMutex
 	learned map[netip.AddrPort]Key
 
-	readMu   sync.Mutex
-	readBuf  []byte
-	writeMu  sync.Mutex
-	writeBuf []byte
+	readMu        sync.Mutex
+	readBuf       []byte
+	batchConn     *ipv4.PacketConn
+	batchMessages []ipv4.Message
+	batchBuffers  [][]byte
+	writeMu       sync.Mutex
+	writeBuf      []byte
 }
 
 // WrapKeyedSalamander wraps a UDP socket without adding configuration secrets.
@@ -106,11 +110,12 @@ func WrapKeyedSalamander(connection *net.UDPConn, peers []PeerKey) (*SalamanderC
 		return nil, errors.New("Salamander requires a UDP connection")
 	}
 	result := &SalamanderConn{
-		UDPConn:  connection,
-		outbound: make(map[netip.AddrPort]Key),
-		learned:  make(map[netip.AddrPort]Key),
-		readBuf:  make([]byte, maxUDPPayload),
-		writeBuf: make([]byte, maxUDPPayload),
+		UDPConn:   connection,
+		outbound:  make(map[netip.AddrPort]Key),
+		learned:   make(map[netip.AddrPort]Key),
+		readBuf:   make([]byte, maxUDPPayload),
+		writeBuf:  make([]byte, maxUDPPayload),
+		batchConn: ipv4.NewPacketConn(connection),
 	}
 	seen := make(map[Key]struct{}, len(peers))
 	for _, peer := range peers {
@@ -219,7 +224,11 @@ func (c *SalamanderConn) WriteMsgUDP(payload, oob []byte, addr *net.UDPAddr) (n,
 	if err != nil {
 		return 0, 0, err
 	}
-	encoded, err := encode(payload, c.writeBuf, key)
+	gsoSize, err := growGSOSegmentSize(oob, SalamanderHeaderSize)
+	if err != nil {
+		return 0, 0, err
+	}
+	encoded, err := encodeSegments(payload, c.writeBuf, key, int(gsoSize))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -231,6 +240,65 @@ func (c *SalamanderConn) WriteMsgUDP(payload, oob []byte, addr *net.UDPAddr) (n,
 		return 0, oobn, io.ErrShortWrite
 	}
 	return len(payload), oobn, nil
+}
+
+// ReadBatch keeps quic-go's UDP batching enabled while ensuring the raw socket
+// is never read around the obfuscation layer.
+func (c *SalamanderConn) ReadBatch(messages []ipv4.Message, flags int) (int, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if len(messages) == 0 {
+		return 0, nil
+	}
+	c.ensureBatchBuffers(len(messages))
+	for {
+		raw := c.batchMessages[:len(messages)]
+		for i := range raw {
+			raw[i].Buffers[0] = c.batchBuffers[i]
+			raw[i].OOB = messages[i].OOB
+			raw[i].N, raw[i].NN, raw[i].Flags, raw[i].Addr = 0, 0, 0, nil
+		}
+		n, err := c.batchConn.ReadBatch(raw, flags)
+		if n == 0 || err != nil {
+			return n, err
+		}
+		decoded := 0
+		for i := 0; i < n; i++ {
+			if len(messages[decoded].Buffers) == 0 {
+				continue
+			}
+			output := messages[decoded].Buffers[0]
+			plain, key, ok := c.decode(raw[i].Buffers[0][:raw[i].N], output)
+			if !ok {
+				continue
+			}
+			addr, ok := raw[i].Addr.(*net.UDPAddr)
+			if !ok {
+				continue
+			}
+			c.remember(addr, key)
+			messages[decoded].N = plain
+			oobn := min(raw[i].NN, len(messages[decoded].OOB))
+			if decoded != i {
+				copy(messages[decoded].OOB[:oobn], raw[i].OOB[:oobn])
+			}
+			messages[decoded].NN = oobn
+			messages[decoded].Flags = raw[i].Flags
+			messages[decoded].Addr = raw[i].Addr
+			decoded++
+		}
+		if decoded > 0 {
+			return decoded, nil
+		}
+	}
+}
+
+func (c *SalamanderConn) ensureBatchBuffers(count int) {
+	for len(c.batchBuffers) < count {
+		c.batchBuffers = append(c.batchBuffers, make([]byte, maxUDPPayload))
+		message := ipv4.Message{Buffers: make([][]byte, 1)}
+		c.batchMessages = append(c.batchMessages, message)
+	}
 }
 
 func (c *SalamanderConn) keyForAddress(addr *net.UDPAddr) (Key, error) {
@@ -334,6 +402,23 @@ func encode(payload, output []byte, key Key) (int, error) {
 		output[SalamanderHeaderSize+i] = value ^ stream[i%len(stream)]
 	}
 	return len(payload) + SalamanderHeaderSize, nil
+}
+
+func encodeSegments(payload, output []byte, key Key, segmentSize int) (int, error) {
+	if segmentSize <= 0 || segmentSize >= len(payload) {
+		return encode(payload, output, key)
+	}
+	written := 0
+	for len(payload) > 0 {
+		size := min(segmentSize, len(payload))
+		n, err := encode(payload[:size], output[written:], key)
+		if err != nil {
+			return 0, err
+		}
+		written += n
+		payload = payload[size:]
+	}
+	return written, nil
 }
 
 func packetHint(key Key, salt []byte) [SalamanderHintSize]byte {

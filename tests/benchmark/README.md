@@ -43,6 +43,13 @@ the configured netem rate from the rate the container path actually delivers.
 Set `MEASURE_OUTER=0` only when the extra measurement would disturb a specific
 experiment.
 
+Loss, duplication, reordering, and protocol-policy trials automatically disable
+TSO/GSO/GRO plus UDP segmentation/GRO forwarding on the container outer
+interfaces. Without this, one large virtual segment can count as one netem
+packet and a configured 5% loss rate can become only a fraction of a percent on
+the wire. Clean trials leave offloads enabled. Override the decision only for
+a deliberate control with `DISABLE_OFFLOADS=0|1`.
+
 ## Synthetic link profiles
 
 `LINK_PROFILE` selects a starting link. These profiles are controlled synthetic
@@ -87,11 +94,13 @@ DURATION=25 \
 ./tests/benchmark/run.sh trial
 ```
 
-Each transition is recorded in `link-schedule.log`. A qdisc replacement resets
-that qdisc's own counters, so scheduled trials should be interpreted using
-iperf and wg-quic counters rather than summing `tc` counters. Every trial also
-writes `intervals.csv`, making rate collapse and recovery visible per iperf
-interval instead of only as one run-wide average.
+Each transition uses `tc qdisc replace`, so there is no transient unshaped
+window between profiles, and is recorded in `link-schedule.log`. A replacement
+resets that qdisc's own counters, so scheduled trials should be interpreted
+using iperf and wg-quic counters rather than summing `tc` counters. Every trial
+writes `intervals.csv` and samples controller state into `controller.csv`
+(0.5-second cadence by default), making rate collapse, protection changes, and
+recovery visible instead of only as one run-wide average.
 
 Every iperf client has a hard deadline of `DURATION + CONTROL_GRACE_SECONDS`
 (20 seconds of grace by default). A broken or extremely lossy path is recorded
@@ -104,7 +113,8 @@ is itself part of the experiment.
 Every trial:
 
 1. renders a fresh configuration;
-2. recreates both containers, resetting WireGuard, QUIC Reno, and FEC state;
+2. recreates both containers, resetting WireGuard, QUIC congestion, and FEC
+   state;
 3. applies the requested one-way or symmetric `netem` before the first probe;
 4. waits for the tunnel through that shaped path;
 5. captures baseline status and core CPU ticks;
@@ -160,6 +170,7 @@ Available matrices:
 ./tests/benchmark/run.sh matrix loss
 ./tests/benchmark/run.sh matrix profiles
 ./tests/benchmark/run.sh matrix bandwidth
+./tests/benchmark/run.sh matrix protocol
 ```
 
 - `transports` is the shortest apples-to-apples zero-loss TCP comparison: raw
@@ -174,6 +185,8 @@ Available matrices:
 - `bandwidth` sweeps offered UDP load through outer and all five tunnel modes.
   Override its space-separated load points with
   `OFFERED_RATES='5 10 20 40 80'`; select its link with `LINK_PROFILE`.
+- `protocol` applies WireGuard signature drop/police and QUIC long-header
+  handshake-drop policies to direct, plain QUIC, and Salamander modes.
 
 All full matrices accept a space-separated `MODES` subset. For example, compare
 only direct WireGuard and the production FEC/obfuscation combination:
@@ -196,6 +209,22 @@ Use `REPEATS`, `DURATION`, `RATE_MBIT`, `ONE_WAY_DELAY_MS`, and
 `OFFERED_MBIT` to override the full matrices. Results are written under
 `tests/benchmark/results/<UTC run id>/`.
 
+## Protocol discrimination and QoS controls
+
+`PROTOCOL_POLICY` installs IPv4 egress classifiers on both fixture nodes:
+
+- `wireguard-block` drops outer UDP payloads beginning with WireGuard message
+  types 1–4;
+- `wireguard-throttle` polices those signatures to
+  `PROTOCOL_RATE_MBIT` (1 Mbit/s by default);
+- `quic-handshake-block` drops QUIC v1/v2 long-header handshake packets;
+- `none` installs no policy.
+
+The classifier counters are saved as `tc-filter-a.txt` and
+`tc-filter-b.txt`. These are synthetic, fixture-specific DPI controls. They
+demonstrate protocol discrimination and do not emulate a blanket UDP ban:
+wg-quic is currently UDP-only, so generic UDP blocking needs another carrier.
+
 Stop any retained fixture:
 
 ```sh
@@ -213,9 +242,18 @@ Stop any retained fixture:
 - comparable sender `eth0` bytes, bit rate, and goodput/outer ratio;
 - FEC data/parity counts;
 - raw missing, recovered, and unrecovered FEC shards;
+- current adaptive parity and FEC loss estimate;
+- QUIC acknowledged/lost bytes and packets;
+- connection minimum, current path baseline, latest, and smoothed RTT;
+- congestion window, in-flight bytes, delivery-capacity estimate, total pacing
+  budget, queue delay, FEC-classified loss, and model state;
 - local queue drops;
-- core process CPU seconds and final RSS.
+- core process CPU seconds and final RSS;
 - explicit `status` and `error` fields for timeouts and failed paths.
+
+`controller.csv` records the dynamic fields throughout the workload. The
+connection-lifetime `quic_min_rtt_us` and controller-local
+`quic_path_rtt_us` intentionally differ after an access-path change.
 
 `outer_baseline_bps` is a short protocol-matched sanity measurement, not an
 oracle for bottleneck capacity. In high-RTT TCP profiles such as `satellite`,
@@ -260,11 +298,18 @@ bottleneck.
 
 Before treating a UDP loss comparison as an FEC comparison, verify that
 `queue_drops_a` remains zero. If it is nonzero, the application offered more
-than the current QUIC/Reno path can drain, and local overload dominates the
+than the current QUIC path can drain, and local overload dominates the
 configured network loss. Run the `bandwidth` sweep first, then choose an offered
 load below the first local-drop point for the FEC loss matrix.
 
-The current QUIC implementation uses Reno and sees raw QUIC packet loss even
-when FEC reconstructs an application shard. Consequently, FEC may reduce
-residual application loss without preserving TCP goodput at high random-loss
-rates. This fixture is intended to quantify that distinction.
+`congestion=auto` currently selects the experimental model controller. It
+estimates acknowledged outer delivery, maintains a dynamic path RTT and queue
+signal, and paces source and repair traffic under one QUIC wire budget. Use
+`CONGESTION=reno|cubic|model` for controlled comparisons. FEC reconstruction
+does not erase QUIC packet-loss accounting; it supplies an additional
+recoverable/residual classification to the model.
+
+Clean ceiling numbers need their link condition. `LINK_PROFILE=lan` is a
+1 Gbit/s quality-link acceptance test. `unshaped` is a near-zero-RTT container
+GSO/CPU ceiling and can be several times faster for direct WireGuard; those two
+baselines must not be compared as if they represented the same target.

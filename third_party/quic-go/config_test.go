@@ -118,6 +118,8 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 			f.Set(reflect.ValueOf(time.Second))
 		case "EnableDatagrams":
 			f.Set(reflect.ValueOf(true))
+		case "CongestionControl":
+			f.Set(reflect.ValueOf("cubic"))
 		case "DisableVersionNegotiationPackets":
 			f.Set(reflect.ValueOf(true))
 		case "InitialPacketSize":
@@ -184,6 +186,7 @@ func TestConfigDefaultValues(t *testing.T) {
 	require.EqualValues(t, protocol.DefaultMaxReceiveConnectionFlowControlWindow, c.MaxConnectionReceiveWindow)
 	require.EqualValues(t, protocol.DefaultMaxIncomingStreams, c.MaxIncomingStreams)
 	require.EqualValues(t, protocol.DefaultMaxIncomingUniStreams, c.MaxIncomingUniStreams)
+	require.Equal(t, "reno", c.CongestionControl)
 	require.False(t, c.DisablePathMTUDiscovery)
 	require.Nil(t, c.GetConfigForClient)
 }

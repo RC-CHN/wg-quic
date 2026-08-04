@@ -8,7 +8,9 @@ results_root=${RESULTS_DIR:-"$script_dir/results"}
 project_name=${COMPOSE_PROJECT_NAME:-wg-quic-bench}
 compose=(docker compose -p "$project_name" -f "$script_dir/compose.yaml")
 benchmark_transport=wg-quic
-benchmark_mtu=1380
+benchmark_mtu=1280
+benchmark_disable_offloads=0
+benchmark_protocol_policy=none
 all_modes=(direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs)
 
 require_command() {
@@ -20,8 +22,9 @@ require_command() {
 
 compose_run() {
 	WGQ_BENCH_CONFIG_DIR="$generated_dir" \
-		WGQ_BENCH_TRANSPORT="$benchmark_transport" \
-		WGQ_BENCH_MTU="$benchmark_mtu" \
+	WGQ_BENCH_TRANSPORT="$benchmark_transport" \
+	WGQ_BENCH_MTU="$benchmark_mtu" \
+	WGQ_BENCH_DISABLE_OFFLOADS="$benchmark_disable_offloads" \
 		"${compose[@]}" "$@"
 }
 
@@ -32,6 +35,7 @@ compose_timeout() {
 		WGQ_BENCH_CONFIG_DIR="$generated_dir" \
 		WGQ_BENCH_TRANSPORT="$benchmark_transport" \
 		WGQ_BENCH_MTU="$benchmark_mtu" \
+		WGQ_BENCH_DISABLE_OFFLOADS="$benchmark_disable_offloads" \
 		"${compose[@]}" "$@"
 }
 
@@ -272,18 +276,21 @@ resolve_link_profile() {
 render_configs() {
 	local mode=$1
 	local mtu=$2
-	local settings fec obfs
+	local settings fec obfs congestion
 	settings=$(mode_settings "$mode")
 	read -r fec obfs <<<"$settings"
+	congestion=${CONGESTION:-auto}
 	mkdir -p "$generated_dir"
 	sed \
 		-e "s/@FEC@/$fec/g" \
 		-e "s/@OBFS@/$obfs/g" \
+		-e "s/@CONGESTION@/$congestion/g" \
 		-e "s/@MTU@/$mtu/g" \
 		"$script_dir/a.conf.in" >"$generated_dir/a.conf"
 	sed \
 		-e "s/@FEC@/$fec/g" \
 		-e "s/@OBFS@/$obfs/g" \
+		-e "s/@CONGESTION@/$congestion/g" \
 		-e "s/@MTU@/$mtu/g" \
 		"$script_dir/b.conf.in" >"$generated_dir/b.conf"
 	cp "$script_dir/a.uapi.in" "$generated_dir/a.uapi"
@@ -305,7 +312,7 @@ prepare_image() {
 }
 
 wait_for_tunnel() {
-	for _ in $(seq 1 60); do
+	for _ in $(seq 1 "${TUNNEL_WAIT_ATTEMPTS:-60}"); do
 		if compose_run exec -T a ping -c 1 -W 1 10.88.0.2 >/dev/null 2>&1; then
 			return 0
 		fi
@@ -317,11 +324,58 @@ wait_for_tunnel() {
 	return 1
 }
 
-clear_netem() {
-	local service
-	for service in a b; do
-		compose_run exec -T "$service" tc qdisc del dev eth0 root >/dev/null 2>&1 || true
-	done
+apply_protocol_policy_to() {
+	local service=$1
+	local policy=$2
+	local action=(action drop)
+	if [[ $policy == wireguard-throttle ]]; then
+		# tc-police orders this as EXCEED/CONFORM, despite the option name.
+		action=(action police rate "${PROTOCOL_RATE_MBIT:-1}mbit" burst 64k conform-exceed drop/pass)
+	fi
+	compose_run exec -T "$service" tc qdisc replace dev eth0 clsact
+	case "$policy" in
+	wireguard-block | wireguard-throttle)
+		local priority=10
+		local signature
+		for signature in 0x01000000 0x02000000 0x03000000 0x04000000; do
+			compose_run exec -T "$service" tc filter add dev eth0 egress \
+				protocol ip prio "$priority" u32 \
+				match ip protocol 17 0xff \
+				match u32 "$signature" 0xffffffff at 28 \
+				"${action[@]}"
+			priority=$((priority + 1))
+		done
+		;;
+	quic-handshake-block)
+		# Match the QUIC long-header bits and either standardized version.
+		compose_run exec -T "$service" tc filter add dev eth0 egress \
+			protocol ip prio 20 u32 \
+			match ip protocol 17 0xff \
+			match u8 0xc0 0xc0 at 28 \
+			match u8 0x00 0xff at 29 \
+			match u8 0x00 0xff at 30 \
+			match u8 0x00 0xff at 31 \
+			match u8 0x01 0xff at 32 \
+			action drop
+		compose_run exec -T "$service" tc filter add dev eth0 egress \
+			protocol ip prio 21 u32 \
+			match ip protocol 17 0xff \
+			match u8 0xc0 0xc0 at 28 \
+			match u8 0x6b 0xff at 29 \
+			match u8 0x33 0xff at 30 \
+			match u8 0x43 0xff at 31 \
+			match u8 0xcf 0xff at 32 \
+			action drop
+		;;
+	esac
+}
+
+apply_protocol_policy() {
+	if [[ $benchmark_protocol_policy == none ]]; then
+		return
+	fi
+	apply_protocol_policy_to a "$benchmark_protocol_policy"
+	apply_protocol_policy_to b "$benchmark_protocol_policy"
 }
 
 apply_netem_to() {
@@ -362,19 +416,19 @@ apply_netem_to() {
 }
 
 apply_netem() {
-	clear_netem
-	if [[ $link_impairment == none ]]; then
-		return
-	fi
 	case "$link_impairment" in
 	none)
+		compose_run exec -T a tc qdisc del dev eth0 root >/dev/null 2>&1 || true
+		compose_run exec -T b tc qdisc del dev eth0 root >/dev/null 2>&1 || true
 		;;
 	forward)
 		apply_netem_to a \
 			"$link_fwd_rate" "$link_fwd_delay" "$link_fwd_jitter" "$link_fwd_loss" \
 			"$link_fwd_duplicate" "$link_fwd_reorder" "$link_queue_packets"
+		compose_run exec -T b tc qdisc del dev eth0 root >/dev/null 2>&1 || true
 		;;
 	reverse)
+		compose_run exec -T a tc qdisc del dev eth0 root >/dev/null 2>&1 || true
 		apply_netem_to b \
 			"$link_rev_rate" "$link_rev_delay" "$link_rev_jitter" "$link_rev_loss" \
 			"$link_rev_duplicate" "$link_rev_reorder" "$link_queue_packets"
@@ -392,6 +446,7 @@ apply_netem() {
 		return 1
 		;;
 	esac
+	apply_protocol_policy
 }
 
 start_link_schedule() {
@@ -434,6 +489,61 @@ stop_link_schedule() {
 		wait "$schedule_pid" >/dev/null 2>&1 || true
 		schedule_pid=
 	fi
+}
+
+start_controller_telemetry() {
+	local trial_dir=$1
+	local interval=${TELEMETRY_INTERVAL_SECONDS:-0.5}
+	validate_number TELEMETRY_INTERVAL_SECONDS "$interval"
+	telemetry_pid=
+	printf '%s\n' \
+		'elapsed_s,fec_parity_shards,fec_loss_estimate_ppm,quic_bytes_acked,quic_packets_lost,quic_min_rtt_us,quic_path_rtt_us,quic_smoothed_rtt_us,quic_latest_rtt_us,quic_cwnd_bytes,quic_bytes_in_flight,quic_bandwidth_estimate_bps,quic_pacing_rate_bps,quic_queue_delay_us,quic_fec_recoverable_loss_ppm,quic_fec_residual_loss_ppm,quic_model_state' \
+		>"$trial_dir/controller.csv"
+	(
+		local started_ns now_ns elapsed sample_file
+		started_ns=$(date +%s%N)
+		sample_file="$trial_dir/.controller-status.json"
+		while :; do
+			if snapshot_status a "$sample_file" 2>/dev/null; then
+				now_ns=$(date +%s%N)
+				elapsed=$(awk -v now="$now_ns" -v started="$started_ns" \
+					'BEGIN {printf "%.3f", (now - started) / 1000000000}')
+				jq -r --arg elapsed "$elapsed" '
+					[
+						$elapsed,
+						(.stats.fec_current_parity_shards // 0),
+						(.stats.fec_loss_estimate_ppm // 0),
+						(.stats.quic_bytes_acked // 0),
+						(.stats.quic_packets_lost // 0),
+						(.stats.quic_min_rtt_us // 0),
+						(.stats.quic_path_rtt_us // 0),
+						(.stats.quic_smoothed_rtt_us // 0),
+						(.stats.quic_latest_rtt_us // 0),
+						(.stats.quic_congestion_window_bytes // 0),
+						(.stats.quic_bytes_in_flight // 0),
+						(.stats.quic_bandwidth_estimate_bps // 0),
+						(.stats.quic_pacing_rate_bps // 0),
+						(.stats.quic_queue_delay_us // 0),
+						(.stats.quic_fec_recoverable_loss_ppm // 0),
+						(.stats.quic_fec_residual_loss_ppm // 0),
+						(.stats.quic_congestion_model_state // 0)
+					] | @csv
+				' "$sample_file" >>"$trial_dir/controller.csv"
+			fi
+			sleep "$interval"
+		done
+	) >"$trial_dir/controller-sampler.log" 2>&1 &
+	telemetry_pid=$!
+}
+
+stop_controller_telemetry() {
+	local trial_dir=$1
+	if [[ -n ${telemetry_pid:-} ]]; then
+		kill "$telemetry_pid" >/dev/null 2>&1 || true
+		wait "$telemetry_pid" >/dev/null 2>&1 || true
+		telemetry_pid=
+	fi
+	rm -f "$trial_dir/.controller-status.json"
 }
 
 start_iperf_server() {
@@ -551,7 +661,7 @@ init_run_directory() {
 		summary_csv="$run_dir/summary.csv"
 		if [[ ! -f $summary_csv ]]; then
 			printf '%s\n' \
-				'trial_id,mode,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,parallel,offered_mbit,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,queue_drops_a,queue_drops_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json' \
+				'trial_id,mode,congestion,protocol_policy,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,parallel,offered_mbit,disable_offloads,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,fec_current_parity_a,fec_loss_estimate_ppm_a,queue_drops_a,queue_drops_b,quic_bytes_acked_a,quic_acked_bps_a,quic_bytes_lost_a,quic_packets_lost_a,quic_min_rtt_us_a,quic_path_rtt_us_a,quic_smoothed_rtt_us_a,quic_latest_rtt_us_a,quic_cwnd_bytes_a,quic_bytes_in_flight_a,quic_bandwidth_estimate_bps_a,quic_pacing_rate_bps_a,quic_queue_delay_us_a,quic_fec_recoverable_loss_ppm_a,quic_fec_residual_loss_ppm_a,quic_model_state_a,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json' \
 				>"$summary_csv"
 			{
 				date -u
@@ -617,12 +727,44 @@ run_trial() {
 	validate_number REV_DUPLICATE_PCT "$link_rev_duplicate"
 	validate_number FWD_REORDER_PCT "$link_fwd_reorder"
 	validate_number REV_REORDER_PCT "$link_rev_reorder"
+	benchmark_protocol_policy=${PROTOCOL_POLICY:-none}
+	case "$benchmark_protocol_policy" in
+	none | wireguard-block | wireguard-throttle | quic-handshake-block)
+		;;
+	*)
+		echo "PROTOCOL_POLICY must be none, wireguard-block, wireguard-throttle, or quic-handshake-block" >&2
+		return 1
+		;;
+	esac
+	case "${DISABLE_OFFLOADS:-auto}" in
+	auto)
+		benchmark_disable_offloads=0
+		if [[ $link_fwd_loss != 0 || $link_rev_loss != 0 ||
+			$link_fwd_duplicate != 0 || $link_rev_duplicate != 0 ||
+			$link_fwd_reorder != 0 || $link_rev_reorder != 0 ||
+			$benchmark_protocol_policy != none ]]; then
+			benchmark_disable_offloads=1
+		fi
+		;;
+	0 | 1)
+		benchmark_disable_offloads=$DISABLE_OFFLOADS
+		;;
+	*)
+		echo "DISABLE_OFFLOADS must be auto, 0, or 1" >&2
+		return 1
+		;;
+	esac
 
 	init_run_directory
 	render_configs "$mode" "$mtu"
 	compose_run up -d --force-recreate a b
 	apply_netem
-	wait_for_tunnel
+	if ! wait_for_tunnel; then
+		if [[ $benchmark_protocol_policy == none ]]; then
+			return 1
+		fi
+		echo "tunnel unavailable under expected protocol policy: $benchmark_protocol_policy" >&2
+	fi
 	sleep "${WARMUP_SECONDS:-1}"
 
 	local safe_fwd_loss=${link_fwd_loss//./p}
@@ -632,14 +774,17 @@ run_trial() {
 	local safe_fwd_delay=${link_fwd_delay//./p}
 	local safe_rev_delay=${link_rev_delay//./p}
 	local safe_schedule=${LINK_SCHEDULE:-static}
+	local congestion=${CONGESTION:-auto}
 	safe_schedule=${safe_schedule//:/-}
 	safe_schedule=${safe_schedule//,/_}
-	local trial_id="${mode}-${link_profile}-${safe_schedule}-${workload}-r${repeat}-rate${safe_fwd_rate}-${safe_rev_rate}-delay${safe_fwd_delay}-${safe_rev_delay}-loss${safe_fwd_loss}-${safe_rev_loss}-p${parallel}"
+	local trial_id="${mode}-${congestion}-${benchmark_protocol_policy}-${link_profile}-${safe_schedule}-${workload}-r${repeat}-rate${safe_fwd_rate}-${safe_rev_rate}-delay${safe_fwd_delay}-${safe_rev_delay}-loss${safe_fwd_loss}-${safe_rev_loss}-p${parallel}"
 	local trial_dir="$run_dir/$trial_id"
 	mkdir -p "$trial_dir"
 	jq -n \
 		--arg trial_id "$trial_id" \
 		--arg mode "$mode" \
+		--arg congestion "$congestion" \
+		--arg protocol_policy "$benchmark_protocol_policy" \
 		--arg link_profile "$link_profile" \
 		--arg link_schedule "${LINK_SCHEDULE:-}" \
 		--arg workload "$workload" \
@@ -662,9 +807,12 @@ run_trial() {
 		--argjson duration_s "$duration" \
 		--argjson parallel "$parallel" \
 		--argjson offered_mbit "$offered_mbit" \
+		--argjson disable_offloads "$benchmark_disable_offloads" \
 		'{
 			trial_id: $trial_id,
 			mode: $mode,
+			congestion: $congestion,
+			protocol_policy: $protocol_policy,
 			link_profile: $link_profile,
 			link_schedule: $link_schedule,
 			workload: $workload,
@@ -688,7 +836,8 @@ run_trial() {
 			mtu: $mtu,
 			duration_s: $duration_s,
 			parallel: $parallel,
-			offered_mbit: $offered_mbit
+			offered_mbit: $offered_mbit,
+			disable_offloads: $disable_offloads
 		}' >"$trial_dir/parameters.json"
 
 	local outer_baseline=0
@@ -737,12 +886,14 @@ run_trial() {
 		iperf_args+=(-u -b "${offered_mbit}M" -l 1200)
 	fi
 	start_link_schedule "$trial_dir"
+	start_controller_telemetry "$trial_dir"
 	local iperf_exit
 	set +e
 	compose_timeout "$((duration + ${CONTROL_GRACE_SECONDS:-20}))" \
 		exec -T a iperf3 "${iperf_args[@]}" >"$trial_dir/iperf-client.json"
 	iperf_exit=$?
 	set -e
+	stop_controller_telemetry "$trial_dir"
 	stop_link_schedule
 	local workload_status=ok
 	local workload_error=
@@ -785,6 +936,8 @@ run_trial() {
 	snapshot_status b "$trial_dir/status-b-after.json"
 	compose_run exec -T a tc -s qdisc show dev eth0 >"$trial_dir/tc-a.txt"
 	compose_run exec -T b tc -s qdisc show dev eth0 >"$trial_dir/tc-b.txt"
+	compose_run exec -T a tc -s filter show dev eth0 egress >"$trial_dir/tc-filter-a.txt" || true
+	compose_run exec -T b tc -s filter show dev eth0 egress >"$trial_dir/tc-filter-b.txt" || true
 
 	local goodput retransmits udp_lost
 	goodput=$(jq -r '
@@ -803,7 +956,8 @@ run_trial() {
 		outer_baseline=$goodput
 	fi
 
-	local wire_tx wg_tx fec_data fec_parity raw_lost recovered unrecovered drops_a drops_b
+	local wire_tx wg_tx fec_data fec_parity raw_lost recovered unrecovered
+	local fec_current_parity fec_loss_estimate drops_a drops_b
 	wire_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wire_tx_bytes)
 	wg_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wg_tx_bytes)
 	fec_data=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" fec_data_tx)
@@ -811,8 +965,31 @@ run_trial() {
 	raw_lost=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" fec_raw_lost)
 	recovered=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" fec_recovered)
 	unrecovered=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" fec_unrecovered)
+	fec_current_parity=$(jq -r '.stats.fec_current_parity_shards // 0' "$trial_dir/status-a-after.json")
+	fec_loss_estimate=$(jq -r '.stats.fec_loss_estimate_ppm // 0' "$trial_dir/status-a-after.json")
 	drops_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" queue_drops)
 	drops_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" queue_drops)
+	local quic_acked quic_acked_bps quic_lost quic_packets_lost
+	local quic_min_rtt quic_path_rtt quic_smoothed_rtt quic_latest_rtt quic_cwnd quic_inflight
+	local quic_bandwidth quic_pacing quic_queue_delay
+	local quic_fec_recoverable quic_fec_residual quic_model_state
+	quic_acked=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_bytes_acked)
+	quic_acked_bps=$(jq -n --argjson bytes "$quic_acked" --argjson duration "$duration" \
+		'$bytes * 8 / $duration')
+	quic_lost=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_bytes_lost)
+	quic_packets_lost=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_packets_lost)
+	quic_min_rtt=$(jq -r '.stats.quic_min_rtt_us // 0' "$trial_dir/status-a-after.json")
+	quic_path_rtt=$(jq -r '.stats.quic_path_rtt_us // 0' "$trial_dir/status-a-after.json")
+	quic_smoothed_rtt=$(jq -r '.stats.quic_smoothed_rtt_us // 0' "$trial_dir/status-a-after.json")
+	quic_latest_rtt=$(jq -r '.stats.quic_latest_rtt_us // 0' "$trial_dir/status-a-after.json")
+	quic_cwnd=$(jq -r '.stats.quic_congestion_window_bytes // 0' "$trial_dir/status-a-after.json")
+	quic_inflight=$(jq -r '.stats.quic_bytes_in_flight // 0' "$trial_dir/status-a-after.json")
+	quic_bandwidth=$(jq -r '.stats.quic_bandwidth_estimate_bps // 0' "$trial_dir/status-a-after.json")
+	quic_pacing=$(jq -r '.stats.quic_pacing_rate_bps // 0' "$trial_dir/status-a-after.json")
+	quic_queue_delay=$(jq -r '.stats.quic_queue_delay_us // 0' "$trial_dir/status-a-after.json")
+	quic_fec_recoverable=$(jq -r '.stats.quic_fec_recoverable_loss_ppm // 0' "$trial_dir/status-a-after.json")
+	quic_fec_residual=$(jq -r '.stats.quic_fec_residual_loss_ppm // 0' "$trial_dir/status-a-after.json")
+	quic_model_state=$(jq -r '.stats.quic_congestion_model_state // 0' "$trial_dir/status-a-after.json")
 
 	local clock_ticks cpu_a_s cpu_b_s rss_a rss_b
 	clock_ticks=$(getconf CLK_TCK)
@@ -836,7 +1013,7 @@ run_trial() {
 	csv_schedule=${csv_schedule//,/;}
 
 	printf '%s\n' \
-		"$trial_id,$mode,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$parallel,$offered_mbit,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$drops_a,$drops_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
+		"$trial_id,$mode,$congestion,$benchmark_protocol_policy,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$parallel,$offered_mbit,$benchmark_disable_offloads,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$fec_current_parity,$fec_loss_estimate,$drops_a,$drops_b,$quic_acked,$quic_acked_bps,$quic_lost,$quic_packets_lost,$quic_min_rtt,$quic_path_rtt,$quic_smoothed_rtt,$quic_latest_rtt,$quic_cwnd,$quic_inflight,$quic_bandwidth,$quic_pacing,$quic_queue_delay,$quic_fec_recoverable,$quic_fec_residual,$quic_model_state,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
 		>>"$summary_csv"
 	echo "$trial_id: $workload_status, $(awk -v bps="$goodput" -v outer="$outer_baseline" \
 		'BEGIN {printf "%.2f Mbit/s (outer %.2f Mbit/s)", bps / 1000000, outer / 1000000}')"
@@ -854,7 +1031,7 @@ run_from_environment() {
 		"${JITTER_MS:-0}" \
 		"${LOSS_PCT:-0}" \
 		"${QUEUE_PACKETS:-1000}" \
-		"${MTU:-1380}" \
+		"${MTU:-1280}" \
 		"${DURATION:-10}" \
 		"${PARALLEL:-1}" \
 		"${OFFERED_MBIT:-50}"
@@ -869,9 +1046,9 @@ run_matrix() {
 	transports)
 		CURRENT_LINK_PROFILE=unshaped
 		for repeat in $(seq 1 "${REPEATS:-1}"); do
-			run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-10}" 1 0
+			run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1280 "${DURATION:-10}" 1 0
 			for mode in "${selected_modes[@]}"; do
-				run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-10}" 1 0
+				run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1280 "${DURATION:-10}" 1 0
 			done
 		done
 		;;
@@ -879,21 +1056,21 @@ run_matrix() {
 		CURRENT_LINK_PROFILE=custom
 		for mode in nofec-obfs fec-obfs; do
 			for loss in 0 2 10; do
-				run_trial "$mode" udp 1 symmetric 100 20 0 "$loss" 1000 1380 3 1 1
+				run_trial "$mode" udp 1 symmetric 100 20 0 "$loss" 1000 1280 3 1 1
 			done
 		done
-		run_trial nofec-plain outer-tcp 1 none 0 0 0 0 1000 1380 3 1 0
+		run_trial nofec-plain outer-tcp 1 none 0 0 0 0 1000 1280 3 1 0
 		for mode in "${selected_modes[@]}"; do
-			run_trial "$mode" tcp 1 none 0 0 0 0 1000 1380 3 1 0
+			run_trial "$mode" tcp 1 none 0 0 0 0 1000 1280 3 1 0
 		done
 		;;
 	ceiling)
 		CURRENT_LINK_PROFILE=unshaped
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for parallel in 1 4; do
-				run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-15}" "$parallel" 0
+				run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1280 "${DURATION:-15}" "$parallel" 0
 				for mode in "${selected_modes[@]}"; do
-					run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-15}" "$parallel" 0
+					run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1280 "${DURATION:-15}" "$parallel" 0
 				done
 			done
 		done
@@ -905,7 +1082,7 @@ run_matrix() {
 				for mode in "${selected_modes[@]}"; do
 					for loss in 0 0.5 1 2 5 10 15; do
 						run_trial "$mode" "$workload" "$repeat" symmetric \
-							"${RATE_MBIT:-100}" "${ONE_WAY_DELAY_MS:-20}" 0 "$loss" 1000 1380 \
+							"${RATE_MBIT:-100}" "${ONE_WAY_DELAY_MS:-20}" 0 "$loss" 1000 1280 \
 							"${DURATION:-15}" 1 "${OFFERED_MBIT:-0.5}"
 					done
 				done
@@ -916,9 +1093,9 @@ run_matrix() {
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for CURRENT_LINK_PROFILE in lan fiber cable dsl wifi cellular satellite lossy-wifi; do
 				for mode in "${selected_modes[@]}"; do
-					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1380 \
+					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1280 \
 						"${DURATION:-15}" 1 "${OFFERED_MBIT:-1}"
-					run_trial "$mode" tcp "$repeat" symmetric 0 0 0 0 1000 1380 \
+					run_trial "$mode" tcp "$repeat" symmetric 0 0 0 0 1000 1280 \
 						"${DURATION:-15}" 1 0
 				done
 			done
@@ -928,17 +1105,32 @@ run_matrix() {
 		CURRENT_LINK_PROFILE=${LINK_PROFILE:-unshaped}
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for offered_mbit in ${OFFERED_RATES:-10 25 50 100 200 500}; do
-				run_trial nofec-plain outer-udp "$repeat" symmetric 0 0 0 0 1000 1380 \
+				run_trial nofec-plain outer-udp "$repeat" symmetric 0 0 0 0 1000 1280 \
 					"${DURATION:-10}" 1 "$offered_mbit"
 				for mode in "${selected_modes[@]}"; do
-					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1380 \
+					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1280 \
 						"${DURATION:-10}" 1 "$offered_mbit"
 				done
 			done
 		done
 		;;
+	protocol)
+		CURRENT_LINK_PROFILE=lan
+		local policy
+		for repeat in $(seq 1 "${REPEATS:-1}"); do
+			for policy in wireguard-block wireguard-throttle quic-handshake-block; do
+				for mode in direct-wireguard-go nofec-plain nofec-obfs; do
+					PROTOCOL_POLICY="$policy" \
+					TUNNEL_WAIT_ATTEMPTS="${TUNNEL_WAIT_ATTEMPTS:-5}" \
+					CONTROL_GRACE_SECONDS="${CONTROL_GRACE_SECONDS:-5}" \
+						run_trial "$mode" tcp "$repeat" symmetric 0 0 0 0 1000 1280 \
+						"${DURATION:-5}" 1 0
+				done
+			done
+		done
+		;;
 	*)
-		echo "matrix must be transports, quick, ceiling, loss, profiles, or bandwidth" >&2
+		echo "matrix must be transports, quick, ceiling, loss, profiles, bandwidth, or protocol" >&2
 		return 1
 		;;
 	esac
@@ -950,7 +1142,7 @@ Usage:
   tests/benchmark/run.sh prepare
   tests/benchmark/run.sh trial
   tests/benchmark/run.sh smoke
-  tests/benchmark/run.sh matrix transports|quick|ceiling|loss|profiles|bandwidth
+  tests/benchmark/run.sh matrix transports|quick|ceiling|loss|profiles|bandwidth|protocol
   tests/benchmark/run.sh down
 
 The trial command is configured with environment variables. Common values:
@@ -961,9 +1153,11 @@ The trial command is configured with environment variables. Common values:
   RATE_MBIT=0 LOSS_PCT=0 ONE_WAY_DELAY_MS=0 JITTER_MS=0
   FWD_RATE_MBIT=0 REV_RATE_MBIT=0 FWD_LOSS_PCT=0 REV_LOSS_PCT=0
   LINK_SCHEDULE=5:cellular,10:fiber
+  TELEMETRY_INTERVAL_SECONDS=0.5
+  PROTOCOL_POLICY=none|wireguard-block|wireguard-throttle|quic-handshake-block
   MODES='direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs'
   OFFERED_RATES='10 25 50 100 200 500'
-  DURATION=10 PARALLEL=1 OFFERED_MBIT=50 MTU=1380
+  DURATION=10 PARALLEL=1 OFFERED_MBIT=50 MTU=1280
 EOF
 }
 
@@ -971,7 +1165,7 @@ main() {
 	local command=${1:-}
 	case "$command" in
 	prepare)
-		render_configs fec-obfs 1380
+		render_configs fec-obfs 1280
 		prepare_image
 		;;
 	trial)
@@ -995,7 +1189,7 @@ main() {
 		run_matrix "$2"
 		;;
 	down)
-		render_configs fec-obfs 1380
+		render_configs fec-obfs 1280
 		compose_run down --volumes --remove-orphans
 		;;
 	*)

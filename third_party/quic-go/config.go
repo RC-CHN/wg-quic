@@ -104,6 +104,10 @@ func populateConfig(config *Config) *Config {
 	if initialPacketSize == 0 {
 		initialPacketSize = protocol.InitialPacketSize
 	}
+	congestionControl := config.CongestionControl
+	if congestionControl == "" {
+		congestionControl = "reno"
+	}
 
 	return &Config{
 		GetConfigForClient:               config.GetConfigForClient,
@@ -120,6 +124,7 @@ func populateConfig(config *Config) *Config {
 		MaxIncomingUniStreams:            maxIncomingUniStreams,
 		TokenStore:                       config.TokenStore,
 		EnableDatagrams:                  config.EnableDatagrams,
+		CongestionControl:                congestionControl,
 		InitialPacketSize:                initialPacketSize,
 		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
 		EnableStreamResetPartialDelivery: config.EnableStreamResetPartialDelivery,

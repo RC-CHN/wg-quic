@@ -1,6 +1,8 @@
 package congestion
 
 import (
+	"time"
+
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
 )
@@ -24,4 +26,22 @@ type SendAlgorithmWithDebugInfos interface {
 	InSlowStart() bool
 	InRecovery() bool
 	GetCongestionWindow() protocol.ByteCount
+}
+
+type SenderStats struct {
+	CongestionWindow      protocol.ByteCount
+	BandwidthEstimate     Bandwidth
+	PacingRate            Bandwidth
+	PropagationRTT        time.Duration
+	QueueDelay            time.Duration
+	FECRecoverableLossPPM uint64
+	FECResidualLossPPM    uint64
+	ModelState            uint64
+}
+
+// SendAlgorithmWithStats exposes lock-free snapshot values to the public
+// connection statistics without coupling observers to a concrete controller.
+type SendAlgorithmWithStats interface {
+	SendAlgorithm
+	Stats() SenderStats
 }

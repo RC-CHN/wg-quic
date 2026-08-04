@@ -9,6 +9,8 @@ from collections import defaultdict
 
 DEFAULT_GROUPS = (
     "mode",
+    "congestion",
+    "protocol_policy",
     "link_profile",
     "link_schedule",
     "workload",
@@ -60,6 +62,12 @@ def main():
         rows = list(csv.DictReader(source))
     if not rows:
         return
+    if "congestion" not in rows[0]:
+        for row in rows:
+            row["congestion"] = "legacy"
+    if "protocol_policy" not in rows[0]:
+        for row in rows:
+            row["protocol_policy"] = "none"
     missing = [field for field in groups if field not in rows[0]]
     if missing:
         parser.error("unknown grouping columns: " + ", ".join(missing))
@@ -79,6 +87,18 @@ def main():
         "sender_outer_median_mbit",
         "udp_loss_median_pct",
         "queue_drops_median",
+        "fec_current_parity_median",
+        "fec_loss_estimate_median_pct",
+        "quic_acked_median_mbit",
+        "quic_loss_median_pct",
+        "quic_path_rtt_median_ms",
+        "quic_smoothed_rtt_median_ms",
+        "quic_cwnd_median_bytes",
+        "quic_bandwidth_median_mbit",
+        "quic_pacing_median_mbit",
+        "quic_queue_delay_median_ms",
+        "quic_fec_recoverable_loss_median_pct",
+        "quic_fec_residual_loss_median_pct",
         "cpu_median_s",
         "goodput_to_wire_median",
         "goodput_to_outer_median",
@@ -112,6 +132,65 @@ def main():
                 ),
                 "queue_drops_median": statistics.median(
                     number(row, "queue_drops_a") for row in measured
+                ),
+                "fec_current_parity_median": statistics.median(
+                    number(row, "fec_current_parity_a") for row in measured
+                ),
+                "fec_loss_estimate_median_pct": statistics.median(
+                    number(row, "fec_loss_estimate_ppm_a") / 10_000
+                    for row in measured
+                ),
+                "quic_acked_median_mbit": statistics.median(
+                    number(row, "quic_acked_bps_a") / 1_000_000
+                    for row in measured
+                ),
+                "quic_loss_median_pct": statistics.median(
+                    (
+                        100
+                        * number(row, "quic_bytes_lost_a")
+                        / (
+                            number(row, "quic_bytes_acked_a")
+                            + number(row, "quic_bytes_lost_a")
+                        )
+                    )
+                    if (
+                        number(row, "quic_bytes_acked_a")
+                        + number(row, "quic_bytes_lost_a")
+                    )
+                    > 0
+                    else 0
+                    for row in measured
+                ),
+                "quic_smoothed_rtt_median_ms": statistics.median(
+                    number(row, "quic_smoothed_rtt_us_a") / 1000
+                    for row in measured
+                ),
+                "quic_path_rtt_median_ms": statistics.median(
+                    number(row, "quic_path_rtt_us_a") / 1000
+                    for row in measured
+                ),
+                "quic_cwnd_median_bytes": statistics.median(
+                    number(row, "quic_cwnd_bytes_a") for row in measured
+                ),
+                "quic_bandwidth_median_mbit": statistics.median(
+                    number(row, "quic_bandwidth_estimate_bps_a") / 1_000_000
+                    for row in measured
+                ),
+                "quic_pacing_median_mbit": statistics.median(
+                    number(row, "quic_pacing_rate_bps_a") / 1_000_000
+                    for row in measured
+                ),
+                "quic_queue_delay_median_ms": statistics.median(
+                    number(row, "quic_queue_delay_us_a") / 1000
+                    for row in measured
+                ),
+                "quic_fec_recoverable_loss_median_pct": statistics.median(
+                    number(row, "quic_fec_recoverable_loss_ppm_a") / 10_000
+                    for row in measured
+                ),
+                "quic_fec_residual_loss_median_pct": statistics.median(
+                    number(row, "quic_fec_residual_loss_ppm_a") / 10_000
+                    for row in measured
                 ),
                 "cpu_median_s": statistics.median(
                     number(row, "core_cpu_a_s") + number(row, "core_cpu_b_s")
