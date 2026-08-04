@@ -9,18 +9,26 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 )
 
-func transportBindConfig(cfg *config.Config) (armorbind.Config, error) {
-	result := armorbind.DefaultConfig()
-	result.FECMode = cfg.Transport.FEC
-	result.ObfsMode = cfg.Transport.Obfs
-	if result.ObfsMode == "none" {
+type transportConfiguration struct {
+	Bind     armorbind.Config
+	PeerKeys map[string]obfs.Key
+}
+
+func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, error) {
+	result := transportConfiguration{
+		Bind:     armorbind.DefaultConfig(),
+		PeerKeys: make(map[string]obfs.Key, len(cfg.Peers)),
+	}
+	result.Bind.FECMode = cfg.Transport.FEC
+	result.Bind.ObfsMode = cfg.Transport.Obfs
+	if result.Bind.ObfsMode == "none" {
 		return result, nil
 	}
 	localPrivate, err := decodeWireGuardKey(cfg.Interface.PrivateKey)
 	if err != nil {
 		return result, fmt.Errorf("decode local WireGuard private key: %w", err)
 	}
-	result.ObfsEndpointKeys = make(map[string]obfs.Key)
+	result.Bind.ObfsEndpointKeys = make(map[string]obfs.Key)
 	for i, peer := range cfg.Peers {
 		remotePublic, err := decodeWireGuardKey(peer.PublicKey)
 		if err != nil {
@@ -37,12 +45,13 @@ func transportBindConfig(cfg *config.Config) (armorbind.Config, error) {
 		if err != nil {
 			return result, fmt.Errorf("derive Peer %d obfuscation key: %w", i+1, err)
 		}
-		result.ObfsKeys = append(result.ObfsKeys, key)
+		result.Bind.ObfsKeys = append(result.Bind.ObfsKeys, key)
+		result.PeerKeys[peer.PublicKey] = key
 		if peer.Endpoint != "" {
-			if existing, ok := result.ObfsEndpointKeys[peer.Endpoint]; ok && existing != key {
+			if existing, ok := result.Bind.ObfsEndpointKeys[peer.Endpoint]; ok && existing != key {
 				return result, fmt.Errorf("Peer %d reuses endpoint %q with a different obfuscation key", i+1, peer.Endpoint)
 			}
-			result.ObfsEndpointKeys[peer.Endpoint] = key
+			result.Bind.ObfsEndpointKeys[peer.Endpoint] = key
 		}
 	}
 	return result, nil

@@ -36,19 +36,22 @@ func TestTransportConfigDerivesMatchingKeysFromWireGuardConfig(t *testing.T) {
 		}},
 		Transport: config.DefaultTransport(),
 	}
-	configA, err := transportBindConfig(a)
+	configA, err := buildTransportConfiguration(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	configB, err := transportBindConfig(b)
+	configB, err := buildTransportConfiguration(b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(configA.ObfsKeys) != 1 || len(configB.ObfsKeys) != 1 || configA.ObfsKeys[0] != configB.ObfsKeys[0] {
+	if len(configA.Bind.ObfsKeys) != 1 || len(configB.Bind.ObfsKeys) != 1 || configA.Bind.ObfsKeys[0] != configB.Bind.ObfsKeys[0] {
 		t.Fatal("two WireGuard configurations did not derive the same transport key")
 	}
-	if configA.ObfsEndpointKeys["192.0.2.2:443"] != configA.ObfsKeys[0] {
+	if configA.Bind.ObfsEndpointKeys["192.0.2.2:443"] != configA.Bind.ObfsKeys[0] {
 		t.Fatal("configured WireGuard endpoint was not associated with its derived key")
+	}
+	if configA.PeerKeys[a.Peers[0].PublicKey] != configA.Bind.ObfsKeys[0] {
+		t.Fatal("peer public key was not associated with its derived transport key")
 	}
 }
 

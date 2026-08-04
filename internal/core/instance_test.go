@@ -1,8 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun/tuntest"
+	"golang.org/x/crypto/curve25519"
 )
 
 type testDeviceHost struct {
@@ -75,5 +78,71 @@ func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	}
 	if err := instance.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
+	privateKey := bytes.Repeat([]byte{0x31}, 32)
+	remotePrivate := bytes.Repeat([]byte{0x42}, 32)
+	remotePublic, err := curve25519.X25519(remotePrivate, curve25519.Basepoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey := base64.StdEncoding.EncodeToString(remotePublic)
+	host := &testDeviceHost{
+		tunnel:      tuntest.NewChannelTUN(),
+		controlPath: testControlPath(t, "wg0"),
+	}
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(privateKey),
+		},
+		Peers: []config.Peer{{
+			PublicKey: publicKey,
+			Endpoint:  "192.0.2.1:443",
+		}},
+		Transport: config.DefaultTransport(),
+	}
+	instance, err := New(cfg, "wg0", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Up(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	update := control.SetPeerEndpointRequest{
+		PublicKey: publicKey, Endpoint: "[2001:db8::20]:8443", Generation: 2,
+	}
+	if err := control.SetPeerEndpoint(host.controlPath, update); err != nil {
+		t.Fatal(err)
+	}
+	status, err := control.Read(host.controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Peers) != 1 || status.Peers[0].Endpoint != update.Endpoint || status.Peers[0].Generation != 2 {
+		t.Fatalf("peer status = %#v, want endpoint update %#v", status.Peers, update)
+	}
+	uapi, err := instance.device.IpcGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(uapi, "endpoint="+update.Endpoint+"\n") {
+		t.Fatalf("WireGuard UAPI did not contain updated endpoint:\n%s", uapi)
+	}
+	if err := control.SetPeerEndpoint(host.controlPath, update); err != nil {
+		t.Fatalf("idempotent update failed: %v", err)
+	}
+	stale := update
+	stale.Generation = 1
+	if err := control.SetPeerEndpoint(host.controlPath, stale); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale update error = %v, want stale generation rejection", err)
+	}
+	conflict := update
+	conflict.Endpoint = "192.0.2.99:443"
+	if err := control.SetPeerEndpoint(host.controlPath, conflict); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("conflicting update error = %v, want generation conflict", err)
 	}
 }

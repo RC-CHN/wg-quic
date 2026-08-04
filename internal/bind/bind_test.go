@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +14,38 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
 )
+
+func TestRuntimeEndpointKeyLeasesAreReferenceCounted(t *testing.T) {
+	bind := New(DefaultConfig())
+	endpoint := netip.MustParseAddrPort("192.0.2.20:443")
+	key := obfs.Key{0x42}
+	first, err := bind.AcquireEndpointKey(endpoint, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := bind.AcquireEndpointKey(endpoint, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bind.obfsDynamic[endpoint].refs; got != 2 {
+		t.Fatalf("dynamic endpoint refs = %d, want 2", got)
+	}
+	if _, err := bind.AcquireEndpointKey(endpoint, obfs.Key{0x43}); err == nil {
+		t.Fatal("different key reused a leased endpoint")
+	}
+	first()
+	first()
+	if got := bind.obfsDynamic[endpoint].refs; got != 1 {
+		t.Fatalf("dynamic endpoint refs after idempotent release = %d, want 1", got)
+	}
+	second()
+	if _, ok := bind.obfsDynamic[endpoint]; ok {
+		t.Fatal("last release retained dynamic endpoint lease")
+	}
+	if _, ok := bind.obfsResolved[endpoint]; ok {
+		t.Fatal("last release retained outbound endpoint key")
+	}
+}
 
 func TestBindRoundTripAndClose(t *testing.T) {
 	var debug bytes.Buffer

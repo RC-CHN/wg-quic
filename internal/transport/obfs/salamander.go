@@ -266,6 +266,21 @@ func (c *SalamanderConn) AssociateEndpoint(addr netip.AddrPort, key Key) {
 	c.cacheMu.Unlock()
 }
 
+// DisassociateEndpoint removes a dynamic outbound association only when it
+// still names the expected key. The comparison prevents one peer releasing an
+// old lease from deleting a newer association installed for the same address.
+func (c *SalamanderConn) DisassociateEndpoint(addr netip.AddrPort, expected Key) {
+	if !addr.IsValid() {
+		return
+	}
+	addr = canonicalAddrPort(addr)
+	c.cacheMu.Lock()
+	if key, ok := c.outbound[addr]; ok && key == expected {
+		delete(c.outbound, addr)
+	}
+	c.cacheMu.Unlock()
+}
+
 func (c *SalamanderConn) remember(addr *net.UDPAddr, key Key) {
 	addrPort, ok := udpAddrPort(addr)
 	if !ok {

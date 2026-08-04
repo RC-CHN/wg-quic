@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
 )
+
+const requestTimeout = 5 * time.Second
 
 type Status struct {
 	Interface  string          `json:"interface"`
@@ -18,7 +21,53 @@ type Status struct {
 	Carrier    string          `json:"carrier"`
 	FECMode    string          `json:"fec_mode"`
 	ObfsMode   string          `json:"obfs_mode"`
+	Peers      []PeerStatus    `json:"peers,omitempty"`
 	Stats      armorbind.Stats `json:"stats"`
+}
+
+type PeerStatus struct {
+	PublicKey  string `json:"public_key"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	Generation uint64 `json:"generation"`
+}
+
+type SetPeerEndpointRequest struct {
+	PublicKey  string `json:"public_key"`
+	Endpoint   string `json:"endpoint"`
+	Generation uint64 `json:"generation"`
+}
+
+type Handler struct {
+	Status          func() Status
+	SetPeerEndpoint func(SetPeerEndpointRequest) error
+	RedialPeer      func(string) error
+}
+
+// Client is the transport-independent core control surface used by quick.
+// LocalClient currently carries it over a Unix socket or Windows named pipe.
+type Client interface {
+	Status() (Status, error)
+	SetPeerEndpoint(SetPeerEndpointRequest) error
+	RedialPeer(publicKey string) error
+}
+
+type LocalClient struct {
+	path string
+}
+
+func NewClient(path string) Client {
+	return &LocalClient{path: path}
+}
+
+type request struct {
+	Operation       string                  `json:"operation"`
+	SetPeerEndpoint *SetPeerEndpointRequest `json:"set_peer_endpoint,omitempty"`
+	PublicKey       string                  `json:"public_key,omitempty"`
+}
+
+type response struct {
+	Status *Status `json:"status,omitempty"`
+	Error  string  `json:"error,omitempty"`
 }
 
 type Server struct {
@@ -30,7 +79,11 @@ type Server struct {
 }
 
 func Start(ctx context.Context, path string, status func() Status) (*Server, error) {
-	if status == nil {
+	return StartHandler(ctx, path, Handler{Status: status})
+}
+
+func StartHandler(ctx context.Context, path string, handler Handler) (*Server, error) {
+	if handler.Status == nil {
 		return nil, errors.New("status provider is required")
 	}
 	listener, cleanup, err := listen(path)
@@ -43,7 +96,7 @@ func Start(ctx context.Context, path string, status func() Status) (*Server, err
 		cleanup:  cleanup,
 	}
 	server.wg.Add(1)
-	go server.accept(status)
+	go server.accept(handler)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -54,7 +107,7 @@ func Start(ctx context.Context, path string, status func() Status) (*Server, err
 	return server, nil
 }
 
-func (s *Server) accept(status func() Status) {
+func (s *Server) accept(handler Handler) {
 	defer s.wg.Done()
 	for {
 		connection, err := s.listener.Accept()
@@ -65,8 +118,47 @@ func (s *Server) accept(status func() Status) {
 		go func() {
 			defer s.wg.Done()
 			defer connection.Close()
-			_ = json.NewEncoder(connection).Encode(status())
+			_ = connection.SetDeadline(time.Now().Add(requestTimeout))
+			var req request
+			if err := json.NewDecoder(connection).Decode(&req); err != nil {
+				_ = json.NewEncoder(connection).Encode(response{Error: fmt.Sprintf("decode control request: %v", err)})
+				return
+			}
+			resp := dispatch(handler, req)
+			_ = json.NewEncoder(connection).Encode(resp)
 		}()
+	}
+}
+
+func dispatch(handler Handler, req request) response {
+	switch req.Operation {
+	case "status":
+		status := handler.Status()
+		return response{Status: &status}
+	case "set_peer_endpoint":
+		if req.SetPeerEndpoint == nil {
+			return response{Error: "set_peer_endpoint payload is required"}
+		}
+		if handler.SetPeerEndpoint == nil {
+			return response{Error: "set_peer_endpoint is not supported"}
+		}
+		if err := handler.SetPeerEndpoint(*req.SetPeerEndpoint); err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{}
+	case "redial_peer":
+		if req.PublicKey == "" {
+			return response{Error: "public_key is required"}
+		}
+		if handler.RedialPeer == nil {
+			return response{Error: "redial_peer is not supported"}
+		}
+		if err := handler.RedialPeer(req.PublicKey); err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{}
+	default:
+		return response{Error: fmt.Sprintf("unsupported control operation %q", req.Operation)}
 	}
 }
 
@@ -84,14 +176,53 @@ func (s *Server) Close() error {
 }
 
 func Read(path string) (Status, error) {
-	connection, err := dial(path, 2*time.Second)
-	if err != nil {
+	return NewClient(path).Status()
+}
+
+func (c *LocalClient) Status() (Status, error) {
+	var resp response
+	if err := c.call(request{Operation: "status"}, &resp); err != nil {
 		return Status{}, err
+	}
+	if resp.Status == nil {
+		return Status{}, errors.New("control response did not include status")
+	}
+	return *resp.Status, nil
+}
+
+func SetPeerEndpoint(path string, update SetPeerEndpointRequest) error {
+	return NewClient(path).SetPeerEndpoint(update)
+}
+
+func (c *LocalClient) SetPeerEndpoint(update SetPeerEndpointRequest) error {
+	var resp response
+	return c.call(request{Operation: "set_peer_endpoint", SetPeerEndpoint: &update}, &resp)
+}
+
+func RedialPeer(path, publicKey string) error {
+	return NewClient(path).RedialPeer(publicKey)
+}
+
+func (c *LocalClient) RedialPeer(publicKey string) error {
+	var resp response
+	return c.call(request{Operation: "redial_peer", PublicKey: publicKey}, &resp)
+}
+
+func (c *LocalClient) call(req request, resp *response) error {
+	connection, err := dial(c.path, 2*time.Second)
+	if err != nil {
+		return err
 	}
 	defer connection.Close()
-	var status Status
-	if err := json.NewDecoder(connection).Decode(&status); err != nil {
-		return Status{}, err
+	_ = connection.SetDeadline(time.Now().Add(requestTimeout))
+	if err := json.NewEncoder(connection).Encode(req); err != nil {
+		return err
 	}
-	return status, nil
+	if err := json.NewDecoder(connection).Decode(resp); err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+	return nil
 }

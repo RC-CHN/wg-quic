@@ -177,6 +177,12 @@ func (c *Carrier) AssociateEndpoint(endpoint netip.AddrPort, key obfs.Key) {
 	}
 }
 
+func (c *Carrier) DisassociateEndpoint(endpoint netip.AddrPort, expected obfs.Key) {
+	if c.obfsConn != nil {
+		c.obfsConn.DisassociateEndpoint(endpoint, expected)
+	}
+}
+
 // AbortNetwork closes only the underlying UDP socket. It models abrupt path
 // loss without sending a graceful QUIC close and is used by restart tests.
 func (c *Carrier) AbortNetwork() error {

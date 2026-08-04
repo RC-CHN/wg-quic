@@ -70,6 +70,13 @@ type Bind struct {
 	mark         atomic.Uint32
 	stats        bindStats
 	obfsResolved map[netip.AddrPort]obfs.Key
+	obfsStatic   map[netip.AddrPort]obfs.Key
+	obfsDynamic  map[netip.AddrPort]endpointKeyLease
+}
+
+type endpointKeyLease struct {
+	key  obfs.Key
+	refs int
 }
 
 var _ conn.Bind = (*Bind)(nil)
@@ -142,7 +149,11 @@ func New(cfg Config) *Bind {
 		endpointKeys[endpoint] = key
 	}
 	cfg.ObfsEndpointKeys = endpointKeys
-	return &Bind{cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key)}
+	return &Bind{
+		cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key),
+		obfsStatic:  make(map[netip.AddrPort]obfs.Key),
+		obfsDynamic: make(map[netip.AddrPort]endpointKeyLease),
+	}
 }
 
 func (b *Bind) debugf(format string, args ...any) {
@@ -179,10 +190,10 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	b.state = state
 	state.wg.Add(1)
 	go b.acceptLoop(state)
-		b.debugf(
-			"ArmorBind opened: udp_port=%d fec=%s fec_data_shards=%d obfs=%s queue_size=%d",
-			carrier.Port(), b.cfg.FECMode, b.cfg.FECDataShards, b.cfg.ObfsMode, b.cfg.QueueSize,
-		)
+	b.debugf(
+		"ArmorBind opened: udp_port=%d fec=%s fec_data_shards=%d obfs=%s queue_size=%d",
+		carrier.Port(), b.cfg.FECMode, b.cfg.FECDataShards, b.cfg.ObfsMode, b.cfg.QueueSize,
+	)
 	return []conn.ReceiveFunc{b.receiveFunc(state)}, carrier.Port(), nil
 }
 
@@ -258,6 +269,7 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 	b.mu.Lock()
 	if key, ok := b.cfg.ObfsEndpointKeys[value]; ok {
 		b.obfsResolved[ep.addr] = key
+		b.obfsStatic[ep.addr] = key
 		if b.state != nil {
 			b.state.carrier.AssociateEndpoint(ep.addr, key)
 		}
@@ -275,6 +287,114 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 	}
 	b.debugf("resolved peer endpoint: configured=%q resolved=%s obfs_key_associated=%t", value, ep.addr, b.cfg.ObfsMode == "salamander")
 	return ep, nil
+}
+
+// AcquireEndpointKey associates a runtime-selected numeric endpoint with its
+// peer's Salamander key. The returned release function is reference-counted so
+// multiple peers or endpoint generations can safely share the same tuple.
+func (b *Bind) AcquireEndpointKey(endpoint netip.AddrPort, key obfs.Key) (func(), error) {
+	endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+	if !endpoint.IsValid() || endpoint.Port() == 0 {
+		return nil, errors.New("valid numeric endpoint is required")
+	}
+	b.mu.Lock()
+	if static, ok := b.obfsResolved[endpoint]; ok && static != key {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("endpoint %s is already associated with a different obfuscation key", endpoint)
+	}
+	lease, ok := b.obfsDynamic[endpoint]
+	if ok && lease.key != key {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("endpoint %s is already associated with a different obfuscation key", endpoint)
+	}
+	lease.key = key
+	lease.refs++
+	b.obfsDynamic[endpoint] = lease
+	b.obfsResolved[endpoint] = key
+	state := b.state
+	if state != nil {
+		state.carrier.AssociateEndpoint(endpoint, key)
+	}
+	b.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() { b.releaseEndpointKey(endpoint, key) })
+	}, nil
+}
+
+func (b *Bind) releaseEndpointKey(endpoint netip.AddrPort, key obfs.Key) {
+	b.mu.Lock()
+	lease, ok := b.obfsDynamic[endpoint]
+	if !ok || lease.key != key {
+		b.mu.Unlock()
+		return
+	}
+	lease.refs--
+	if lease.refs > 0 {
+		b.obfsDynamic[endpoint] = lease
+		b.mu.Unlock()
+		return
+	}
+	delete(b.obfsDynamic, endpoint)
+	if static, permanent := b.obfsStatic[endpoint]; permanent {
+		b.obfsResolved[endpoint] = static
+		if state := b.state; state != nil {
+			state.carrier.AssociateEndpoint(endpoint, static)
+		}
+		b.mu.Unlock()
+		return
+	}
+	delete(b.obfsResolved, endpoint)
+	state := b.state
+	if state != nil {
+		state.carrier.DisassociateEndpoint(endpoint, key)
+	}
+	b.mu.Unlock()
+}
+
+// RetireEndpoint closes the configured outbound session for an old endpoint.
+// It does not affect accepted connection-scoped endpoints used for roaming.
+func (b *Bind) RetireEndpoint(endpoint netip.AddrPort) {
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	ep := state.endpoints[endpoint]
+	delete(state.endpoints, endpoint)
+	state.mu.Unlock()
+	retireEndpointSession(ep)
+}
+
+// RedialEndpoint closes the current configured session while retaining the
+// endpoint object. The next WireGuard send creates a fresh QUIC session.
+func (b *Bind) RedialEndpoint(endpoint netip.AddrPort) {
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	ep := state.endpoints[endpoint]
+	state.mu.Unlock()
+	retireEndpointSession(ep)
+}
+
+func retireEndpointSession(endpoint *Endpoint) {
+	if endpoint == nil {
+		return
+	}
+	endpoint.mu.Lock()
+	session := endpoint.session
+	endpoint.session = nil
+	endpoint.mu.Unlock()
+	if session != nil {
+		session.cancel()
+	}
 }
 
 func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
@@ -380,6 +500,11 @@ func (b *Bind) acceptLoop(state *runState) {
 }
 
 func (b *Bind) sessionForEndpoint(state *runState, ep *Endpoint) *session {
+	state.mu.Lock()
+	if state.endpoints[ep.addr] == nil {
+		state.endpoints[ep.addr] = ep
+	}
+	state.mu.Unlock()
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 	if ep.session != nil && ep.session.state == state && !ep.session.closed.Load() {
