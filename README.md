@@ -6,6 +6,10 @@ Repository: <https://github.com/RC-CHN/wg-quic>
 frames. Its WireGuard userspace cryptographic and peer state machine is a
 pinned in-repository fork under `third_party/wireguard-go`; production code and
 behavior tests no longer download `golang.zx2c4.com/wireguard`.
+The complete quic-go v0.61.0 source and tests are likewise pinned under
+`third_party/quic-go`. The root product module uses that nested upstream module
+through a local `replace` and `go.work`; production builds do not substitute a
+module-cache or `references/` copy.
 
 The fully exercised runtime is currently Linux. The `wg-quic-quick` host-policy
 layer also builds and runs natively on FreeBSD and includes an rc.d service
@@ -22,6 +26,12 @@ The command boundary mirrors WireGuard's daemon/`wg-quick` split:
 - `wg-quic-quick` owns addresses, routes, DNS, hooks, and platform service
   management. It starts and supervises the separate `wg-quic` executable; it
   does not import or embed the core package.
+
+The supervised startup configuration also has one owner:
+`wg-quic-quick` parses and validates the `.conf` once, resolves automatic host
+policy, and sends a versioned immutable configuration snapshot to the core over
+the child's standard input. Private and preshared keys do not enter process
+arguments, and the supervised core does not reread the path.
 
 QUIC is also isolated below the WireGuard bind adapter:
 `internal/transport/quic` owns quic-go, outer TLS, UDP sockets, socket marks,
@@ -43,6 +53,7 @@ password or extra configuration field is required.
 go test ./...
 make test-wireguard
 make test-transport
+make test-quic
 ./tests/container/test.sh
 make build
 ```
@@ -110,10 +121,14 @@ wg-quic-quick.exe down wg0
 
 The quick service runs as LocalSystem, supervises a separate sibling
 `wg-quic.exe`, and reports readiness through an Administrators/System-only
-Named Pipe. Its route plan pins every resolved QUIC endpoint through the
-pre-tunnel default route before installing AllowedIPs, including full-tunnel
-defaults. Windows Wintun, SCM, route, DNS, and cleanup behavior is not yet
-claimed VM-validated.
+Named Pipe using the same JSON request/response control protocol as Unix
+sockets. Before installing AllowedIPs, its endpoint supervisor asks the
+Windows route manager for a lease on every resolved endpoint. The manager uses
+per-interface `GetBestRoute2`, excludes Wintun, compares prefix length and
+effective route cost, and owns pins through a persistent reference-counted
+ledger. It never approximates selection by taking the first default route or
+uses a magic metric as ownership. Windows Wintun, SCM, route, DNS, and cleanup
+behavior is not yet claimed privileged-VM validated.
 
 `make build-windows` creates self-contained amd64 and arm64 test directories
 under `build/`. Each contains both executables, an unmodified official signed
