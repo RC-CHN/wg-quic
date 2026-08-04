@@ -15,7 +15,7 @@ import (
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
-	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/devicehost"
 	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	"github.com/RC-CHN/wg-quic/internal/wgdevice"
@@ -51,11 +51,11 @@ type peerRuntime struct {
 	releaseAssociation func()
 }
 
-func New(cfg *config.Config, name string, host platform.DeviceHost) (*Instance, error) {
+func New(cfg *config.Config, name string, host devicehost.Host) (*Instance, error) {
 	return newInstance(cfg, name, host, false)
 }
 
-func newInstance(cfg *config.Config, name string, host platform.DeviceHost, debug bool) (*Instance, error) {
+func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bool) (*Instance, error) {
 	if cfg == nil {
 		return nil, errors.New("configuration is required")
 	}

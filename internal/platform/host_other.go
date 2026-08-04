@@ -8,35 +8,21 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
-var errHostNotImplemented = errors.New("wg-quic host integration is not implemented on this operating system")
+var errHostNotImplemented = platformenv.ErrUnsupported
 
-type unsupportedHost struct{}
+type unsupportedHost struct {
+	platformenv.Paths
+}
 
 func Current() Host {
 	return unsupportedHost{}
 }
 
-func (unsupportedHost) ValidateInterfaceName(string) error {
-	return errHostNotImplemented
-}
-
-func (unsupportedHost) ControlPath(string) string {
-	return ""
-}
-
-func (unsupportedHost) ConfigPath(string) string {
-	return ""
-}
-
 func (unsupportedHost) Prepare(context.Context, *config.Config) error {
 	return errHostNotImplemented
-}
-
-func (unsupportedHost) CreateTUN(string, int) (tun.Device, error) {
-	return nil, errHostNotImplemented
 }
 
 func (unsupportedHost) NewEndpointRouteLeaser(

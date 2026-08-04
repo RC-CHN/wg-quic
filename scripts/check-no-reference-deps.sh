@@ -57,10 +57,22 @@ if [ "$quic_module" != "github.com/quic-go/quic-go" ]; then
 	exit 1
 fi
 
-quick_dependencies=$(go list -deps ./internal/quick)
+quick_dependencies=$(go list -deps ./cmd/wg-quic-quick)
 for forbidden in core bind transport/fec transport/obfs transport/quic wgdevice; do
 	if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/$forbidden\$"; then
 		echo "wg-quic-quick depends on data-plane package internal/$forbidden" >&2
+		exit 1
+	fi
+done
+if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/third_party/wireguard-go/"; then
+	echo "wg-quic-quick depends on the WireGuard data-plane fork" >&2
+	exit 1
+fi
+
+core_dependencies=$(go list -deps ./internal/core)
+for forbidden in endpoint platform quick; do
+	if printf '%s\n' "$core_dependencies" | grep -q "^$expected_module/internal/$forbidden\$"; then
+		echo "wg-quic core depends on host-policy package internal/$forbidden" >&2
 		exit 1
 	fi
 done

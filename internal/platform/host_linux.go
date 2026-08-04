@@ -9,20 +9,19 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
 const firstAutoRouteTable = 51820
 
-var linuxInterfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_=+.-]{1,15}$`)
-
-type linuxHost struct{}
+type linuxHost struct {
+	platformenv.Paths
+}
 
 type linuxNetworkState struct {
 	undo []hostCommand
@@ -30,21 +29,6 @@ type linuxNetworkState struct {
 
 func Current() Host {
 	return linuxHost{}
-}
-
-func (linuxHost) ValidateInterfaceName(name string) error {
-	if !linuxInterfaceNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid Linux interface name %q", name)
-	}
-	return nil
-}
-
-func (linuxHost) ControlPath(name string) string {
-	return "/run/wg-quic/" + name + ".sock"
-}
-
-func (linuxHost) ConfigPath(name string) string {
-	return "/etc/wg-quic/" + name + ".conf"
 }
 
 func (linuxHost) Prepare(ctx context.Context, cfg *config.Config) error {
@@ -57,10 +41,6 @@ func (linuxHost) Prepare(ctx context.Context, cfg *config.Config) error {
 	}
 	cfg.Interface.FwMark = mark
 	return nil
-}
-
-func (linuxHost) CreateTUN(name string, mtu int) (tun.Device, error) {
-	return tun.CreateTUN(name, mtu)
 }
 
 func (linuxHost) NewEndpointRouteLeaser(

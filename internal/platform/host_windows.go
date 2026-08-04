@@ -8,18 +8,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
-var windowsInterfaceNamePattern = regexp.MustCompile(`^[^\\/:*?"<>|\x00-\x1f]{1,128}$`)
-
-type windowsHost struct{}
+type windowsHost struct {
+	platformenv.Paths
+}
 
 type windowsNetworkState struct {
 	undo []string
@@ -29,32 +27,8 @@ func Current() Host {
 	return windowsHost{}
 }
 
-func (windowsHost) ValidateInterfaceName(name string) error {
-	if !windowsInterfaceNamePattern.MatchString(name) || strings.HasSuffix(name, " ") || strings.HasSuffix(name, ".") {
-		return fmt.Errorf("invalid Windows interface name %q", name)
-	}
-	return nil
-}
-
-func (windowsHost) ControlPath(name string) string {
-	return `\\.\pipe\wg-quic-` + name
-}
-
-func (windowsHost) ConfigPath(name string) string {
-	root := os.Getenv("ProgramData")
-	if root == "" {
-		root = `C:\ProgramData`
-	}
-	return filepath.Join(root, "wg-quic", "interfaces", name+".conf")
-}
-
 func (windowsHost) Prepare(context.Context, *config.Config) error {
 	return nil
-}
-
-func (windowsHost) CreateTUN(name string, mtu int) (tun.Device, error) {
-	tun.WintunTunnelType = "wg-quic"
-	return tun.CreateTUN(name, mtu)
 }
 
 func (windowsHost) NewEndpointRouteLeaser(

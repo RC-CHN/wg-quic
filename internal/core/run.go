@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
-	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/devicehost"
 )
 
 type RunOptions struct {
@@ -34,7 +34,7 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 		}
 	}
 	name := InterfaceName(configPath, options.Name)
-	instance, err := newInstance(cfg, name, platform.Current(), options.Debug)
+	instance, err := newInstance(cfg, name, devicehost.Current(), options.Debug)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,6 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/internal/platform"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
 type testHost struct {
@@ -60,10 +59,6 @@ func (h *testHost) ConfigPath(name string) string {
 func (h *testHost) Prepare(context.Context, *config.Config) error {
 	h.record("prepare")
 	return nil
-}
-
-func (h *testHost) CreateTUN(name string, mtu int) (tun.Device, error) {
-	return nil, errors.New("quick must not create the core TUN")
 }
 
 func (h *testHost) NewEndpointRouteLeaser(

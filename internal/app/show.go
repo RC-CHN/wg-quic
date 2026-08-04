@@ -9,11 +9,11 @@ import (
 	"sort"
 
 	"github.com/RC-CHN/wg-quic/internal/control"
-	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
 func Show(name string, jsonOutput bool) error {
-	host := platform.Current()
+	host := platformenv.Paths{}
 	var paths []string
 	if name != "" {
 		if err := host.ValidateInterfaceName(name); err != nil {

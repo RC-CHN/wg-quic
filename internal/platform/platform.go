@@ -7,7 +7,6 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
 // Cleanup reverses network state installed by ConfigureNetwork.
@@ -23,21 +22,14 @@ type hostOperation struct {
 	undo  hostCommand
 }
 
-// DeviceHost is the only operating-system surface required by the shared
-// userspace data plane. It deliberately excludes addresses, routes, DNS, and
-// hooks so the core daemon can run without owning wg-quick policy.
-type DeviceHost interface {
-	ValidateInterfaceName(string) error
-	ControlPath(string) string
-	CreateTUN(name string, mtu int) (tun.Device, error)
-}
-
-// Host extends DeviceHost with the policy operations used by
-// wg-quic-quick. Linux and FreeBSD implement this interface; future desktop
+// Host exposes only the policy operations used by wg-quic-quick. Device
+// creation lives in package devicehost, so management clients do not compile
+// the WireGuard TUN implementation. Future desktop
 // clients should control an OS service that exposes the same core lifecycle
 // instead of performing these privileged operations in the UI process.
 type Host interface {
-	DeviceHost
+	ValidateInterfaceName(string) error
+	ControlPath(string) string
 	ConfigPath(string) string
 	Prepare(context.Context, *config.Config) error
 	NewEndpointRouteLeaser(context.Context, string, *config.Config) (endpoint.RouteLeaser, error)

@@ -9,17 +9,16 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
-	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
+	"github.com/RC-CHN/wg-quic/internal/platformenv"
 )
 
-var freeBSDInterfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_=+.-]{1,15}$`)
-
-type freeBSDHost struct{}
+type freeBSDHost struct {
+	platformenv.Paths
+}
 
 type freeBSDNetworkState struct {
 	undo []hostCommand
@@ -29,26 +28,7 @@ func Current() Host {
 	return freeBSDHost{}
 }
 
-func (freeBSDHost) ValidateInterfaceName(name string) error {
-	if !freeBSDInterfaceNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid FreeBSD interface name %q", name)
-	}
-	return nil
-}
-
-func (freeBSDHost) ControlPath(name string) string {
-	return "/var/run/wg-quic/" + name + ".sock"
-}
-
-func (freeBSDHost) ConfigPath(name string) string {
-	return "/usr/local/etc/wg-quic/" + name + ".conf"
-}
-
 func (freeBSDHost) Prepare(context.Context, *config.Config) error { return nil }
-
-func (freeBSDHost) CreateTUN(name string, mtu int) (tun.Device, error) {
-	return tun.CreateTUN(name, mtu)
-}
 
 func (freeBSDHost) NewEndpointRouteLeaser(
 	_ context.Context,
