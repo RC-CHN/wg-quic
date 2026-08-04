@@ -1,5 +1,3 @@
-//go:build linux || freebsd
-
 package main
 
 import (
@@ -7,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/RC-CHN/wg-quic/internal/quick"
 )
@@ -38,9 +34,9 @@ func run(args []string) error {
 			}
 			name = args[3]
 		}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, stop := commandContext()
 		defer stop()
-		return quick.Run(ctx, args[1], name)
+		return runQuick(ctx, args[1], name)
 	case "check":
 		if len(args) != 2 {
 			return usage()

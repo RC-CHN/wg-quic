@@ -1,4 +1,4 @@
-//go:build linux || freebsd
+//go:build windows
 
 package quick
 
@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
-	"syscall"
 )
 
 type execCoreProcess struct {
@@ -53,12 +52,12 @@ func (p *execCoreProcess) Stop() error {
 	if p.cmd.Process == nil {
 		return errors.New("wg-quic core process was not started")
 	}
-	err := p.cmd.Process.Signal(syscall.SIGTERM)
+	err := p.cmd.Process.Kill()
 	if errors.Is(err, os.ErrProcessDone) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("signal wg-quic core: %w", err)
+		return fmt.Errorf("terminate wg-quic core: %w", err)
 	}
 	return nil
 }

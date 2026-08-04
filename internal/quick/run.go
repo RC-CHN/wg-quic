@@ -31,6 +31,16 @@ func runWithHost(
 	host platform.Host,
 	newProcess coreProcessFactory,
 ) error {
+	return runWithHostReady(ctx, input, requestedName, host, newProcess, nil)
+}
+
+func runWithHostReady(
+	ctx context.Context,
+	input, requestedName string,
+	host platform.Host,
+	newProcess coreProcessFactory,
+	ready func(),
+) error {
 	configPath, name, err := ResolveConfig(input, requestedName, host)
 	if err != nil {
 		return err
@@ -74,6 +84,9 @@ func runWithHost(
 		if err := host.RunHook(ctx, hook, name); err != nil {
 			return fmt.Errorf("PostUp: %w", err)
 		}
+	}
+	if ready != nil {
+		ready()
 	}
 	log.Printf("wg-quic-quick configured host policy for interface %s", name)
 	select {
