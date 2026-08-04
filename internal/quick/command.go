@@ -1,6 +1,4 @@
-//go:build linux
-
-package app
+package quick
 
 import (
 	"context"

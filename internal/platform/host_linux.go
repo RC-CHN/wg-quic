@@ -42,6 +42,10 @@ func (linuxHost) ControlPath(name string) string {
 	return "/run/wg-quic/" + name + ".sock"
 }
 
+func (linuxHost) ConfigPath(name string) string {
+	return "/etc/wireguard/" + name + ".conf"
+}
+
 func (linuxHost) Prepare(ctx context.Context, cfg *config.Config) error {
 	if !usesAutomaticDefaultRoute(cfg) || cfg.Interface.FwMark != 0 {
 		return nil

@@ -40,6 +40,10 @@ func (freeBSDHost) ControlPath(name string) string {
 	return "/var/run/wg-quic/" + name + ".sock"
 }
 
+func (freeBSDHost) ConfigPath(name string) string {
+	return "/usr/local/etc/wireguard/" + name + ".conf"
+}
+
 func (freeBSDHost) Prepare(_ context.Context, cfg *config.Config) error {
 	for i := range cfg.Peers {
 		if cfg.Peers[i].Endpoint == "" {

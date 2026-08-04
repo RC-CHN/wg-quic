@@ -26,6 +26,10 @@ func (unsupportedHost) ControlPath(string) string {
 	return ""
 }
 
+func (unsupportedHost) ConfigPath(string) string {
+	return ""
+}
+
 func (unsupportedHost) Prepare(context.Context, *config.Config) error {
 	return errHostNotImplemented
 }

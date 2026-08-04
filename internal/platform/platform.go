@@ -22,14 +22,23 @@ type hostOperation struct {
 	undo  hostCommand
 }
 
-// Host is the narrow capability boundary implemented by each operating
-// system. Transport, FEC, obfuscation, WireGuard configuration, and device
-// orchestration stay outside this interface and are shared by every port.
-type Host interface {
+// DeviceHost is the only operating-system surface required by the shared
+// userspace data plane. It deliberately excludes addresses, routes, DNS, and
+// hooks so the core daemon can run without owning wg-quick policy.
+type DeviceHost interface {
 	ValidateInterfaceName(string) error
 	ControlPath(string) string
-	Prepare(context.Context, *config.Config) error
 	CreateTUN(name string, mtu int) (tun.Device, error)
+}
+
+// Host extends DeviceHost with the policy operations used by
+// wg-quic-quick. Linux and FreeBSD implement this interface; future desktop
+// clients should control an OS service that exposes the same core lifecycle
+// instead of performing these privileged operations in the UI process.
+type Host interface {
+	DeviceHost
+	ConfigPath(string) string
+	Prepare(context.Context, *config.Config) error
 	ConfigureNetwork(context.Context, string, *config.Config) (Cleanup, error)
 	RunHook(context.Context, string, string) error
 }
