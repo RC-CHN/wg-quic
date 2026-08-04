@@ -98,6 +98,9 @@ func TestLinuxConfigPathIsProjectSpecific(t *testing.T) {
 	if got, want := (linuxHost{}).ConfigPath("wg0"), "/etc/wg-quic/wg0.conf"; got != want {
 		t.Fatalf("ConfigPath(wg0) = %q, want %q", got, want)
 	}
+	if got, want := (linuxHost{}).ControlPath("wg0"), "/run/wg-quic/wg0.sock"; got != want {
+		t.Fatalf("ControlPath(wg0) = %q, want %q", got, want)
+	}
 }
 
 func containsCommand(commands [][]string, want []string) bool {

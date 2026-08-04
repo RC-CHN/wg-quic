@@ -16,6 +16,10 @@ func TestWindowsHostPathsAndNames(t *testing.T) {
 	if got, want := host.ControlPath("wg0"), `\\.\pipe\wg-quic-wg0`; got != want {
 		t.Fatalf("ControlPath(wg0) = %q, want %q", got, want)
 	}
+	t.Setenv("ProgramData", "")
+	if got, want := host.ConfigPath("wg0"), `C:\ProgramData\wg-quic\interfaces\wg0.conf`; got != want {
+		t.Fatalf("default ConfigPath(wg0) = %q, want %q", got, want)
+	}
 	for _, valid := range []string{"wg0", "office vpn"} {
 		if err := host.ValidateInterfaceName(valid); err != nil {
 			t.Errorf("valid name %q: %v", valid, err)
