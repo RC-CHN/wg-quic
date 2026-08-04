@@ -57,7 +57,7 @@ binary_description=$(file \
 printf '%s\n' "$binary_description"
 case "$target_os:$target_arch:$binary_description" in
 windows:amd64:*PE32+*x86-64*) ;;
-windows:arm64:*PE32+*ARM64*) ;;
+windows:arm64:*PE32+*ARM64*|windows:arm64:*PE32+*Aarch64*) ;;
 linux:amd64:*ELF*x86-64*) ;;
 linux:arm64:*ELF*ARM*aarch64*) ;;
 freebsd:amd64:*ELF*x86-64*) ;;
