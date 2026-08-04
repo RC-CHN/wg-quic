@@ -83,6 +83,14 @@ WireGuard PresharedKeys. Its pinned upper-layer behavior matrix covers:
   Salamander transport;
 - cryptokey routing from one WireGuard device to two distinct peers.
 
+The extended large-packet and concurrent behavior matrix currently runs on
+Linux and FreeBSD. Windows is intentionally behind those targets: its native CI
+still executes every Windows-applicable fork test, the ArmorBind round-trip,
+simultaneous-dial and abrupt-restart regressions, and the bidirectional
+WireGuard-over-QUIC/FEC/Salamander smoke test. Extending the high-volume matrix
+to Windows is tracked with the deferred Windows host backend rather than
+weakening the Linux/FreeBSD assertions.
+
 The container suite repeats the production path with four separate Linux
 process and network namespaces, real TUN devices, and network impairment.
 GitHub Actions names this the `Two-node Linux tunnel interoperability` gate;
