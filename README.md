@@ -2,9 +2,10 @@
 
 Repository: <https://github.com/RC-CHN/wg-quic>
 
-`wg-quic` keeps the upstream `wireguard-go` cryptographic and peer state
-machine, but carries complete encrypted WireGuard datagrams over QUIC
-DATAGRAM frames.
+`wg-quic` carries complete encrypted WireGuard datagrams over QUIC DATAGRAM
+frames. Its WireGuard userspace cryptographic and peer state machine is a
+pinned in-repository fork under `third_party/wireguard-go`; production code and
+behavior tests no longer download `golang.zx2c4.com/wireguard`.
 
 The usable runtime is currently Linux. A FreeBSD host backend is present and
 cross-builds for amd64 and arm64, but still needs QEMU runtime validation and
@@ -24,17 +25,19 @@ password or extra configuration field is required.
 
 ```sh
 go test ./...
-./scripts/test-upstream-wireguard.sh
+make test-wireguard
+make test-transport
 ./tests/container/test.sh
 go build ./cmd/wg-quic
 ```
 
 The container test leaves the host route table and DNS untouched. It creates
-isolated privileged containers for real Linux TUN devices and covers IPv4 and
-IPv6 inner/outer paths, TCP/UDP, large packets, carrier MTU, loss/FEC,
-reordering, NAT rebinding, and peer restart recovery. See
-[`tests/UPSTREAM-WIREGUARD.md`](tests/UPSTREAM-WIREGUARD.md) for the mapping to
-the pinned upstream WireGuard test suite.
+isolated privileged nodes with separate Linux network namespaces and real TUN
+devices. The GitHub Actions gate covers IPv4 and IPv6 inner/outer paths,
+TCP/UDP, large packets, carrier MTU, loss/FEC, reordering, NAT rebinding, and
+peer restart recovery. See
+[`tests/WIREGUARD-FORK.md`](tests/WIREGUARD-FORK.md) for the mapping to
+the pinned WireGuard fork and its imported test suite.
 
 Check a configuration without changing the host:
 

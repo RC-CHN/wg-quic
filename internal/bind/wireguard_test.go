@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun/tuntest"
 	"golang.org/x/crypto/curve25519"
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/tun/tuntest"
 )
 
 type testDevice struct {
@@ -21,9 +22,13 @@ type testDevice struct {
 	ip   netip.Addr
 }
 
-func TestWireGuardDeviceBidirectionalOverQUIC(t *testing.T) {
+func TestWireGuardDeviceBidirectionalOverQUICFECAndSalamander(t *testing.T) {
 	var privateKeys [2][32]byte
 	var publicKeys [2][]byte
+	var presharedKey [32]byte
+	if _, err := rand.Read(presharedKey[:]); err != nil {
+		t.Fatal(err)
+	}
 	for i := range privateKeys {
 		if _, err := rand.Read(privateKeys[i][:]); err != nil {
 			t.Fatal(err)
@@ -40,7 +45,14 @@ func TestWireGuardDeviceBidirectionalOverQUIC(t *testing.T) {
 		peers[i].ip = netip.AddrFrom4([4]byte{10, 55, 0, byte(i + 1)})
 	}
 	for i := range peers {
-		peers[i].bind = New(DefaultConfig())
+		obfsKey, err := obfs.DeriveWireGuardKey(privateKeys[i][:], publicKeys[i^1], presharedKey[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		bindConfig := DefaultConfig()
+		bindConfig.ObfsMode = "salamander"
+		bindConfig.ObfsKeys = []obfs.Key{obfsKey}
+		peers[i].bind = New(bindConfig)
 		peers[i].tun = tuntest.NewChannelTUN()
 		peers[i].dev = device.NewDevice(
 			peers[i].tun.TUN(),
@@ -48,9 +60,10 @@ func TestWireGuardDeviceBidirectionalOverQUIC(t *testing.T) {
 			device.NewLogger(device.LogLevelError, fmt.Sprintf("wgq-test-%d: ", i)),
 		)
 		cfg := fmt.Sprintf(
-			"private_key=%s\nlisten_port=0\nreplace_peers=true\npublic_key=%s\nprotocol_version=1\nreplace_allowed_ips=true\nallowed_ip=%s/32\n",
+			"private_key=%s\nlisten_port=0\nreplace_peers=true\npublic_key=%s\npreshared_key=%s\nprotocol_version=1\nreplace_allowed_ips=true\nallowed_ip=%s/32\n",
 			hex.EncodeToString(privateKeys[i][:]),
 			hex.EncodeToString(publicKeys[i^1]),
+			hex.EncodeToString(presharedKey[:]),
 			peers[i^1].ip,
 		)
 		if err := peers[i].dev.IpcSet(cfg); err != nil {
@@ -74,6 +87,26 @@ func TestWireGuardDeviceBidirectionalOverQUIC(t *testing.T) {
 
 	sendTUNPacket(t, &peers[0], &peers[1])
 	sendTUNPacket(t, &peers[1], &peers[0])
+	for i := range peers {
+		assertFullTransportUsed(t, peers[i].bind)
+	}
+}
+
+func assertFullTransportUsed(t *testing.T, bind *Bind) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stats := bind.Stats()
+		if stats.WGTxPackets > 0 && stats.WGRxPackets > 0 &&
+			stats.WireTxPackets > 0 && stats.WireRxPackets > 0 &&
+			stats.FECDataTx > 0 && stats.FECParityTx > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("full transport path was not exercised: %+v", stats)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func sendTUNPacket(t *testing.T, destination, source *testDevice) {

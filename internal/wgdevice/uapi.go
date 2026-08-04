@@ -2,7 +2,7 @@ package wgdevice
 
 import (
 	"github.com/RC-CHN/wg-quic/internal/config"
-	"golang.zx2c4.com/wireguard/device"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 )
 
 func Configure(dev *device.Device, cfg *config.Config) error {

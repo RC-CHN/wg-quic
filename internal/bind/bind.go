@@ -18,8 +18,8 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/transport/fec"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
 	"github.com/quic-go/quic-go"
-	"golang.zx2c4.com/wireguard/conn"
 )
 
 const alpn = "wg-quic/1"
@@ -41,8 +41,11 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		QueueSize: 1024, HandshakeTimeout: 4 * time.Second, MaxIdleTimeout: 2 * time.Minute, KeepAlivePeriod: 15 * time.Second,
-		FECMode: "auto", FECDataShards: fec.DefaultDataShards, FECFlushDeadline: 2 * time.Millisecond, ObfsMode: "none",
+		QueueSize:        1024,
+		HandshakeTimeout: 4 * time.Second,
+		MaxIdleTimeout:   15 * time.Second,
+		KeepAlivePeriod:  5 * time.Second,
+		FECMode:          "auto", FECDataShards: fec.DefaultDataShards, FECFlushDeadline: 2 * time.Millisecond, ObfsMode: "none",
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
-	"golang.zx2c4.com/wireguard/tun"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
 var freeBSDInterfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_=+.-]{1,15}$`)

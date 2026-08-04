@@ -16,7 +16,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/internal/wgdevice"
-	"golang.zx2c4.com/wireguard/device"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 )
 
 func Run(ctx context.Context, configPath, requestedName string) error {

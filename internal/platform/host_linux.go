@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
-	"golang.zx2c4.com/wireguard/tun"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
 const firstAutoRouteTable = 51820

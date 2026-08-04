@@ -7,7 +7,7 @@ import (
 	"errors"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
-	"golang.zx2c4.com/wireguard/tun"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
 var errHostNotImplemented = errors.New("wg-quic host integration is not implemented on this operating system")

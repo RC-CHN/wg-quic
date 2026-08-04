@@ -10,7 +10,11 @@ if [ "$actual_module" != "$expected_module" ]; then
 	exit 1
 fi
 
-for dir in $(go list -deps -f '{{.Dir}}' ./...); do
+if ! dependency_dirs=$(go list -deps -f '{{.Dir}}' ./...); then
+	echo "failed to resolve the project dependency graph" >&2
+	exit 1
+fi
+for dir in $dependency_dirs; do
 	case "$dir" in
 		"$repo_dir/references"|"$repo_dir/references"/*)
 			echo "formal build depends on local references path: $dir" >&2
@@ -19,9 +23,27 @@ for dir in $(go list -deps -f '{{.Dir}}' ./...); do
 	esac
 done
 
-if go env GOMOD | grep -q '/references/'; then
+active_gomod=$(go env GOMOD)
+case "$active_gomod" in
+*/references/*)
 	echo "active Go module is under references/" >&2
+	exit 1
+	;;
+esac
+
+if ! module_list=$(go list -m all); then
+	echo "failed to resolve the project module graph" >&2
+	exit 1
+fi
+if printf '%s\n' "$module_list" | grep -q '^golang\.zx2c4\.com/wireguard '; then
+	echo "formal build still depends on the upstream wireguard-go module" >&2
 	exit 1
 fi
 
-echo "$actual_module has no dependency on references/"
+fork_device_dir=$(go list -f '{{.Dir}}' "$expected_module/third_party/wireguard-go/device")
+if [ "$fork_device_dir" != "$repo_dir/third_party/wireguard-go/device" ]; then
+	echo "WireGuard device resolved outside the in-repository fork: $fork_device_dir" >&2
+	exit 1
+fi
+
+echo "$actual_module uses the in-repository WireGuard fork and has no dependency on references/"

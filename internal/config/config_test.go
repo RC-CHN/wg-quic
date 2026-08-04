@@ -127,11 +127,11 @@ AllowedIPs = 10.0.0.2/32
 	}
 }
 
-// The upstream wireguard-go netns suite sends 130,560 AllowedIPs through UAPI
+// The imported wireguard-go netns suite sends 130,560 AllowedIPs through UAPI
 // to catch implementations that truncate large requests or responses. wg-quic
 // intentionally exposes a file-oriented CLI instead of stock wg(8) UAPI, so
 // exercise the equivalent boundary here: parse the complete wg-quick input and
-// serialize every prefix into the upstream Device IpcSet format.
+// serialize every prefix into the forked Device IpcSet format.
 func TestLargeAllowedIPsConfigurationIsNotTruncated(t *testing.T) {
 	var input strings.Builder
 	fmt.Fprintf(&input, "[Interface]\nPrivateKey = %s\n[Peer]\nPublicKey = %s\n", testKey(1), testKey(2))

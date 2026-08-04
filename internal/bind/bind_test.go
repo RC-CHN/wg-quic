@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
-	"golang.zx2c4.com/wireguard/conn"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
 )
 
 func TestBindRoundTripAndClose(t *testing.T) {
@@ -87,6 +87,92 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	got, _ = receiveOne(t, aReceive[0])
 	if !bytes.Equal(got, payload) {
 		t.Fatal("obfuscated reply changed in transit")
+	}
+}
+
+func TestBindRedialsAfterAbruptPeerRestart(t *testing.T) {
+	config := DefaultConfig()
+	config.MaxIdleTimeout = time.Second
+	config.KeepAlivePeriod = 250 * time.Millisecond
+	a, b := New(config), New(config)
+	_, _, err := a.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	bReceive, bPort, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beforeRestart := []byte("before abrupt restart")
+	if err := a.Send([][]byte{beforeRestart}, aToB); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := receiveOne(t, bReceive[0])
+	if !bytes.Equal(got, beforeRestart) {
+		t.Fatal("payload changed before restart")
+	}
+
+	b.mu.Lock()
+	bState := b.state
+	b.mu.Unlock()
+	if bState == nil {
+		t.Fatal("peer bind unexpectedly closed")
+	}
+	// Closing the packet socket first models process or host loss: the peer
+	// cannot send a graceful QUIC CONNECTION_CLOSE to the surviving endpoint.
+	if err := bState.packetConn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := New(config)
+	restartedReceive, reboundPort, err := restarted.Open(bPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if reboundPort != bPort {
+		t.Fatalf("restarted peer bound port %d, want %d", reboundPort, bPort)
+	}
+
+	afterRestart := []byte("after abrupt restart")
+	stopSending := make(chan struct{})
+	defer close(stopSending)
+	sendErrors := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if err := a.Send([][]byte{afterRestart}, aToB); err != nil {
+				select {
+				case sendErrors <- err:
+				default:
+				}
+			}
+			select {
+			case <-stopSending:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	got, _ = receiveOne(t, restartedReceive[0])
+	select {
+	case err := <-sendErrors:
+		t.Fatalf("send while redialing failed: %v", err)
+	default:
+	}
+	if !bytes.Equal(got, afterRestart) {
+		t.Fatal("payload changed after restart")
 	}
 }
 

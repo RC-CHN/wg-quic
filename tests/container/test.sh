@@ -56,6 +56,12 @@ docker build -t wg-quic-e2e:local -f "$script_dir/Dockerfile" "$repo_dir"
 
 $compose up -d
 
+netns_a=$($compose exec -T a readlink /proc/1/ns/net)
+netns_b=$($compose exec -T b readlink /proc/1/ns/net)
+if [ "$netns_a" = "$netns_b" ]; then
+	fail_with_logs "A and B unexpectedly share a network namespace"
+fi
+
 wait_ping a 10.77.0.2 "" "A to B IPv4 tunnel ping did not become ready"
 wait_ping a fd00:77::2 6 "A to B IPv6 tunnel ping did not become ready"
 wait_ping a6 10.78.0.2 "" "tunnel over an IPv6 QUIC endpoint did not become ready"
@@ -79,7 +85,7 @@ if $compose exec -T a ping -I 10.77.99.1 -c 1 -W 1 10.77.0.2 >/dev/null 2>&1; th
 fi
 $compose exec -T a ip address delete 10.77.99.1/32 dev wg0
 
-# Mirror the upstream wireguard-go netns data-plane matrix with bounded CI
+# Mirror the imported WireGuard fork's netns data-plane matrix with bounded CI
 # transfer sizes: TCP and UDP in both address families and both directions.
 start_iperf_server b 10.77.0.2 5201
 $compose exec -T a iperf3 -c 10.77.0.2 -p 5201 -n 16M
@@ -90,7 +96,7 @@ $compose exec -T b iperf3 -c 10.77.0.1 -p 5203 -u -b 10M -t 2
 start_iperf_server b fd00:77::2 5204
 $compose exec -T a iperf3 -6 -c fd00:77::2 -p 5204 -u -b 10M -t 2
 
-# The upstream suite raises the interface MTU far beyond Ethernet MTU. Verify
+# The imported suite raises the interface MTU far beyond Ethernet MTU. Verify
 # that a single large inner packet survives WireGuard encryption plus wg-quic
 # fragmentation/reassembly, over both IPv4 and IPv6.
 $compose exec -T a ip link set dev wg0 mtu 16000
@@ -169,4 +175,4 @@ fi
 $compose exec -T a ip -details link show wg0
 $compose exec -T b ip -details link show wg0
 
-echo "wg-quic container interoperability and upstream behavior test passed"
+echo "wg-quic container interoperability and pinned WireGuard behavior test passed"

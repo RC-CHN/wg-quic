@@ -17,8 +17,9 @@ jobs:
           go-version-file: go.mod
       - run: ./scripts/check-no-reference-deps.sh
       - run: go test ./...
+      - name: Pinned WireGuard behavior over production ArmorBind
+        run: go test -count=1 -run '^TestWireGuard' ./internal/bind
       - run: go test -race ./...
-      - run: ./scripts/test-upstream-wireguard.sh
       - run: shellcheck scripts/*.sh tests/container/*.sh
 
   windows:
@@ -30,9 +31,6 @@ jobs:
           go-version-file: go.mod
       - name: Project tests
         run: go test ./...
-      - name: All Windows-applicable upstream wireguard-go tests
-        shell: pwsh
-        run: ./scripts/test-upstream-wireguard-windows.ps1
       - name: Build Windows CLI
         run: go build ./cmd/wg-quic
 
@@ -51,10 +49,10 @@ jobs:
             go version
             ./scripts/check-no-reference-deps.sh
             go test ./...
-            ./scripts/test-upstream-wireguard.sh
             go build ./cmd/wg-quic
 
   container:
+    name: Two-node Linux tunnel interoperability
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
