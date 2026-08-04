@@ -41,7 +41,7 @@ func (freeBSDHost) ControlPath(name string) string {
 }
 
 func (freeBSDHost) ConfigPath(name string) string {
-	return "/usr/local/etc/wireguard/" + name + ".conf"
+	return "/usr/local/etc/wg-quic/" + name + ".conf"
 }
 
 func (freeBSDHost) Prepare(_ context.Context, cfg *config.Config) error {

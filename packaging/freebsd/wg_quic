@@ -8,6 +8,7 @@
 # Add this to /etc/rc.conf:
 #   wg_quic_enable="YES"
 #   wg_quic_interfaces="wg0"
+# Profiles are read from /usr/local/etc/wg-quic/<interface>.conf.
 #
 
 . /etc/rc.subr

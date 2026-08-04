@@ -43,7 +43,7 @@ func (linuxHost) ControlPath(name string) string {
 }
 
 func (linuxHost) ConfigPath(name string) string {
-	return "/etc/wireguard/" + name + ".conf"
+	return "/etc/wg-quic/" + name + ".conf"
 }
 
 func (linuxHost) Prepare(ctx context.Context, cfg *config.Config) error {

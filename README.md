@@ -56,13 +56,13 @@ the pinned WireGuard fork and its imported test suite.
 Check a configuration without changing the host:
 
 ```sh
-go run ./cmd/wg-quic-quick check /etc/wireguard/wg0.conf
+go run ./cmd/wg-quic-quick check /etc/wg-quic/wg0.conf
 ```
 
 Run one complete tunnel in the foreground:
 
 ```sh
-sudo go run ./cmd/wg-quic-quick run /etc/wireguard/wg0.conf
+sudo go run ./cmd/wg-quic-quick run /etc/wg-quic/wg0.conf
 ```
 
 For service-managed Linux installations:
@@ -80,8 +80,13 @@ configure DNS, or run hooks.
 `SaveConfig=true` is rejected by `wg-quic-quick` instead of being silently
 ignored. There is no runtime configuration mutation to persist yet.
 
+Bare interface names resolve under `/etc/wg-quic/` on Linux and
+`/usr/local/etc/wg-quic/` on FreeBSD. Explicit paths remain supported, but the
+defaults are intentionally separate from stock WireGuard because the on-wire
+protocols are not compatible.
+
 On FreeBSD, install `packaging/freebsd/wg_quic` under
-`/usr/local/etc/rc.d/`, put profiles in `/usr/local/etc/wireguard/`, and set
+`/usr/local/etc/rc.d/`, put profiles in `/usr/local/etc/wg-quic/`, and set
 `wg_quic_interfaces` in `rc.conf`. The same quick commands then use rc.d:
 
 ```sh
