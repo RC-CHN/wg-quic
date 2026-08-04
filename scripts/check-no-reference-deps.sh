@@ -3,7 +3,7 @@ set -eu
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 expected_module=github.com/RC-CHN/wg-quic
-actual_module=$(go list -m -f '{{.Path}}')
+actual_module=$(GOWORK=off go list -m -f '{{.Path}}')
 
 if [ "$actual_module" != "$expected_module" ]; then
 	echo "module path mismatch: got $actual_module, want $expected_module" >&2
@@ -46,6 +46,17 @@ if [ "$fork_device_dir" != "$repo_dir/third_party/wireguard-go/device" ]; then
 	exit 1
 fi
 
+quic_dir=$(GOWORK=off go list -f '{{.Dir}}' github.com/quic-go/quic-go)
+if [ "$quic_dir" != "$repo_dir/third_party/quic-go" ]; then
+	echo "quic-go resolved outside the in-repository fork: $quic_dir" >&2
+	exit 1
+fi
+quic_module=$(CDPATH='' cd -- "$repo_dir/third_party/quic-go" && GOWORK=off go list -m -f '{{.Path}}')
+if [ "$quic_module" != "github.com/quic-go/quic-go" ]; then
+	echo "in-repository quic-go has unexpected module path: $quic_module" >&2
+	exit 1
+fi
+
 quick_dependencies=$(go list -deps ./internal/quick)
 if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/core\$"; then
 	echo "wg-quic-quick embeds the wg-quic core instead of supervising the separate executable" >&2
@@ -58,4 +69,4 @@ if printf '%s\n' "$bind_imports" | grep -q '^github\.com/quic-go/quic-go$'; then
 	exit 1
 fi
 
-echo "$actual_module uses the in-repository WireGuard fork and has no dependency on references/"
+echo "$actual_module uses in-repository WireGuard and quic-go sources and has no dependency on references/"
