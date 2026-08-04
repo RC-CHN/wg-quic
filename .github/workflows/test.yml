@@ -21,6 +21,14 @@ jobs:
         run: go test -count=1 -run '^TestWireGuard' ./internal/bind
       - run: go test -race ./...
       - run: shellcheck scripts/*.sh tests/container/*.sh packaging/freebsd/wg_quic
+      - run: make build-windows
+      - name: Upload self-contained Windows test bundles
+        uses: actions/upload-artifact@v6
+        with:
+          name: wg-quic-windows
+          path: |
+            build/wg-quic-windows-amd64
+            build/wg-quic-windows-arm64
 
   windows:
     runs-on: windows-latest

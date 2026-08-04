@@ -115,5 +115,10 @@ pre-tunnel default route before installing AllowedIPs, including full-tunnel
 defaults. Windows Wintun, SCM, route, DNS, and cleanup behavior is not yet
 claimed VM-validated.
 
+`make build-windows` creates self-contained amd64 and arm64 test directories
+under `build/`. Each contains both executables, an unmodified official signed
+Wintun 0.14.1 DLL, its original license, checksums, and a LAN test guide.
+GitHub Actions uploads the same directories as the `wg-quic-windows` artifact.
+
 The implementation and tests are under active development. See the local
 `design/architecture.md` when the design checkout is present.

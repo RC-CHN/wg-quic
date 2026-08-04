@@ -3,4 +3,5 @@
 /references/
 
 # Generated test and build artifacts.
+/build/
 /tests/container/build/
