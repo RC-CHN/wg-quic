@@ -3,6 +3,8 @@
 package platform
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"slices"
 	"testing"
@@ -37,5 +39,48 @@ func TestFreeBSDHostRouteCommandsUseExactAddressFamilyAndGateway(t *testing.T) {
 		"-q", "-n", "delete", "-inet6", "2001:db8::10",
 	}) {
 		t.Fatalf("IPv6 endpoint route undo = %#v", undo.args)
+	}
+}
+
+func TestFreeBSDRouteLeaseRetriesFailedRelease(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.10")
+	deleteAttempts := 0
+	manager := &freeBSDEndpointRouteLeaser{
+		need4:   true,
+		entries: make(map[netip.Addr]*freeBSDEndpointRouteEntry),
+		defaultGateway: func(context.Context, bool) (freeBSDGateway, error) {
+			return freeBSDGateway{address: "192.0.2.1"}, nil
+		},
+		runCommand: func(_ context.Context, _ string, args ...string) error {
+			if slices.Contains(args, "delete") {
+				deleteAttempts++
+				if deleteAttempts == 1 {
+					return errors.New("temporary route deletion failure")
+				}
+			}
+			return nil
+		},
+	}
+	lease, err := manager.AcquireEndpointRoute(context.Background(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Release(context.Background()); err == nil {
+		t.Fatal("first route release unexpectedly succeeded")
+	}
+	if entry := manager.entries[address]; entry == nil || entry.refs != 1 {
+		t.Fatalf("failed release consumed route ownership: %#v", entry)
+	}
+	if err := lease.Release(context.Background()); err != nil {
+		t.Fatalf("retry route release: %v", err)
+	}
+	if _, ok := manager.entries[address]; ok {
+		t.Fatal("successful retry retained route ownership")
+	}
+	if err := lease.Release(context.Background()); err != nil {
+		t.Fatalf("idempotent release: %v", err)
+	}
+	if deleteAttempts != 2 {
+		t.Fatalf("route delete attempts = %d, want 2", deleteAttempts)
 	}
 }

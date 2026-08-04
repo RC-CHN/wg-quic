@@ -18,6 +18,9 @@ type freeBSDEndpointRouteLeaser struct {
 	need6   bool
 	closed  bool
 	entries map[netip.Addr]*freeBSDEndpointRouteEntry
+
+	runCommand     func(context.Context, string, ...string) error
+	defaultGateway func(context.Context, bool) (freeBSDGateway, error)
 }
 
 type freeBSDEndpointRouteEntry struct {
@@ -29,8 +32,9 @@ type freeBSDEndpointRouteEntry struct {
 type freeBSDEndpointRouteLease struct {
 	manager *freeBSDEndpointRouteLeaser
 	address netip.Addr
-	once    sync.Once
-	err     error
+
+	mu       sync.Mutex
+	released bool
 }
 
 func (m *freeBSDEndpointRouteLeaser) AcquireEndpointRoute(
@@ -53,13 +57,13 @@ func (m *freeBSDEndpointRouteLeaser) AcquireEndpointRoute(
 		entry.refs++
 		return &freeBSDEndpointRouteLease{manager: m, address: address}, nil
 	}
-	gateway, err := freeBSDDefaultGateway(ctx, address.Is6())
+	gateway, err := m.getDefaultGateway(ctx, address.Is6())
 	if err != nil {
 		return nil, err
 	}
 	apply, undo := freeBSDHostRouteCommands(address, gateway)
 	managed := true
-	if err := run(ctx, apply.name, apply.args...); err != nil {
+	if err := m.execute(ctx, apply.name, apply.args...); err != nil {
 		// An identical route not created by this process may already exist.
 		// Borrow it, but never delete it.
 		if !strings.Contains(strings.ToLower(err.Error()), "exist") {
@@ -91,10 +95,16 @@ func freeBSDHostRouteCommands(address netip.Addr, gateway freeBSDGateway) (hostC
 }
 
 func (l *freeBSDEndpointRouteLease) Release(ctx context.Context) error {
-	l.once.Do(func() {
-		l.err = l.manager.release(ctx, l.address)
-	})
-	return l.err
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.released {
+		return nil
+	}
+	if err := l.manager.release(ctx, l.address); err != nil {
+		return err
+	}
+	l.released = true
+	return nil
 }
 
 func (m *freeBSDEndpointRouteLeaser) release(ctx context.Context, address netip.Addr) error {
@@ -104,15 +114,19 @@ func (m *freeBSDEndpointRouteLeaser) release(ctx context.Context, address netip.
 	if entry == nil {
 		return nil
 	}
-	entry.refs--
-	if entry.refs > 0 {
+	if entry.refs > 1 {
+		entry.refs--
 		return nil
+	}
+	if !entry.managed {
+		delete(m.entries, address)
+		return nil
+	}
+	if err := m.execute(ctx, entry.undo.name, entry.undo.args...); err != nil {
+		return err
 	}
 	delete(m.entries, address)
-	if !entry.managed {
-		return nil
-	}
-	return run(ctx, entry.undo.name, entry.undo.args...)
+	return nil
 }
 
 func (m *freeBSDEndpointRouteLeaser) Close() error {
@@ -125,8 +139,9 @@ func (m *freeBSDEndpointRouteLeaser) Close() error {
 	var errs []error
 	for address, entry := range m.entries {
 		if entry.managed {
-			if err := run(context.Background(), entry.undo.name, entry.undo.args...); err != nil {
+			if err := m.execute(context.Background(), entry.undo.name, entry.undo.args...); err != nil {
 				errs = append(errs, err)
+				continue
 			}
 		}
 		delete(m.entries, address)
@@ -135,3 +150,24 @@ func (m *freeBSDEndpointRouteLeaser) Close() error {
 }
 
 func (*freeBSDEndpointRouteLeaser) Changes() <-chan struct{} { return nil }
+
+func (m *freeBSDEndpointRouteLeaser) execute(
+	ctx context.Context,
+	name string,
+	args ...string,
+) error {
+	if m.runCommand != nil {
+		return m.runCommand(ctx, name, args...)
+	}
+	return run(ctx, name, args...)
+}
+
+func (m *freeBSDEndpointRouteLeaser) getDefaultGateway(
+	ctx context.Context,
+	ipv6 bool,
+) (freeBSDGateway, error) {
+	if m.defaultGateway != nil {
+		return m.defaultGateway(ctx, ipv6)
+	}
+	return freeBSDDefaultGateway(ctx, ipv6)
+}

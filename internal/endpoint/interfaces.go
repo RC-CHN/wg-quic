@@ -18,7 +18,8 @@ type Resolver interface {
 }
 
 // RouteLease proves that the outer route for one numeric endpoint remains
-// available.
+// available. Release is idempotent after success. A failed Release does not
+// consume the lease and callers may retry it.
 type RouteLease interface {
 	Release(context.Context) error
 }
