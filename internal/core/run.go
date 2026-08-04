@@ -80,7 +80,7 @@ func loadConfiguration(configPath string, options RunOptions) (*config.Config, e
 func logDebugConfiguration(configPath, name string, cfg *config.Config) {
 	log.Printf(
 		"debug core configuration: interface=%q config=%q listen_port=%d mtu=%d fwmark=%d carrier=%q congestion=%q fec=%q obfs=%q peers=%d",
-		name, configPath, cfg.Interface.ListenPort, InterfaceMTU(cfg), cfg.Interface.FwMark,
+		name, configPath, cfg.Interface.ListenPort, cfg.EffectiveMTU(), cfg.Interface.FwMark,
 		cfg.Transport.Carrier, cfg.Transport.Congestion, cfg.Transport.FEC, cfg.Transport.Obfs,
 		len(cfg.Peers),
 	)

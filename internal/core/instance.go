@@ -92,7 +92,7 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 		transportLogger := device.NewLogger(device.LogLevelVerbose, fmt.Sprintf("(%s/transport) ", name))
 		transportConfig.Bind.Debugf = transportLogger.Verbosef
 	}
-	tdev, err := host.CreateTUN(name, InterfaceMTU(cfg))
+	tdev, err := host.CreateTUN(name, cfg.EffectiveMTU())
 	if err != nil {
 		return nil, fmt.Errorf("create TUN %s: %w", name, err)
 	}
@@ -368,11 +368,4 @@ func (i *Instance) redialPeer(publicKey string) error {
 	}
 	i.bind.RedialEndpoint(endpoint)
 	return nil
-}
-
-func InterfaceMTU(cfg *config.Config) int {
-	if cfg.Interface.MTU != 0 {
-		return cfg.Interface.MTU
-	}
-	return 1380
 }

@@ -35,10 +35,10 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 				" -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
 		})
 	}
-	mtu := cfg.Interface.MTU
-	if mtu == 0 {
-		mtu = 1380
-	}
+	// Wintun's CreateTUN MTU controls the userspace device view. Windows also
+	// exposes per-family IP-interface MTUs, so mirror the same centrally chosen
+	// value here without owning a second fallback policy.
+	mtu := cfg.EffectiveMTU()
 	operations = append(operations, windowsOperation{
 		apply: base +
 			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +

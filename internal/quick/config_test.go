@@ -211,7 +211,7 @@ PostDown = post-down
 
 [Peer]
 PublicKey = %s
-Endpoint = 192.0.2.10:443
+Endpoint = [::ffff:192.0.2.10]:443
 `, key, peerKey)
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
@@ -242,6 +242,9 @@ Endpoint = 192.0.2.10:443
 	select {
 	case <-host.postUp:
 		cancel()
+	case err := <-result:
+		cancel()
+		t.Fatalf("quick exited before PostUp: %v", err)
 	case <-time.After(5 * time.Second):
 		cancel()
 		t.Fatal("quick layer did not finish bringing the core up")
@@ -264,7 +267,9 @@ Endpoint = 192.0.2.10:443
 	if got := host.snapshot(); !slices.Equal(got, want) {
 		t.Fatalf("quick lifecycle events = %#v, want %#v", got, want)
 	}
-	if host.runtimeCfg == nil || host.runtimeCfg.Peers[0].Endpoint != "192.0.2.10:443" {
-		t.Fatalf("runtime config did not contain selected numeric endpoint: %#v", host.runtimeCfg)
+	if host.runtimeCfg == nil ||
+		host.runtimeCfg.Peers[0].Endpoint != "[::ffff:192.0.2.10]:443" ||
+		host.runtimeCfg.Interface.MTU != config.DefaultMTU {
+		t.Fatalf("host policy did not receive the immutable normalized configuration: %#v", host.runtimeCfg)
 	}
 }

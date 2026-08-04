@@ -81,6 +81,9 @@ func runWithHostReadyLog(
 	if err := validateConfig(cfg); err != nil {
 		return err
 	}
+	// Resolve the automatic value once before creating the immutable core
+	// snapshot and applying host policy.
+	cfg.Interface.MTU = cfg.EffectiveMTU()
 	runLogger.debugf(
 		"quick configuration: interface=%q config=%q addresses=%v dns=%v mtu=%d table=%q peers=%d hooks=%d/%d/%d/%d",
 		name, configPath, cfg.Interface.Addresses, cfg.Interface.DNS, cfg.Interface.MTU,
@@ -153,21 +156,14 @@ func runWithHostReadyLog(
 			runLogger.logger.Printf("close endpoint supervisor: %v", err)
 		}
 	}()
-	selected, err := supervisor.Initialize(ctx)
-	if err != nil {
+	if _, err := supervisor.Initialize(ctx); err != nil {
 		return err
 	}
-	runtimeConfig := cfg.Clone()
-	for index := range runtimeConfig.Peers {
-		if selectedEndpoint, ok := selected[runtimeConfig.Peers[index].PublicKey]; ok {
-			runtimeConfig.Peers[index].Endpoint = selectedEndpoint.String()
-		}
-	}
 	runLogger.debugf("applying platform address, route, MTU, and DNS policy")
-	networkCleanup, err := host.ConfigureNetwork(ctx, name, runtimeConfig)
+	networkCleanup, err := host.ConfigureNetwork(ctx, name, cfg)
 	defer func() {
 		supervisor.Stop()
-		cleanupHost(context.Background(), host, name, runtimeConfig, &networkCleanup, runLogger)
+		cleanupHost(context.Background(), host, name, cfg, &networkCleanup, runLogger)
 	}()
 	if err != nil {
 		return err

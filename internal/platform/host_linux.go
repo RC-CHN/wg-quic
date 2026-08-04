@@ -70,11 +70,7 @@ func (linuxHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.
 			return cleanup, err
 		}
 	}
-	mtu := cfg.Interface.MTU
-	if mtu == 0 {
-		mtu = 1380
-	}
-	if err := run(ctx, "ip", "link", "set", "dev", name, "mtu", fmt.Sprint(mtu), "up"); err != nil {
+	if err := run(ctx, "ip", "link", "set", "dev", name, "up"); err != nil {
 		return cleanup, err
 	}
 	operations, err := linuxRouteOperations(name, cfg)

@@ -44,6 +44,9 @@ func TestWindowsNetworkPlanLeavesEndpointRoutingToManager(t *testing.T) {
 			t.Fatalf("ordinary network operation owns endpoint routing: %s", operation.apply)
 		}
 	}
+	if !strings.Contains(operations[1].apply, "NlMtuBytes 1380") {
+		t.Fatalf("Windows IP-interface MTU did not use the central default: %s", operations[1].apply)
+	}
 	last := operations[len(operations)-1]
 	if !strings.Contains(last.apply, "Set-DnsClientServerAddress") ||
 		!strings.Contains(last.apply, "Set-DnsClient") ||

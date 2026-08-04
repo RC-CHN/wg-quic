@@ -53,6 +53,18 @@ type Transport struct {
 	Obfs       string
 }
 
+const DefaultMTU = 1380
+
+// EffectiveMTU is the single policy source for the configured or automatic
+// tunnel MTU. Platform code may apply this value to distinct OS surfaces, but
+// must not choose its own fallback.
+func (cfg *Config) EffectiveMTU() int {
+	if cfg != nil && cfg.Interface.MTU != 0 {
+		return cfg.Interface.MTU
+	}
+	return DefaultMTU
+}
+
 func (cfg *Config) Clone() *Config {
 	if cfg == nil {
 		return nil

@@ -123,6 +123,17 @@ PersistentKeepalive = off
 	}
 }
 
+func TestEffectiveMTUHasOneDefault(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.EffectiveMTU(); got != DefaultMTU {
+		t.Fatalf("automatic MTU = %d, want %d", got, DefaultMTU)
+	}
+	cfg.Interface.MTU = 1420
+	if got := cfg.EffectiveMTU(); got != 1420 {
+		t.Fatalf("explicit MTU = %d, want 1420", got)
+	}
+}
+
 func TestRejectsUnknownDirective(t *testing.T) {
 	input := `[Interface]
 PrivateKey = ` + testKey(1) + `

@@ -66,11 +66,7 @@ func (freeBSDHost) ConfigureNetwork(ctx context.Context, name string, cfg *confi
 			return cleanup, err
 		}
 	}
-	mtu := cfg.Interface.MTU
-	if mtu == 0 {
-		mtu = 1380
-	}
-	if err := run(ctx, "ifconfig", name, "mtu", fmt.Sprint(mtu), "up"); err != nil {
+	if err := run(ctx, "ifconfig", name, "up"); err != nil {
 		return cleanup, err
 	}
 	for _, operation := range freeBSDRouteOperations(name, cfg) {

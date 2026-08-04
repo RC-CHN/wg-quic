@@ -19,6 +19,7 @@ import (
 type testDeviceHost struct {
 	tunnel      *tuntest.ChannelTUN
 	controlPath string
+	createdMTU  int
 }
 
 func (h *testDeviceHost) ValidateInterfaceName(name string) error {
@@ -30,6 +31,7 @@ func (h *testDeviceHost) ControlPath(name string) string {
 }
 
 func (h *testDeviceHost) CreateTUN(name string, mtu int) (tun.Device, error) {
+	h.createdMTU = mtu
 	return h.tunnel.TUN(), nil
 }
 
@@ -47,6 +49,9 @@ func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	instance, err := New(cfg, "wg0", host)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if host.createdMTU != config.DefaultMTU {
+		t.Fatalf("CreateTUN MTU = %d, want %d", host.createdMTU, config.DefaultMTU)
 	}
 	if err := instance.Up(context.Background()); err != nil {
 		instance.Close()
