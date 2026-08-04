@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"log"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,13 @@ type RunOptions struct {
 	FwMark         *uint32
 	Debug          bool
 	DeferEndpoints bool
+	Snapshot       io.Reader
 }
 
 // Run starts only the userspace data plane. It does not assign addresses,
 // install routes or DNS, execute hooks, or invoke a service manager.
 func Run(ctx context.Context, configPath string, options RunOptions) error {
-	cfg, err := config.ParseFile(configPath)
+	cfg, err := loadConfiguration(configPath, options)
 	if err != nil {
 		return err
 	}
@@ -57,6 +59,22 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 		go logDebugStats(ctx, name, instance)
 	}
 	return instance.Wait(ctx)
+}
+
+func loadConfiguration(configPath string, options RunOptions) (*config.Config, error) {
+	var (
+		cfg *config.Config
+		err error
+	)
+	if options.Snapshot != nil {
+		cfg, err = config.ParseSnapshot(options.Snapshot)
+	} else {
+		cfg, err = config.ParseFile(configPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 func logDebugConfiguration(configPath, name string, cfg *config.Config) {

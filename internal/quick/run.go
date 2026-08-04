@@ -24,7 +24,7 @@ type coreProcess interface {
 	Err() error
 }
 
-type coreProcessFactory func(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error)
+type coreProcessFactory func(coreLaunch) (coreProcess, error)
 
 type runLog struct {
 	logger *log.Logger
@@ -103,8 +103,14 @@ func runWithHostReadyLog(
 			return fmt.Errorf("PreUp: %w", err)
 		}
 	}
+	snapshot, err := config.MarshalSnapshot(cfg)
+	if err != nil {
+		return err
+	}
 	runLogger.debugf("starting wg-quic core process")
-	process, err := newProcess(configPath, name, cfg.Interface.FwMark, true)
+	process, err := newProcess(coreLaunch{
+		ConfigPath: configPath, Name: name, Snapshot: snapshot, DeferEndpoints: true,
+	})
 	if err != nil {
 		return err
 	}

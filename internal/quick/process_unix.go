@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"sync"
 	"syscall"
 )
@@ -20,19 +19,15 @@ type execCoreProcess struct {
 	err error
 }
 
-func newCoreProcess(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
+func newCoreProcess(launch coreLaunch) (coreProcess, error) {
 	executable, err := coreExecutable()
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"run", configPath, "--name", name}
-	if fwmark != 0 {
-		args = append(args, "--fwmark", strconv.FormatUint(uint64(fwmark), 10))
+	cmd, err := coreCommand(executable, launch)
+	if err != nil {
+		return nil, err
 	}
-	if deferEndpoints {
-		args = append(args, "--defer-endpoints")
-	}
-	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return &execCoreProcess{cmd: cmd, done: make(chan struct{})}, nil

@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/base64"
 	"log"
 	"strings"
 	"testing"
@@ -36,5 +37,29 @@ func TestLogDebugConfigurationOmitsKeys(t *testing.T) {
 	}
 	if !strings.Contains(got, "preshared_key_present=true") || !strings.Contains(got, "192.0.2.1:51820") {
 		t.Fatalf("debug output omitted safe diagnostics: %s", got)
+	}
+}
+
+func TestLoadConfigurationUsesSnapshotWithoutReadingSourcePath(t *testing.T) {
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+			FwMark:     123,
+		},
+		Transport: config.DefaultTransport(),
+	}
+	snapshot, err := config.MarshalSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadConfiguration(
+		"/path/that/must/not/be/read.conf",
+		RunOptions{Snapshot: bytes.NewReader(snapshot)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Interface.PrivateKey != cfg.Interface.PrivateKey || got.Interface.FwMark != 123 {
+		t.Fatalf("loaded snapshot = %#v, want %#v", got, cfg)
 	}
 }

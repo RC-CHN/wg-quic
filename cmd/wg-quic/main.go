@@ -96,6 +96,12 @@ func parseRunArgs(args []string) (string, core.RunOptions, error) {
 		case "--defer-endpoints":
 			options.DeferEndpoints = true
 			i++
+		case "--config-snapshot-stdin":
+			if options.Snapshot != nil {
+				return "", core.RunOptions{}, errors.New("--config-snapshot-stdin was specified more than once")
+			}
+			options.Snapshot = os.Stdin
+			i++
 		case "--name", "--fwmark":
 			if i+1 >= len(args) {
 				return "", core.RunOptions{}, fmt.Errorf("%s requires a value", args[i])

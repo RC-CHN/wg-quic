@@ -223,11 +223,20 @@ Endpoint = 192.0.2.10:443
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		result <- runWithHost(ctx, path, "wg0", host, func(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
-			if !deferEndpoints {
+		result <- runWithHost(ctx, path, "wg0", host, func(launch coreLaunch) (coreProcess, error) {
+			if !launch.DeferEndpoints {
 				return nil, errors.New("quick did not defer core endpoints")
 			}
-			return &testCoreProcess{host: host, name: name, done: make(chan struct{})}, nil
+			snapshot, err := config.ParseSnapshot(bytes.NewReader(launch.Snapshot))
+			if err != nil {
+				return nil, err
+			}
+			if launch.ConfigPath != path || launch.Name != "wg0" ||
+				snapshot.Interface.PrivateKey != key ||
+				snapshot.Peers[0].PublicKey != peerKey {
+				return nil, errors.New("quick did not pass its parsed configuration snapshot to core")
+			}
+			return &testCoreProcess{host: host, name: launch.Name, done: make(chan struct{})}, nil
 		})
 	}()
 	select {
