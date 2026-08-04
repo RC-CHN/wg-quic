@@ -83,12 +83,12 @@ WireGuard PresharedKeys. Its pinned upper-layer behavior matrix covers:
   Salamander transport;
 - cryptokey routing from one WireGuard device to two distinct peers.
 
-The Salamander round-trip additionally asserts that `quic.Transport.Conn`
-resolves to the obfuscating PacketConn rather than the raw UDP socket. The
-adapter intentionally disables QUIC GSO/GRO and ECN OOB paths until their
-segment metadata can be rewritten for Salamander's per-datagram header. A
-negative integration test configures different Salamander keys and requires
-the QUIC handshake and plaintext delivery to fail.
+The dedicated `internal/transport/quic` carrier test additionally asserts that
+`quic.Transport.Conn` resolves to the obfuscating PacketConn rather than the
+raw UDP socket. The adapter intentionally disables QUIC GSO/GRO and ECN OOB
+paths until their segment metadata can be rewritten for Salamander's
+per-datagram header. A negative ArmorBind integration test configures different
+Salamander keys and requires the QUIC handshake and plaintext delivery to fail.
 
 The extended large-packet and concurrent behavior matrix currently runs on
 Linux and FreeBSD. Windows is intentionally behind those targets: its native CI
@@ -99,7 +99,9 @@ to Windows is tracked with the deferred Windows host backend rather than
 weakening the Linux/FreeBSD assertions.
 
 The container suite repeats the production path with four separate Linux
-process and network namespaces, real TUN devices, and network impairment.
+nodes and network namespaces, real TUN devices, and network impairment. Each
+node runs `wg-quic-quick` as the host-policy supervisor and a distinct
+`wg-quic` core child process.
 GitHub Actions names this the `Two-node Linux tunnel interoperability` gate;
 the primary A/B pair is checked to have distinct network namespaces before any
 tunnel assertion. A6/B6 independently verify IPv6 outer endpoints.

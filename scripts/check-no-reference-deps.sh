@@ -46,4 +46,16 @@ if [ "$fork_device_dir" != "$repo_dir/third_party/wireguard-go/device" ]; then
 	exit 1
 fi
 
+quick_dependencies=$(go list -deps ./internal/quick)
+if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/core\$"; then
+	echo "wg-quic-quick embeds the wg-quic core instead of supervising the separate executable" >&2
+	exit 1
+fi
+
+bind_imports=$(go list -f '{{join .Imports "\n"}}' ./internal/bind)
+if printf '%s\n' "$bind_imports" | grep -q '^github\.com/quic-go/quic-go$'; then
+	echo "ArmorBind imports quic-go directly instead of using internal/transport/quic" >&2
+	exit 1
+fi
+
 echo "$actual_module uses the in-repository WireGuard fork and has no dependency on references/"
