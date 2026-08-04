@@ -94,9 +94,11 @@ The extended large-packet and concurrent behavior matrix currently runs on
 Linux and FreeBSD. Windows is intentionally behind those targets: its native CI
 still executes every Windows-applicable fork test, the ArmorBind round-trip,
 simultaneous-dial and abrupt-restart regressions, and the bidirectional
-WireGuard-over-QUIC/FEC/Salamander smoke test. Extending the high-volume matrix
-to Windows is tracked with the deferred Windows host backend rather than
-weakening the Linux/FreeBSD assertions.
+WireGuard-over-QUIC/FEC/Salamander smoke test. It also executes the Windows
+ACL Named Pipe status transport, quick SCM state machine, and host-network plan
+tests repeatedly, then builds and smokes both amd64 CLIs and cross-builds both
+arm64 CLIs. Actual privileged Wintun and route mutation remains a Windows VM
+integration gate rather than a hosted-runner unit test.
 
 The container suite repeats the production path with four separate Linux
 nodes and network namespaces, real TUN devices, and network impairment. Each

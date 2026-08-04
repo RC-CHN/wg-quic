@@ -35,13 +35,21 @@ jobs:
         run: go test -count=10 -timeout=5m ./internal/transport/quic ./internal/bind
       - name: Named Pipe behavior
         run: go test -count=3 -timeout=5m ./third_party/wireguard-go/ipc/namedpipe
-      - name: Build Windows CLI
-        run: go build ./cmd/wg-quic
-      - name: Cross-build Windows arm64 CLI
+      - name: Windows control and quick lifecycle stress
+        run: go test -count=10 -timeout=5m ./internal/control ./internal/platform ./internal/quick
+      - name: Build and smoke Windows CLIs
+        shell: pwsh
+        run: |
+          go build -o wg-quic.exe ./cmd/wg-quic
+          go build -o wg-quic-quick.exe ./cmd/wg-quic-quick
+          .\wg-quic.exe version
+          .\wg-quic-quick.exe version
+      - name: Cross-build Windows arm64 CLIs
         shell: pwsh
         run: |
           $env:GOARCH = "arm64"
           go build -o wg-quic-arm64.exe ./cmd/wg-quic
+          go build -o wg-quic-quick-arm64.exe ./cmd/wg-quic-quick
 
   freebsd:
     runs-on: ubuntu-latest
