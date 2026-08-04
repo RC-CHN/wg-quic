@@ -58,10 +58,12 @@ if [ "$quic_module" != "github.com/quic-go/quic-go" ]; then
 fi
 
 quick_dependencies=$(go list -deps ./internal/quick)
-if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/core\$"; then
-	echo "wg-quic-quick embeds the wg-quic core instead of supervising the separate executable" >&2
-	exit 1
-fi
+for forbidden in core bind transport/fec transport/obfs transport/quic wgdevice; do
+	if printf '%s\n' "$quick_dependencies" | grep -q "^$expected_module/internal/$forbidden\$"; then
+		echo "wg-quic-quick depends on data-plane package internal/$forbidden" >&2
+		exit 1
+	fi
+done
 
 bind_imports=$(go list -f '{{join .Imports "\n"}}' ./internal/bind)
 if printf '%s\n' "$bind_imports" | grep -q '^github\.com/quic-go/quic-go$'; then

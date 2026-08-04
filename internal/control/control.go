@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 const requestTimeout = 5 * time.Second
@@ -22,7 +22,7 @@ type Status struct {
 	FECMode    string          `json:"fec_mode"`
 	ObfsMode   string          `json:"obfs_mode"`
 	Peers      []PeerStatus    `json:"peers,omitempty"`
-	Stats      armorbind.Stats `json:"stats"`
+	Stats      telemetry.Stats `json:"stats"`
 }
 
 type PeerStatus struct {

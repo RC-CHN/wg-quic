@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/fec"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
@@ -97,24 +98,6 @@ type bindStats struct {
 	fecRecovered   atomic.Uint64
 	fecUnrecovered atomic.Uint64
 	activeSessions atomic.Uint64
-}
-
-type Stats struct {
-	WGTxPackets    uint64 `json:"wg_tx_packets"`
-	WGTxBytes      uint64 `json:"wg_tx_bytes"`
-	WGRxPackets    uint64 `json:"wg_rx_packets"`
-	WGRxBytes      uint64 `json:"wg_rx_bytes"`
-	WireTxPackets  uint64 `json:"wire_tx_packets"`
-	WireTxBytes    uint64 `json:"wire_tx_bytes"`
-	WireRxPackets  uint64 `json:"wire_rx_packets"`
-	WireRxBytes    uint64 `json:"wire_rx_bytes"`
-	QueueDrops     uint64 `json:"queue_drops"`
-	FECDataTx      uint64 `json:"fec_data_tx"`
-	FECParityTx    uint64 `json:"fec_parity_tx"`
-	FECRawLost     uint64 `json:"fec_raw_lost"`
-	FECRecovered   uint64 `json:"fec_recovered"`
-	FECUnrecovered uint64 `json:"fec_unrecovered"`
-	ActiveSessions uint64 `json:"active_sessions"`
 }
 
 type EndpointSessionState string
@@ -242,8 +225,8 @@ func (b *Bind) SetMark(mark uint32) error {
 }
 func (b *Bind) BatchSize() int { return 32 }
 
-func (b *Bind) Stats() Stats {
-	return Stats{
+func (b *Bind) Stats() telemetry.Stats {
+	return telemetry.Stats{
 		WGTxPackets: b.stats.wgTxPackets.Load(), WGTxBytes: b.stats.wgTxBytes.Load(),
 		WGRxPackets: b.stats.wgRxPackets.Load(), WGRxBytes: b.stats.wgRxBytes.Load(),
 		WireTxPackets: b.stats.wireTxPackets.Load(), WireTxBytes: b.stats.wireTxBytes.Load(),

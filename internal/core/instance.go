@@ -16,6 +16,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	"github.com/RC-CHN/wg-quic/internal/wgdevice"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
@@ -219,7 +220,7 @@ func (i *Instance) ListenPort() uint16 {
 	return i.bind.Port()
 }
 
-func (i *Instance) Stats() armorbind.Stats {
+func (i *Instance) Stats() telemetry.Stats {
 	return i.bind.Stats()
 }
 
