@@ -9,7 +9,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 )
 
-func TestWindowsNetworkPlanPinsEndpointBeforeDefaultRoute(t *testing.T) {
+func TestWindowsNetworkPlanLeavesEndpointRoutingToManager(t *testing.T) {
 	cfg := &config.Config{
 		Interface: config.Interface{
 			Addresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.1/24")},
@@ -19,36 +19,31 @@ func TestWindowsNetworkPlanPinsEndpointBeforeDefaultRoute(t *testing.T) {
 			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")},
 		}},
 	}
-	operations, err := windowsNetworkOperations(
-		"wg-quic' test",
-		cfg,
-		[]netip.Addr{netip.MustParseAddr("192.0.2.10")},
-	)
+	operations, err := windowsNetworkOperations("wg-quic' test", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(operations) < 5 {
+	if len(operations) < 4 {
 		t.Fatalf("network plan has only %d operations", len(operations))
 	}
-	if !strings.Contains(operations[0].apply, "192.0.2.10/32") ||
-		!strings.Contains(operations[0].apply, "42771") {
-		t.Fatalf("first operation does not pin the endpoint: %s", operations[0].apply)
-	}
-	var endpointIndex, defaultIndex = -1, -1
+	var defaultIndex = -1
 	for i, operation := range operations {
-		if strings.Contains(operation.apply, "192.0.2.10/32") {
-			endpointIndex = i
-		}
 		if strings.Contains(operation.apply, "0.0.0.0/0") &&
 			strings.Contains(operation.apply, "New-NetRoute -InterfaceIndex $ifIndex") {
 			defaultIndex = i
 		}
 	}
-	if endpointIndex < 0 || defaultIndex < 0 || endpointIndex >= defaultIndex {
-		t.Fatalf("endpoint route index=%d, tunnel default route index=%d", endpointIndex, defaultIndex)
+	if defaultIndex < 0 {
+		t.Fatal("network plan does not install the tunnel default route")
 	}
-	if !strings.Contains(operations[1].apply, "wg-quic'' test") {
+	if !strings.Contains(operations[0].apply, "wg-quic'' test") {
 		t.Fatal("interface name was not safely PowerShell-quoted")
+	}
+	for _, operation := range operations {
+		if strings.Contains(operation.apply, "Find-NetRoute") ||
+			strings.Contains(operation.apply, "42771") {
+			t.Fatalf("ordinary network operation owns endpoint routing: %s", operation.apply)
+		}
 	}
 	last := operations[len(operations)-1]
 	if !strings.Contains(last.apply, "Set-DnsClientServerAddress") ||
@@ -65,7 +60,7 @@ func TestWindowsNetworkPlanHonorsTableOff(t *testing.T) {
 			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")},
 		}},
 	}
-	operations, err := windowsNetworkOperations("wg0", cfg, nil)
+	operations, err := windowsNetworkOperations("wg0", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +73,12 @@ func TestWindowsNetworkPlanHonorsTableOff(t *testing.T) {
 
 func TestWindowsNetworkPlanRejectsUnsupportedTableAndDNSDomains(t *testing.T) {
 	cfg := &config.Config{Interface: config.Interface{Table: "123"}}
-	if _, err := windowsNetworkOperations("wg0", cfg, nil); err == nil {
+	if _, err := windowsNetworkOperations("wg0", cfg); err == nil {
 		t.Fatal("explicit Windows route table was silently accepted")
 	}
 	cfg.Interface.Table = ""
 	cfg.Interface.DNS = []string{"one.example", "two.example"}
-	if _, err := windowsNetworkOperations("wg0", cfg, nil); err == nil {
+	if _, err := windowsNetworkOperations("wg0", cfg); err == nil {
 		t.Fatal("multiple Windows DNS suffixes were silently accepted")
 	}
 }

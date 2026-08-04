@@ -21,7 +21,9 @@ var windowsInterfaceNamePattern = regexp.MustCompile(`^[^\\/:*?"<>|\x00-\x1f]{1,
 type windowsHost struct{}
 
 type windowsNetworkState struct {
-	undo []string
+	endpointLeases []RouteLease
+	routeManager   *windowsRouteManager
+	undo           []string
 }
 
 func Current() Host {
@@ -61,7 +63,7 @@ func (windowsHost) ConfigureNetwork(ctx context.Context, name string, cfg *confi
 	if err != nil {
 		return nil, err
 	}
-	operations, err := windowsNetworkOperations(name, cfg, endpoints)
+	operations, err := windowsNetworkOperations(name, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +75,30 @@ func (windowsHost) ConfigureNetwork(ctx context.Context, name string, cfg *confi
 				errs = append(errs, err)
 			}
 		}
+		for i := len(state.endpointLeases) - 1; i >= 0; i-- {
+			if err := state.endpointLeases[i].Release(cleanupCtx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if state.routeManager != nil {
+			if err := state.routeManager.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		return errors.Join(errs...)
+	}
+	if len(endpoints) != 0 {
+		state.routeManager, err = newWindowsRouteManager(name)
+		if err != nil {
+			return cleanup, err
+		}
+		for _, endpoint := range endpoints {
+			lease, acquireErr := state.routeManager.AcquireEndpointRoute(ctx, endpoint)
+			if acquireErr != nil {
+				return cleanup, acquireErr
+			}
+			state.endpointLeases = append(state.endpointLeases, lease)
+		}
 	}
 	for _, operation := range operations {
 		if err := runWindowsPowerShell(ctx, operation.apply); err != nil {

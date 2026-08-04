@@ -11,8 +11,6 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 )
 
-const windowsEndpointRouteMetric = 42771
-
 type windowsOperation struct {
 	apply string
 	undo  string
@@ -56,7 +54,7 @@ func windowsEndpointAddresses(ctx context.Context, cfg *config.Config) ([]netip.
 	return addresses, nil
 }
 
-func windowsNetworkOperations(name string, cfg *config.Config, endpoints []netip.Addr) ([]windowsOperation, error) {
+func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("configuration is required")
 	}
@@ -66,9 +64,6 @@ func windowsNetworkOperations(name string, cfg *config.Config, endpoints []netip
 	}
 	base := windowsPowerShellBase(name)
 	var operations []windowsOperation
-	for _, address := range endpoints {
-		operations = append(operations, windowsEndpointRouteOperation(base, address))
-	}
 	for _, prefix := range cfg.Interface.Addresses {
 		address := prefix.Addr().String()
 		operations = append(operations, windowsOperation{
@@ -116,34 +111,6 @@ func windowsNetworkOperations(name string, cfg *config.Config, endpoints []netip
 		operations = append(operations, dnsOperation)
 	}
 	return operations, nil
-}
-
-func windowsEndpointRouteOperation(base string, address netip.Addr) windowsOperation {
-	family := "IPv4"
-	bits := 32
-	defaultRoute := "0.0.0.0/0"
-	if address.Is6() {
-		family = "IPv6"
-		bits = 128
-		defaultRoute = "::/0"
-	}
-	destination := netip.PrefixFrom(address, bits).String()
-	metric := fmt.Sprint(windowsEndpointRouteMetric)
-	apply := base +
-		"$route=Get-NetRoute -AddressFamily " + family + " -DestinationPrefix " + powerShellQuote(defaultRoute) +
-		" -ErrorAction Stop | Where-Object { $_.InterfaceIndex -ne $ifIndex } | Sort-Object RouteMetric | Select-Object -First 1;" +
-		"if ($null -eq $route) { throw 'no physical default route for wg-quic endpoint' };" +
-		"$existing=Get-NetRoute -DestinationPrefix " + powerShellQuote(destination) +
-		" -ErrorAction SilentlyContinue | Where-Object { $_.RouteMetric -eq " + metric + " };" +
-		"if ($null -eq $existing) {" +
-		"New-NetRoute -DestinationPrefix " + powerShellQuote(destination) +
-		" -InterfaceIndex $route.InterfaceIndex -NextHop $route.NextHop -RouteMetric " + metric +
-		" -PolicyStore ActiveStore -ErrorAction Stop | Out-Null}"
-	undo := "$ErrorActionPreference='Continue';" +
-		"Get-NetRoute -DestinationPrefix " + powerShellQuote(destination) +
-		" -ErrorAction SilentlyContinue | Where-Object { $_.RouteMetric -eq " + metric + " } | " +
-		"Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue"
-	return windowsOperation{apply: apply, undo: undo}
 }
 
 func windowsDNSOperation(base string, values []string) (windowsOperation, error) {
