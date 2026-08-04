@@ -122,5 +122,20 @@ GitHub Actions uploads the same directories as the `wg-quic-windows` artifact.
 On Windows, `wg-quic-quick debug wg0` runs the tunnel in the foreground and
 writes a key-redacted diagnostic log under `%ProgramData%\wg-quic\logs`.
 
+## Release archives
+
+Every `v*` tag is gated again on native Linux, Windows, and FreeBSD tests plus
+the privileged Linux tunnel matrix. CD then publishes amd64 and arm64 archives
+for Linux, FreeBSD, and Windows together with one top-level `SHA256SUMS`.
+Windows archives include the matching official Wintun DLL and its license.
+
+To build and validate the same six archives locally:
+
+```sh
+make release-artifacts VERSION=0.1.0
+./scripts/check-release-archive.sh \
+  dist/wg-quic-v0.1.0-linux-amd64.tar.gz linux amd64 0.1.0
+```
+
 The implementation and tests are under active development. See the local
 `design/architecture.md` when the design checkout is present.

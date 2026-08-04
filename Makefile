@@ -1,13 +1,24 @@
-.PHONY: build build-windows check-no-reference-deps check-third-party test test-race test-wireguard test-transport test-container
+VERSION ?= $(shell test -f VERSION && sed -n '1p' VERSION || echo 0.1.0-dev)
+LDFLAGS = -s -w -X main.version=$(VERSION)
+
+.PHONY: build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-transport test-container
 
 build:
 	mkdir -p build
-	CGO_ENABLED=0 go build -trimpath -o build/wg-quic ./cmd/wg-quic
-	CGO_ENABLED=0 go build -trimpath -o build/wg-quic-quick ./cmd/wg-quic-quick
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o build/wg-quic ./cmd/wg-quic
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o build/wg-quic-quick ./cmd/wg-quic-quick
 
 build-windows:
-	./scripts/package-windows.sh amd64
-	./scripts/package-windows.sh arm64
+	WG_QUIC_VERSION="$(VERSION)" ./scripts/package-windows.sh amd64
+	WG_QUIC_VERSION="$(VERSION)" ./scripts/package-windows.sh arm64
+
+release-artifacts:
+	./scripts/package-release.sh linux amd64 "$(VERSION)"
+	./scripts/package-release.sh linux arm64 "$(VERSION)"
+	./scripts/package-release.sh freebsd amd64 "$(VERSION)"
+	./scripts/package-release.sh freebsd arm64 "$(VERSION)"
+	./scripts/package-release.sh windows amd64 "$(VERSION)"
+	./scripts/package-release.sh windows arm64 "$(VERSION)"
 
 test:
 	./scripts/check-no-reference-deps.sh
