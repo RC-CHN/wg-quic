@@ -16,17 +16,25 @@ The first matrices target two questions:
 2. At a fixed outer rate and RTT, how do delivered goodput and residual loss
    change as independent random loss increases?
 
-The fixture compares a two-by-two transport matrix:
+The fixture compares direct userspace WireGuard with the full two-by-two
+wg-quic transport matrix:
 
-| Mode | FEC | Salamander |
-| --- | --- | --- |
-| `nofec-plain` | off | off |
-| `nofec-obfs` | off | on |
-| `fec-plain` | auto | off |
-| `fec-obfs` | auto | on |
+| Mode | Carrier | FEC | Salamander |
+| --- | --- | --- | --- |
+| `direct-wireguard-go` | standard WireGuard UDP bind | n/a | n/a |
+| `nofec-plain` | QUIC DATAGRAM | off | off |
+| `nofec-obfs` | QUIC DATAGRAM | off | on |
+| `fec-plain` | QUIC DATAGRAM | auto | off |
+| `fec-obfs` | QUIC DATAGRAM | auto | on |
 
 `outer-tcp` and `outer-udp` bypass the tunnel and provide the Docker/veth
-baseline. They are not a stock WireGuard baseline.
+baseline. `direct-wireguard-go` is the stock userspace WireGuard baseline built
+from this repository's pinned fork.
+
+The benchmark's small `wg-uapi` helper configures that process and reads its
+transfer counters through wireguard-go's standard Unix UAPI. It is used only
+before and after the timed workload; it is not part of the direct WireGuard data
+path.
 
 By default, every tunnel trial first runs a short outer measurement under the
 exact same qdisc and records `outer_baseline_bps`. TCP trials use outer TCP;
@@ -96,7 +104,7 @@ is itself part of the experiment.
 Every trial:
 
 1. renders a fresh configuration;
-2. recreates both containers, resetting QUIC Reno and FEC controller state;
+2. recreates both containers, resetting WireGuard, QUIC Reno, and FEC state;
 3. applies the requested one-way or symmetric `netem` before the first probe;
 4. waits for the tunnel through that shaped path;
 5. captures baseline status and core CPU ticks;
@@ -146,6 +154,7 @@ SKIP_BUILD=1 MODE=nofec-obfs WORKLOAD=tcp ./tests/benchmark/run.sh trial
 Available matrices:
 
 ```sh
+./tests/benchmark/run.sh matrix transports
 ./tests/benchmark/run.sh matrix quick
 ./tests/benchmark/run.sh matrix ceiling
 ./tests/benchmark/run.sh matrix loss
@@ -153,16 +162,26 @@ Available matrices:
 ./tests/benchmark/run.sh matrix bandwidth
 ```
 
+- `transports` is the shortest apples-to-apples zero-loss TCP comparison: raw
+  outer plus all five tunnel modes, one repetition by default.
 - `quick` is a short functional sample, not publication-quality evidence.
-- `ceiling` runs raw outer TCP plus all four tunnel modes with 1 and 4 streams.
-- `loss` compares FEC on/off using TCP and a conservative 0.5 Mbit/s UDP load
+- `ceiling` runs raw outer TCP plus all five tunnel modes with 1 and 4 streams.
+- `loss` runs all five modes using TCP and a conservative 0.5 Mbit/s UDP load
   at 100 Mbit/s outer rate, approximately 40 ms RTT, and 0–15% symmetric
   random loss. Override `OFFERED_MBIT` after a bandwidth sweep.
-- `profiles` compares FEC on/off with TCP capacity traffic and a low-load
+- `profiles` runs all five modes with TCP capacity traffic and a low-load
   1 Mbit/s UDP probe across every synthetic link profile.
-- `bandwidth` sweeps offered UDP load through outer, plain, obfuscated, and FEC
-  paths. Override its space-separated load points with
+- `bandwidth` sweeps offered UDP load through outer and all five tunnel modes.
+  Override its space-separated load points with
   `OFFERED_RATES='5 10 20 40 80'`; select its link with `LINK_PROFILE`.
+
+All full matrices accept a space-separated `MODES` subset. For example, compare
+only direct WireGuard and the production FEC/obfuscation combination:
+
+```sh
+MODES='direct-wireguard-go fec-obfs' \
+./tests/benchmark/run.sh matrix profiles
+```
 
 For example, measure where a cellular-shaped path starts dropping offered load:
 
@@ -190,7 +209,8 @@ Stop any retained fixture:
 - measured outer baseline and tunnel/outer utilization;
 - configured forward/reverse link parameters;
 - WireGuard and wire bytes;
-- measured sender wire bit rate and goodput/wire ratio;
+- measured sender transport-payload bit rate and goodput/payload ratio;
+- comparable sender `eth0` bytes, bit rate, and goodput/outer ratio;
 - FEC data/parity counts;
 - raw missing, recovered, and unrecovered FEC shards;
 - local queue drops;
@@ -204,6 +224,17 @@ UDP `bandwidth` sweep is the stronger capacity check: the sustainable point is
 the highest offered load that keeps receiver loss and local queue drops within
 the chosen acceptance threshold.
 
+`wire_tx_bytes_a` is a transport-internal counter: wg-quic counts submitted QUIC
+DATAGRAM payload while direct WireGuard counts encrypted WireGuard messages.
+Use `outer_tx_bytes_a`, `outer_tx_bps_a`, and `goodput_to_outer_ratio` for
+cross-mode efficiency comparisons because those fields use the same sender
+`eth0` counter in every mode.
+
+`queue_drops_a` and `queue_drops_b` are ArmorBind queue counters and are
+therefore zero for `direct-wireguard-go`, which has no equivalent ArmorBind
+queue. Inspect `tc-a.txt` and `tc-b.txt` when comparing qdisc loss or overflow
+across direct and wg-quic modes.
+
 Always retain the raw JSON and qdisc output beside the CSV. A useful comparison
 requires at least three repetitions on an otherwise idle host. Report medians
 and dispersion, not only the best run.
@@ -216,9 +247,10 @@ Aggregate repeated rows without external Python packages:
 ```
 
 The report groups identical transport/link/workload conditions and emits the
-outer and tunnel medians, goodput P10/P90, UDP loss, queue drops, combined core
-CPU time, and goodput-to-wire efficiency. Dynamic and static link trials remain
-separate groups through the `link_schedule` field.
+outer and tunnel medians, goodput P10/P90, sender outer bit rate, UDP loss,
+queue drops, combined core CPU time, and both internal-payload and comparable
+outer-wire efficiency. Dynamic and static link trials remain separate groups
+through the `link_schedule` field.
 
 For the loss matrix, keep outer rate, RTT, MTU, offered UDP rate, direction,
 duration, and queue limit unchanged while varying only FEC mode and loss. For

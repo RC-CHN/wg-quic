@@ -76,10 +76,12 @@ def main():
         "goodput_median_mbit",
         "goodput_p10_mbit",
         "goodput_p90_mbit",
+        "sender_outer_median_mbit",
         "udp_loss_median_pct",
         "queue_drops_median",
         "cpu_median_s",
         "goodput_to_wire_median",
+        "goodput_to_outer_median",
     ]
     writer = csv.DictWriter(sys.stdout, fieldnames=fields)
     writer.writeheader()
@@ -101,6 +103,10 @@ def main():
                 "goodput_median_mbit": statistics.median(goodputs),
                 "goodput_p10_mbit": percentile(goodputs, 0.10),
                 "goodput_p90_mbit": percentile(goodputs, 0.90),
+                "sender_outer_median_mbit": statistics.median(
+                    number(row, "outer_tx_bps_a") / 1_000_000
+                    for row in measured
+                ),
                 "udp_loss_median_pct": statistics.median(
                     number(row, "udp_lost_pct") for row in measured
                 ),
@@ -113,6 +119,9 @@ def main():
                 ),
                 "goodput_to_wire_median": statistics.median(
                     number(row, "goodput_to_wire_ratio") for row in measured
+                ),
+                "goodput_to_outer_median": statistics.median(
+                    number(row, "goodput_to_outer_ratio") for row in measured
                 ),
             }
         )

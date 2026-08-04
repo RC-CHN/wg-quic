@@ -7,6 +7,9 @@ generated_dir="$script_dir/.generated"
 results_root=${RESULTS_DIR:-"$script_dir/results"}
 project_name=${COMPOSE_PROJECT_NAME:-wg-quic-bench}
 compose=(docker compose -p "$project_name" -f "$script_dir/compose.yaml")
+benchmark_transport=wg-quic
+benchmark_mtu=1380
+all_modes=(direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs)
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -16,13 +19,20 @@ require_command() {
 }
 
 compose_run() {
-	WGQ_BENCH_CONFIG_DIR="$generated_dir" "${compose[@]}" "$@"
+	WGQ_BENCH_CONFIG_DIR="$generated_dir" \
+		WGQ_BENCH_TRANSPORT="$benchmark_transport" \
+		WGQ_BENCH_MTU="$benchmark_mtu" \
+		"${compose[@]}" "$@"
 }
 
 compose_timeout() {
 	local seconds=$1
 	shift
-	timeout "$seconds" env WGQ_BENCH_CONFIG_DIR="$generated_dir" "${compose[@]}" "$@"
+	timeout "$seconds" env \
+		WGQ_BENCH_CONFIG_DIR="$generated_dir" \
+		WGQ_BENCH_TRANSPORT="$benchmark_transport" \
+		WGQ_BENCH_MTU="$benchmark_mtu" \
+		"${compose[@]}" "$@"
 }
 
 mode_settings() {
@@ -38,6 +48,24 @@ mode_settings() {
 		;;
 	nofec-plain)
 		printf '%s %s\n' off none
+		;;
+	direct-wireguard-go)
+		printf '%s %s\n' off none
+		;;
+	*)
+		echo "unsupported MODE $1" >&2
+		return 1
+		;;
+	esac
+}
+
+transport_for_mode() {
+	case "$1" in
+	direct-wireguard-go)
+		echo direct-wireguard-go
+		;;
+	fec-obfs | fec-plain | nofec-obfs | nofec-plain)
+		echo wg-quic
 		;;
 	*)
 		echo "unsupported MODE $1" >&2
@@ -258,6 +286,8 @@ render_configs() {
 		-e "s/@OBFS@/$obfs/g" \
 		-e "s/@MTU@/$mtu/g" \
 		"$script_dir/b.conf.in" >"$generated_dir/b.conf"
+	cp "$script_dir/a.uapi.in" "$generated_dir/a.uapi"
+	cp "$script_dir/b.uapi.in" "$generated_dir/b.uapi"
 }
 
 prepare_image() {
@@ -268,6 +298,9 @@ prepare_image() {
 	mkdir -p "$script_dir/build"
 	CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic" ./cmd/wg-quic
 	CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic-quick" ./cmd/wg-quic-quick
+	CGO_ENABLED=0 go -C "$repo_dir/third_party/wireguard-go" build \
+		-trimpath -o "$script_dir/build/wireguard-go" .
+	CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-uapi" ./tests/benchmark
 	docker build -t wg-quic-bench:local -f "$script_dir/Dockerfile" "$repo_dir"
 }
 
@@ -423,12 +456,47 @@ start_iperf_server() {
 snapshot_status() {
 	local service=$1
 	local output=$2
+	if [[ $benchmark_transport == direct-wireguard-go ]]; then
+		local status peer rx tx
+		status=$(compose_run exec -T "$service" \
+			/usr/local/bin/wg-uapi get /var/run/wireguard/wg0.sock)
+		peer=$(awk -F= '$1 == "public_key" {print $2; exit}' <<<"$status")
+		rx=$(awk -F= '$1 == "rx_bytes" {print $2; exit}' <<<"$status")
+		tx=$(awk -F= '$1 == "tx_bytes" {print $2; exit}' <<<"$status")
+		rx=${rx:-0}
+		tx=${tx:-0}
+		jq -n \
+			--arg peer "$peer" \
+			--argjson rx "${rx:-0}" \
+			--argjson tx "${tx:-0}" \
+			'{
+				transport: "direct-wireguard-go",
+				peer: $peer,
+				stats: {
+					wg_tx_bytes: $tx,
+					wg_rx_bytes: $rx,
+					wire_tx_bytes: $tx,
+					wire_rx_bytes: $rx,
+					queue_drops: 0,
+					fec_data_tx: 0,
+					fec_parity_tx: 0,
+					fec_raw_lost: 0,
+					fec_recovered: 0,
+					fec_unrecovered: 0
+				}
+			}' >"$output"
+		return
+	fi
 	compose_run exec -T "$service" wg-quic show wg0 --json >"$output"
 }
 
 core_pid() {
 	local service=$1
-	compose_run exec -T "$service" pidof wg-quic 2>/dev/null | tr -d '\r' | awk '{print $1}'
+	local process=wg-quic
+	if [[ $benchmark_transport == direct-wireguard-go ]]; then
+		process=wireguard-go
+	fi
+	compose_run exec -T "$service" pidof "$process" 2>/dev/null | tr -d '\r' | awk '{print $1}'
 }
 
 core_cpu_ticks() {
@@ -455,6 +523,14 @@ core_rss_kib() {
 	compose_run exec -T "$service" awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" | tr -d '\r'
 }
 
+interface_bytes() {
+	local service=$1
+	local interface=$2
+	local direction=$3
+	compose_run exec -T "$service" \
+		cat "/sys/class/net/$interface/statistics/${direction}_bytes" | tr -d '\r'
+}
+
 stat_delta() {
 	local before=$1
 	local after=$2
@@ -475,7 +551,7 @@ init_run_directory() {
 		summary_csv="$run_dir/summary.csv"
 		if [[ ! -f $summary_csv ]]; then
 			printf '%s\n' \
-				'trial_id,mode,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,parallel,offered_mbit,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,queue_drops_a,queue_drops_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json' \
+				'trial_id,mode,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,parallel,offered_mbit,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,queue_drops_a,queue_drops_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json' \
 				>"$summary_csv"
 			{
 				date -u
@@ -516,6 +592,8 @@ run_trial() {
 	validate_integer PARALLEL "$parallel"
 	validate_number OFFERED_MBIT "$offered_mbit"
 	validate_integer CONTROL_GRACE_SECONDS "${CONTROL_GRACE_SECONDS:-20}"
+	benchmark_transport=$(transport_for_mode "$mode")
+	benchmark_mtu=$mtu
 	case "$workload" in
 	tcp | udp | outer-tcp | outer-udp)
 		;;
@@ -645,6 +723,8 @@ run_trial() {
 	local cpu_a_before cpu_b_before
 	cpu_a_before=$(core_cpu_ticks a)
 	cpu_b_before=$(core_cpu_ticks b)
+	local outer_tx_a_before
+	outer_tx_a_before=$(interface_bytes a eth0 tx)
 
 	local destination=10.88.0.2
 	if [[ $workload == outer-* ]]; then
@@ -699,6 +779,8 @@ run_trial() {
 	local cpu_a_after cpu_b_after
 	cpu_a_after=$(core_cpu_ticks a)
 	cpu_b_after=$(core_cpu_ticks b)
+	local outer_tx_a_after
+	outer_tx_a_after=$(interface_bytes a eth0 tx)
 	snapshot_status a "$trial_dir/status-a-after.json"
 	snapshot_status b "$trial_dir/status-b-after.json"
 	compose_run exec -T a tc -s qdisc show dev eth0 >"$trial_dir/tc-a.txt"
@@ -738,18 +820,23 @@ run_trial() {
 	cpu_b_s=$(jq -n --argjson delta "$((cpu_b_after - cpu_b_before))" --argjson hz "$clock_ticks" '$delta / $hz')
 	rss_a=$(core_rss_kib a)
 	rss_b=$(core_rss_kib b)
-	local wire_tx_bps outer_utilization goodput_to_wire
+	local wire_tx_bps outer_tx outer_tx_bps outer_utilization goodput_to_wire goodput_to_outer
 	wire_tx_bps=$(jq -n --argjson bytes "$wire_tx" --argjson duration "$duration" \
+		'$bytes * 8 / $duration')
+	outer_tx=$((outer_tx_a_after - outer_tx_a_before))
+	outer_tx_bps=$(jq -n --argjson bytes "$outer_tx" --argjson duration "$duration" \
 		'$bytes * 8 / $duration')
 	outer_utilization=$(jq -n --argjson goodput "$goodput" --argjson outer "$outer_baseline" \
 		'if $outer > 0 then $goodput / $outer else 0 end')
 	goodput_to_wire=$(jq -n --argjson goodput "$goodput" --argjson wire "$wire_tx_bps" \
 		'if $wire > 0 then $goodput / $wire else 0 end')
+	goodput_to_outer=$(jq -n --argjson goodput "$goodput" --argjson wire "$outer_tx_bps" \
+		'if $wire > 0 then $goodput / $wire else 0 end')
 	local csv_schedule=${LINK_SCHEDULE:-}
 	csv_schedule=${csv_schedule//,/;}
 
 	printf '%s\n' \
-		"$trial_id,$mode,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$parallel,$offered_mbit,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$wire_tx,$wire_tx_bps,$goodput_to_wire,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$drops_a,$drops_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
+		"$trial_id,$mode,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$parallel,$offered_mbit,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$drops_a,$drops_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
 		>>"$summary_csv"
 	echo "$trial_id: $workload_status, $(awk -v bps="$goodput" -v outer="$outer_baseline" \
 		'BEGIN {printf "%.2f Mbit/s (outer %.2f Mbit/s)", bps / 1000000, outer / 1000000}')"
@@ -776,7 +863,18 @@ run_from_environment() {
 run_matrix() {
 	local matrix=$1
 	local repeat mode loss parallel workload
+	local -a selected_modes
+	read -r -a selected_modes <<<"${MODES:-${all_modes[*]}}"
 	case "$matrix" in
+	transports)
+		CURRENT_LINK_PROFILE=unshaped
+		for repeat in $(seq 1 "${REPEATS:-1}"); do
+			run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-10}" 1 0
+			for mode in "${selected_modes[@]}"; do
+				run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-10}" 1 0
+			done
+		done
+		;;
 	quick)
 		CURRENT_LINK_PROFILE=custom
 		for mode in nofec-obfs fec-obfs; do
@@ -785,7 +883,7 @@ run_matrix() {
 			done
 		done
 		run_trial nofec-plain outer-tcp 1 none 0 0 0 0 1000 1380 3 1 0
-		for mode in nofec-plain nofec-obfs fec-obfs; do
+		for mode in "${selected_modes[@]}"; do
 			run_trial "$mode" tcp 1 none 0 0 0 0 1000 1380 3 1 0
 		done
 		;;
@@ -794,7 +892,7 @@ run_matrix() {
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for parallel in 1 4; do
 				run_trial nofec-plain outer-tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-15}" "$parallel" 0
-				for mode in nofec-plain nofec-obfs fec-plain fec-obfs; do
+				for mode in "${selected_modes[@]}"; do
 					run_trial "$mode" tcp "$repeat" none 0 0 0 0 1000 1380 "${DURATION:-15}" "$parallel" 0
 				done
 			done
@@ -804,7 +902,7 @@ run_matrix() {
 		CURRENT_LINK_PROFILE=custom
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for workload in udp tcp; do
-				for mode in nofec-obfs fec-obfs; do
+				for mode in "${selected_modes[@]}"; do
 					for loss in 0 0.5 1 2 5 10 15; do
 						run_trial "$mode" "$workload" "$repeat" symmetric \
 							"${RATE_MBIT:-100}" "${ONE_WAY_DELAY_MS:-20}" 0 "$loss" 1000 1380 \
@@ -817,7 +915,7 @@ run_matrix() {
 	profiles)
 		for repeat in $(seq 1 "${REPEATS:-3}"); do
 			for CURRENT_LINK_PROFILE in lan fiber cable dsl wifi cellular satellite lossy-wifi; do
-				for mode in nofec-obfs fec-obfs; do
+				for mode in "${selected_modes[@]}"; do
 					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1380 \
 						"${DURATION:-15}" 1 "${OFFERED_MBIT:-1}"
 					run_trial "$mode" tcp "$repeat" symmetric 0 0 0 0 1000 1380 \
@@ -832,7 +930,7 @@ run_matrix() {
 			for offered_mbit in ${OFFERED_RATES:-10 25 50 100 200 500}; do
 				run_trial nofec-plain outer-udp "$repeat" symmetric 0 0 0 0 1000 1380 \
 					"${DURATION:-10}" 1 "$offered_mbit"
-				for mode in nofec-plain nofec-obfs fec-obfs; do
+				for mode in "${selected_modes[@]}"; do
 					run_trial "$mode" udp "$repeat" symmetric 0 0 0 0 1000 1380 \
 						"${DURATION:-10}" 1 "$offered_mbit"
 				done
@@ -840,7 +938,7 @@ run_matrix() {
 		done
 		;;
 	*)
-		echo "matrix must be quick, ceiling, loss, profiles, or bandwidth" >&2
+		echo "matrix must be transports, quick, ceiling, loss, profiles, or bandwidth" >&2
 		return 1
 		;;
 	esac
@@ -852,17 +950,18 @@ Usage:
   tests/benchmark/run.sh prepare
   tests/benchmark/run.sh trial
   tests/benchmark/run.sh smoke
-  tests/benchmark/run.sh matrix quick|ceiling|loss|profiles|bandwidth
+  tests/benchmark/run.sh matrix transports|quick|ceiling|loss|profiles|bandwidth
   tests/benchmark/run.sh down
 
 The trial command is configured with environment variables. Common values:
-  MODE=fec-obfs|fec-plain|nofec-obfs|nofec-plain
+  MODE=direct-wireguard-go|nofec-plain|nofec-obfs|fec-plain|fec-obfs
   WORKLOAD=tcp|udp|outer-tcp|outer-udp
   LINK_PROFILE=custom|unshaped|lan|fiber|cable|dsl|wifi|cellular|satellite|lossy-wifi
   IMPAIRMENT=none|forward|reverse|symmetric
   RATE_MBIT=0 LOSS_PCT=0 ONE_WAY_DELAY_MS=0 JITTER_MS=0
   FWD_RATE_MBIT=0 REV_RATE_MBIT=0 FWD_LOSS_PCT=0 REV_LOSS_PCT=0
   LINK_SCHEDULE=5:cellular,10:fiber
+  MODES='direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs'
   OFFERED_RATES='10 25 50 100 200 500'
   DURATION=10 PARALLEL=1 OFFERED_MBIT=50 MTU=1380
 EOF

@@ -4,6 +4,12 @@ services:
     privileged: true
     volumes:
       - ${WGQ_BENCH_CONFIG_DIR}/a.conf:/etc/wg-quic/wg0.conf:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/a.uapi:/etc/wg-quic/wg0.uapi:ro
+    environment:
+      WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
+      WGQ_BENCH_ADDRESS: 10.88.0.1/32
+      WGQ_BENCH_PEER_ADDRESS: 10.88.0.2/32
+      WGQ_BENCH_MTU: ${WGQ_BENCH_MTU:-1380}
     networks:
       outer:
         ipv4_address: 172.30.0.2
@@ -13,6 +19,12 @@ services:
     privileged: true
     volumes:
       - ${WGQ_BENCH_CONFIG_DIR}/b.conf:/etc/wg-quic/wg0.conf:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/b.uapi:/etc/wg-quic/wg0.uapi:ro
+    environment:
+      WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
+      WGQ_BENCH_ADDRESS: 10.88.0.2/32
+      WGQ_BENCH_PEER_ADDRESS: 10.88.0.1/32
+      WGQ_BENCH_MTU: ${WGQ_BENCH_MTU:-1380}
     networks:
       outer:
         ipv4_address: 172.30.0.3
