@@ -1,0 +1,115 @@
+#!/bin/sh
+# shellcheck disable=SC1091,SC2034
+#
+# PROVIDE: wg_quic
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# Add this to /etc/rc.conf:
+#   wg_quic_enable="YES"
+#   wg_quic_interfaces="wg0"
+#
+
+. /etc/rc.subr
+
+name="wg_quic"
+rcvar="wg_quic_enable"
+desc="wg-quic userspace tunnels"
+
+load_rc_config "$name"
+
+: "${wg_quic_enable:=NO}"
+: "${wg_quic_interfaces:=}"
+: "${wg_quic_quick:=/usr/local/bin/wg-quic-quick}"
+
+start_cmd="wg_quic_start"
+stop_cmd="wg_quic_stop"
+status_cmd="wg_quic_status"
+
+wg_quic_validate_interface()
+{
+	case "$1" in
+	""|*[!A-Za-z0-9_=+.-]*)
+		err 1 "invalid wg-quic interface name: $1"
+		;;
+	esac
+	if [ "${#1}" -gt 15 ]; then
+		err 1 "wg-quic interface name is longer than 15 characters: $1"
+	fi
+}
+
+wg_quic_each_interface()
+{
+	if [ "$#" -gt 0 ]; then
+		printf '%s\n' "$@"
+	else
+		printf '%s\n' "$wg_quic_interfaces"
+	fi
+}
+
+wg_quic_start()
+{
+	interfaces=$(wg_quic_each_interface "$@")
+	if [ -z "$interfaces" ]; then
+		err 1 "no interface supplied and wg_quic_interfaces is empty"
+	fi
+	install -d -m 0755 /var/run/wg-quic /var/log/wg-quic
+	for interface in $interfaces; do
+		wg_quic_validate_interface "$interface"
+		supervisor_pid="/var/run/wg-quic/${interface}.supervisor.pid"
+		child_pid="/var/run/wg-quic/${interface}.pid"
+		log_file="/var/log/wg-quic/${interface}.log"
+		if [ -s "$supervisor_pid" ] && kill -0 "$(cat "$supervisor_pid")" 2>/dev/null; then
+			warn "wg-quic interface ${interface} is already running"
+			continue
+		fi
+		rm -f "$supervisor_pid" "$child_pid"
+		echo "Starting wg-quic interface ${interface}."
+		/usr/sbin/daemon -c -r -R 2 \
+			-P "$supervisor_pid" -p "$child_pid" \
+			-t "wg-quic-${interface}" -o "$log_file" \
+			"$wg_quic_quick" run "$interface"
+	done
+}
+
+wg_quic_stop()
+{
+	interfaces=$(wg_quic_each_interface "$@")
+	if [ -z "$interfaces" ]; then
+		err 1 "no interface supplied and wg_quic_interfaces is empty"
+	fi
+	for interface in $interfaces; do
+		wg_quic_validate_interface "$interface"
+		supervisor_pid="/var/run/wg-quic/${interface}.supervisor.pid"
+		if [ ! -s "$supervisor_pid" ]; then
+			warn "wg-quic interface ${interface} is not running"
+			continue
+		fi
+		pid=$(cat "$supervisor_pid")
+		echo "Stopping wg-quic interface ${interface}."
+		kill "$pid"
+		wait_for_pids "$pid"
+	done
+}
+
+wg_quic_status()
+{
+	interfaces=$(wg_quic_each_interface "$@")
+	if [ -z "$interfaces" ]; then
+		err 1 "no interface supplied and wg_quic_interfaces is empty"
+	fi
+	status=0
+	for interface in $interfaces; do
+		wg_quic_validate_interface "$interface"
+		supervisor_pid="/var/run/wg-quic/${interface}.supervisor.pid"
+		if [ -s "$supervisor_pid" ] && kill -0 "$(cat "$supervisor_pid")" 2>/dev/null; then
+			echo "wg-quic interface ${interface} is running."
+		else
+			echo "wg-quic interface ${interface} is not running."
+			status=1
+		fi
+	done
+	return "$status"
+}
+
+run_rc_command "$@"

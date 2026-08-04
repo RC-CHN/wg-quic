@@ -52,6 +52,7 @@ start_iperf_server() {
 
 mkdir -p "$script_dir/build"
 (cd "$repo_dir" && CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic" ./cmd/wg-quic)
+(cd "$repo_dir" && CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic-quick" ./cmd/wg-quic-quick)
 docker build -t wg-quic-e2e:local -f "$script_dir/Dockerfile" "$repo_dir"
 
 $compose up -d

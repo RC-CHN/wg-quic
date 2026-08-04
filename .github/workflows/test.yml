@@ -20,7 +20,7 @@ jobs:
       - name: Pinned WireGuard behavior over production ArmorBind
         run: go test -count=1 -run '^TestWireGuard' ./internal/bind
       - run: go test -race ./...
-      - run: shellcheck scripts/*.sh tests/container/*.sh
+      - run: shellcheck scripts/*.sh tests/container/*.sh packaging/freebsd/wg_quic
 
   windows:
     runs-on: windows-latest
@@ -50,6 +50,8 @@ jobs:
             ./scripts/check-no-reference-deps.sh
             go test ./...
             go build ./cmd/wg-quic
+            go build ./cmd/wg-quic-quick
+            sh -n packaging/freebsd/wg_quic
 
   container:
     name: Two-node Linux tunnel interoperability

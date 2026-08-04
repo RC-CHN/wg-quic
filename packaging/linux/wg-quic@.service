@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/wg-quic run /etc/wireguard/%i.conf --name %i
+ExecStart=/usr/local/bin/wg-quic-quick run %i
 Restart=on-failure
 RestartSec=2s
 AmbientCapabilities=CAP_NET_ADMIN
