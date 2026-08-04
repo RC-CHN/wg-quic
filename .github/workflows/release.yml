@@ -33,6 +33,9 @@ jobs:
         shell: bash
         run: test "$(sed -n '1p' VERSION)" = "${RELEASE_VERSION#v}"
       - run: ./scripts/check-no-reference-deps.sh
+      - name: In-repository quic-go tests
+        working-directory: third_party/quic-go
+        run: go test -count=1 ./...
       - run: go test -count=1 ./...
       - run: go test -race ./...
       - run: shellcheck scripts/*.sh tests/container/*.sh packaging/freebsd/wg_quic

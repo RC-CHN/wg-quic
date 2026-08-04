@@ -12,6 +12,8 @@ require (
 	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c
 )
 
+replace github.com/quic-go/quic-go => ./third_party/quic-go
+
 require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect

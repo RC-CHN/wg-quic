@@ -1,7 +1,7 @@
 VERSION ?= $(shell test -f VERSION && sed -n '1p' VERSION || echo 0.1.0-dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
-.PHONY: build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-transport test-container
+.PHONY: build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-quic test-transport test-container
 
 build:
 	mkdir -p build
@@ -29,12 +29,16 @@ check-no-reference-deps:
 
 check-third-party:
 	cd third_party/wintun && sha256sum -c SHA256SUMS
+	cd third_party/quic-go && go test ./...
 
 test-race:
 	go test -race ./...
 
 test-wireguard:
 	go test -count=1 ./third_party/wireguard-go/...
+
+test-quic:
+	cd third_party/quic-go && go test -count=1 ./...
 
 test-transport:
 	go test -count=1 -run '^TestWireGuard' ./internal/bind

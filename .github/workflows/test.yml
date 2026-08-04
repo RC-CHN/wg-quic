@@ -16,6 +16,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: ./scripts/check-no-reference-deps.sh
+      - name: In-repository quic-go tests
+        working-directory: third_party/quic-go
+        run: go test -count=1 ./...
       - run: go test ./...
       - name: Pinned WireGuard behavior over production ArmorBind
         run: go test -count=1 -run '^TestWireGuard' ./internal/bind
