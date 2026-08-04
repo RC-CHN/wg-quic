@@ -68,13 +68,20 @@ func newWindowsRouteManager(tunnel string) (*windowsRouteManager, error) {
 		_ = lease.Close()
 		return nil, err
 	}
-	return &windowsRouteManager{
+	notifier, err := newWindowsRouteNotifier()
+	if err != nil {
+		_ = lease.Close()
+		return nil, fmt.Errorf("subscribe to Windows route changes: %w", err)
+	}
+	manager := &windowsRouteManager{
 		system:     windowsNativeRouteSystem{},
 		store:      store,
 		owner:      owner,
 		tunnelLUID: tunnelLUID,
 		closeOwner: lease.Close,
-	}, nil
+	}
+	manager.startRouteWatcher(notifier)
+	return manager, nil
 }
 
 func (s *windowsDiskRouteStore) prepare() error {
@@ -131,6 +138,7 @@ func (s *windowsDiskRouteStore) createOwnerLease(
 			Tunnel:     tunnel,
 			InstanceID: instanceID,
 			LeaseFile:  filename,
+			References: 1,
 		},
 		&windowsOwnerLease{file: file, path: path},
 		nil

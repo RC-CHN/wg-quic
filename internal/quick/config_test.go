@@ -106,6 +106,8 @@ func (l *testEndpointRouteLeaser) Close() error {
 	return nil
 }
 
+func (*testEndpointRouteLeaser) Changes() <-chan struct{} { return nil }
+
 func (l *testEndpointRouteLease) Release(context.Context) error {
 	l.once.Do(func() { l.host.record("route-release") })
 	return nil

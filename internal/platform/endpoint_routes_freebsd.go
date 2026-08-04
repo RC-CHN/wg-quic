@@ -133,3 +133,5 @@ func (m *freeBSDEndpointRouteLeaser) Close() error {
 	}
 	return errors.Join(errs...)
 }
+
+func (*freeBSDEndpointRouteLeaser) Changes() <-chan struct{} { return nil }

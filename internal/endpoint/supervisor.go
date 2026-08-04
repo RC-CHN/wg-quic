@@ -18,6 +18,7 @@ type Options struct {
 	RetryMin         time.Duration
 	RetryMax         time.Duration
 	ReadinessTimeout time.Duration
+	NetworkDebounce  time.Duration
 	Jitter           func(time.Duration) time.Duration
 	Logf             func(string, ...any)
 }
@@ -119,6 +120,9 @@ func withDefaults(options Options) Options {
 	}
 	if options.ReadinessTimeout <= 0 {
 		options.ReadinessTimeout = 15 * time.Second
+	}
+	if options.NetworkDebounce <= 0 {
+		options.NetworkDebounce = 500 * time.Millisecond
 	}
 	if options.Jitter == nil {
 		options.Jitter = func(value time.Duration) time.Duration {
@@ -230,6 +234,10 @@ func (s *Supervisor) Activate(ctx context.Context) error {
 		s.wg.Add(1)
 		go s.refreshLoop(runCtx, publicKey)
 	}
+	if s.routes.Changes() != nil {
+		s.wg.Add(1)
+		go s.routeChangeLoop(runCtx)
+	}
 	s.mu.Unlock()
 	return nil
 }
@@ -310,6 +318,7 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 	cancel()
 	if err == nil {
 		oldLease := state.lease
+		oldEndpoint := state.active
 		state.active = newEndpoint
 		state.generation = newGeneration
 		state.lease = lease
@@ -318,6 +327,10 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 				s.options.Logf("release old endpoint route lease: %v", releaseErr)
 			}
 		}
+		s.options.Logf(
+			"peer %s endpoint migrated: %s -> %s",
+			peerIdentifier(state.spec.PublicKey), oldEndpoint, newEndpoint,
+		)
 		return nil
 	}
 
@@ -346,6 +359,52 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 		return errors.Join(err, fmt.Errorf("release failed endpoint route: %w", releaseErr))
 	}
 	return err
+}
+
+// RefreshRoutes asks each platform route lease to re-evaluate its path. DNS
+// selection is deliberately not part of this transaction: the peer keeps the
+// same numeric endpoint, while a changed outer path causes a transport redial.
+func (s *Supervisor) RefreshRoutes(ctx context.Context) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mu.RLock()
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed {
+		return errors.New("endpoint supervisor is closed")
+	}
+	var errs []error
+	for _, publicKey := range s.order {
+		state := s.peers[publicKey]
+		lease, ok := state.lease.(RefreshableRouteLease)
+		if !ok || lease == nil {
+			continue
+		}
+		changed, err := lease.Refresh(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("refresh peer outer route: %w", err))
+			continue
+		}
+		if !changed {
+			continue
+		}
+		if err := s.core.RedialPeer(ctx, publicKey); err != nil {
+			errs = append(errs, fmt.Errorf("redial peer after outer route change: %w", err))
+		} else {
+			s.options.Logf(
+				"peer %s outer route changed; transport redial requested",
+				peerIdentifier(publicKey),
+			)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func peerIdentifier(publicKey string) string {
+	if len(publicKey) <= 8 {
+		return publicKey
+	}
+	return publicKey[:8]
 }
 
 func (s *Supervisor) resolve(ctx context.Context, state *peerState) (Resolution, error) {
@@ -404,6 +463,62 @@ func (s *Supervisor) refreshLoop(ctx context.Context, publicKey string) {
 			failures = 0
 		}
 	}
+}
+
+func (s *Supervisor) routeChangeLoop(ctx context.Context) {
+	defer s.wg.Done()
+	changes := s.routes.Changes()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-changes:
+			if !ok {
+				return
+			}
+		}
+
+		timer := time.NewTimer(s.options.NetworkDebounce)
+	debounce:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case _, ok := <-changes:
+				if !ok {
+					timer.Stop()
+					return
+				}
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timer.Reset(s.options.NetworkDebounce)
+			case <-timer.C:
+				break debounce
+			}
+		}
+		if err := s.RefreshRoutes(ctx); err != nil && ctx.Err() == nil {
+			s.options.Logf("refresh endpoint routes after network change: %v", err)
+		}
+		for _, publicKey := range s.dynamicPeerKeys() {
+			if err := s.RefreshPeer(ctx, publicKey); err != nil && ctx.Err() == nil {
+				s.options.Logf("re-resolve peer endpoint after network change: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Supervisor) dynamicPeerKeys() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]string, 0, len(s.order))
+	for _, publicKey := range s.order {
+		if s.peers[publicKey].dynamic {
+			result = append(result, publicKey)
+		}
+	}
+	return result
 }
 
 func (s *Supervisor) refreshDelay(value time.Duration) time.Duration {

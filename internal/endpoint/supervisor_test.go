@@ -36,6 +36,7 @@ type fakeRouteLeaser struct {
 	acquired          []netip.Addr
 	leases            []*fakeRouteLease
 	nextReleaseErrors []error
+	changes           chan struct{}
 	closed            bool
 }
 
@@ -45,6 +46,9 @@ type fakeRouteLease struct {
 	released      bool
 	releaseCalls  int
 	releaseErrors []error
+	refreshCalls  int
+	refreshResult bool
+	refreshError  error
 }
 
 func (l *fakeRouteLeaser) AcquireEndpointRoute(_ context.Context, address netip.Addr) (RouteLease, error) {
@@ -67,7 +71,14 @@ func (l *fakeRouteLeaser) Close() error {
 	return nil
 }
 
-func (l *fakeRouteLease) Refresh(context.Context) (bool, error) { return false, nil }
+func (l *fakeRouteLeaser) Changes() <-chan struct{} { return l.changes }
+
+func (l *fakeRouteLease) Refresh(context.Context) (bool, error) {
+	l.parent.mu.Lock()
+	defer l.parent.mu.Unlock()
+	l.refreshCalls++
+	return l.refreshResult, l.refreshError
+}
 
 func (l *fakeRouteLease) Release(context.Context) error {
 	l.parent.mu.Lock()
@@ -326,6 +337,61 @@ func TestSupervisorDoesNotResolveNumericEndpoint(t *testing.T) {
 	}
 	if len(resolver.calls) != 0 {
 		t.Fatalf("numeric endpoint invoked DNS resolver: %v", resolver.calls)
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorRedialsPeerAfterOuterRouteChanges(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.10")
+	resolver := &fakeResolver{responses: map[string][]Resolution{
+		"peer.example": {
+			{Addresses: []netip.Addr{address}, RefreshAfter: time.Hour},
+			{Addresses: []netip.Addr{address}, RefreshAfter: time.Hour},
+		},
+	}}
+	routes := &fakeRouteLeaser{changes: make(chan struct{}, 1)}
+	core := &fakeCoreControl{}
+	supervisor := testSupervisor(t, resolver, routes, core, "peer.example:443")
+	supervisor.options.NetworkDebounce = time.Millisecond
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	routes.leases[0].refreshResult = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	routes.changes <- struct{}{}
+	deadline := time.Now().Add(time.Second)
+	for {
+		core.mu.Lock()
+		redialed := slices.Contains(core.redialPeers, "peer")
+		core.mu.Unlock()
+		resolver.mu.Lock()
+		resolveCalls := len(resolver.calls)
+		resolver.mu.Unlock()
+		if redialed && resolveCalls >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("network change did not redial the peer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	routes.mu.Lock()
+	refreshCalls := routes.leases[0].refreshCalls
+	routes.mu.Unlock()
+	if refreshCalls != 1 {
+		t.Fatalf("route refresh calls = %d, want 1", refreshCalls)
+	}
+	resolver.mu.Lock()
+	resolveCalls := len(resolver.calls)
+	resolver.mu.Unlock()
+	if resolveCalls != 2 {
+		t.Fatalf("DNS resolve calls = %d, want initialization plus network refresh", resolveCalls)
 	}
 	if err := supervisor.Close(context.Background()); err != nil {
 		t.Fatal(err)

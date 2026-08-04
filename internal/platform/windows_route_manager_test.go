@@ -10,14 +10,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakeWindowsRouteSystem struct {
-	mu       sync.Mutex
-	selected map[netip.Addr]windowsSelectedRoute
-	routes   map[windowsRouteKey]windowsSelectedRoute
-	created  []windowsRouteKey
-	deleted  []windowsRouteKey
+	mu        sync.Mutex
+	selected  map[netip.Addr]windowsSelectedRoute
+	routes    map[windowsRouteKey]windowsSelectedRoute
+	created   []windowsRouteKey
+	deleted   []windowsRouteKey
+	bestErr   error
+	bestCalls int
 }
 
 func (*fakeWindowsRouteSystem) CurrentCompartmentID() uint32 {
@@ -31,6 +34,10 @@ func (s *fakeWindowsRouteSystem) BestRoute(
 ) (windowsSelectedRoute, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.bestCalls++
+	if s.bestErr != nil {
+		return windowsSelectedRoute{}, s.bestErr
+	}
 	selected, ok := s.selected[endpoint]
 	if !ok {
 		return windowsSelectedRoute{}, errors.New("no selected route")
@@ -77,6 +84,44 @@ type fakeWindowsRouteStore struct {
 	mu     sync.Mutex
 	ledger windowsRouteLedger
 	alive  map[string]bool
+}
+
+type fakeWindowsRouteNotifier struct {
+	mu      sync.Mutex
+	ready   chan struct{}
+	pending []windowsRouteChange
+	closed  bool
+}
+
+func newFakeWindowsRouteNotifier() *fakeWindowsRouteNotifier {
+	return &fakeWindowsRouteNotifier{ready: make(chan struct{}, 1)}
+}
+
+func (n *fakeWindowsRouteNotifier) Ready() <-chan struct{} { return n.ready }
+
+func (n *fakeWindowsRouteNotifier) Drain() []windowsRouteChange {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	changes := slices.Clone(n.pending)
+	n.pending = nil
+	return changes
+}
+
+func (n *fakeWindowsRouteNotifier) Close() error {
+	n.mu.Lock()
+	n.closed = true
+	n.mu.Unlock()
+	return nil
+}
+
+func (n *fakeWindowsRouteNotifier) emit(change windowsRouteChange) {
+	n.mu.Lock()
+	n.pending = append(n.pending, change)
+	n.mu.Unlock()
+	select {
+	case n.ready <- struct{}{}:
+	default:
+	}
 }
 
 func (s *fakeWindowsRouteStore) Lock(context.Context) (func() error, error) {
@@ -210,6 +255,305 @@ func TestWindowsRouteManagerReferenceCountsMultipleOwners(t *testing.T) {
 	}
 	if len(system.deleted) != 1 {
 		t.Fatalf("route delete count = %d, want 1", len(system.deleted))
+	}
+}
+
+func TestWindowsRouteManagerReferenceCountsDuplicateEndpointLeases(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.21")
+	selected := testWindowsSelectedRoute(endpoint, 31, 3)
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: selected},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+
+	first, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.ledger.Routes[0].Owners[0].References; got != 2 {
+		t.Fatalf("owner references = %d, want 2", got)
+	}
+	if err := first.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(system.deleted) != 0 {
+		t.Fatal("route was deleted while a same-owner lease remained")
+	}
+	if err := second.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(system.deleted) != 1 {
+		t.Fatalf("route delete count = %d, want 1", len(system.deleted))
+	}
+}
+
+func TestWindowsRouteLeaseMigratesWithGetBestRouteResult(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.22")
+	oldRoute := testWindowsSelectedRoute(endpoint, 32, 10)
+	newRoute := testWindowsSelectedRoute(endpoint, 33, 5)
+	newRoute.Key.NextHop = "198.51.100.1"
+	newRoute.BestSource = netip.MustParseAddr("198.51.100.2")
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system.selected[endpoint] = newRoute
+
+	refreshable := lease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	changed, err := refreshable.Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("new GetBestRoute2 result did not migrate the endpoint route")
+	}
+	if _, exists := system.routes[oldRoute.Key]; exists {
+		t.Fatal("old endpoint route still exists")
+	}
+	if _, exists := system.routes[newRoute.Key]; !exists {
+		t.Fatal("new endpoint route was not created")
+	}
+	record := store.ledger.Routes[0]
+	if record.Key != newRoute.Key || record.Revision != 2 ||
+		record.State != windowsRouteActive || record.Previous != nil {
+		t.Fatalf("migrated route record = %#v", record)
+	}
+	if err := lease.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(system.deleted, newRoute.Key) {
+		t.Fatal("migrated lease did not release its current route")
+	}
+}
+
+func TestWindowsRouteLeaseObservesMigrationByAnotherOwner(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.23")
+	oldRoute := testWindowsSelectedRoute(endpoint, 34, 10)
+	newRoute := testWindowsSelectedRoute(endpoint, 35, 5)
+	newRoute.Key.NextHop = "198.51.100.1"
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	first := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	second := newFakeWindowsRouteManager(system, store, "wg1", "owner-2")
+	firstLease, err := first.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondLease, err := second.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system.selected[endpoint] = newRoute
+	firstRefresh := firstLease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	if changed, err := firstRefresh.Refresh(context.Background()); err != nil || !changed {
+		t.Fatalf("first refresh changed=%t err=%v", changed, err)
+	}
+	createdBefore := len(system.created)
+	secondRefresh := secondLease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	if changed, err := secondRefresh.Refresh(context.Background()); err != nil || !changed {
+		t.Fatalf("second refresh changed=%t err=%v", changed, err)
+	}
+	if len(system.created) != createdBefore {
+		t.Fatal("second owner repeated an already committed route migration")
+	}
+}
+
+func TestWindowsRouteLeaseRestoresOldRouteWhenSelectionFails(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.24")
+	oldRoute := testWindowsSelectedRoute(endpoint, 36, 10)
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system.bestErr = errors.New("no usable route")
+	refreshable := lease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	if changed, err := refreshable.Refresh(context.Background()); err == nil || changed {
+		t.Fatalf("failed refresh changed=%t err=%v", changed, err)
+	}
+	if _, exists := system.routes[oldRoute.Key]; !exists {
+		t.Fatal("failed route selection did not restore the old managed pin")
+	}
+	record := store.ledger.Routes[0]
+	if record.Key != oldRoute.Key || record.State != windowsRouteActive ||
+		record.Previous != nil {
+		t.Fatalf("route ledger was not rolled back: %#v", record)
+	}
+}
+
+func TestWindowsRouteLeaseReportsBestSourceChangeOnSamePath(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.26")
+	selected := testWindowsSelectedRoute(endpoint, 38, 10)
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: selected},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected.BestSource = netip.MustParseAddr("192.0.2.99")
+	system.selected[endpoint] = selected
+	refreshable := lease.(interface {
+		Refresh(context.Context) (bool, error)
+	})
+	changed, err := refreshable.Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("best source change on the same interface did not request a redial")
+	}
+	if store.ledger.Routes[0].BestSource != "192.0.2.99" ||
+		store.ledger.Routes[0].Revision != 2 {
+		t.Fatalf("same-path source update = %#v", store.ledger.Routes[0])
+	}
+}
+
+func TestWindowsRouteManagerRecoversInterruptedMigrations(t *testing.T) {
+	t.Run("remove phase restores old managed route", func(t *testing.T) {
+		endpoint := netip.MustParseAddr("192.0.2.27")
+		oldRoute := testWindowsSelectedRoute(endpoint, 39, 10)
+		system := &fakeWindowsRouteSystem{
+			selected: map[netip.Addr]windowsSelectedRoute{endpoint: oldRoute},
+			routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+		}
+		store := newFakeWindowsRouteStore()
+		manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+		previous := snapshotWindowsRoute(windowsRouteRecord{
+			Key: oldRoute.Key, InterfaceIndex: oldRoute.InterfaceIndex,
+			Metric: oldRoute.Metric, BestSource: oldRoute.BestSource.String(),
+			Ownership: windowsRouteManaged, Revision: 1,
+		})
+		store.ledger.Routes = []windowsRouteRecord{{
+			Key: oldRoute.Key, InterfaceIndex: oldRoute.InterfaceIndex,
+			Metric: oldRoute.Metric, BestSource: oldRoute.BestSource.String(),
+			Ownership: windowsRouteManaged, State: windowsRoutePendingMigrateRemove,
+			Revision: 1, Previous: &previous,
+			Owners: []windowsRouteOwner{manager.owner},
+		}}
+		if _, err := manager.AcquireEndpointRoute(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := system.routes[oldRoute.Key]; !exists {
+			t.Fatal("interrupted remove phase did not restore the old route")
+		}
+		if record := store.ledger.Routes[0]; record.State != windowsRouteActive ||
+			record.Previous != nil {
+			t.Fatalf("recovered remove record = %#v", record)
+		}
+	})
+
+	t.Run("add phase retains ambiguous existing route", func(t *testing.T) {
+		endpoint := netip.MustParseAddr("192.0.2.28")
+		oldRoute := testWindowsSelectedRoute(endpoint, 40, 10)
+		newRoute := testWindowsSelectedRoute(endpoint, 41, 5)
+		newRoute.Key.NextHop = "198.51.100.1"
+		system := &fakeWindowsRouteSystem{
+			selected: map[netip.Addr]windowsSelectedRoute{endpoint: newRoute},
+			routes:   map[windowsRouteKey]windowsSelectedRoute{newRoute.Key: newRoute},
+		}
+		store := newFakeWindowsRouteStore()
+		manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+		previous := snapshotWindowsRoute(windowsRouteRecord{
+			Key: oldRoute.Key, InterfaceIndex: oldRoute.InterfaceIndex,
+			Metric: oldRoute.Metric, BestSource: oldRoute.BestSource.String(),
+			Ownership: windowsRouteManaged, Revision: 1,
+		})
+		store.ledger.Routes = []windowsRouteRecord{{
+			Key: newRoute.Key, InterfaceIndex: newRoute.InterfaceIndex,
+			Metric: newRoute.Metric, BestSource: newRoute.BestSource.String(),
+			Ownership: windowsRouteManaged, State: windowsRoutePendingMigrateAdd,
+			Revision: 1, Previous: &previous,
+			Owners: []windowsRouteOwner{manager.owner},
+		}}
+		if _, err := manager.AcquireEndpointRoute(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+		record := store.ledger.Routes[0]
+		if record.State != windowsRouteActive ||
+			record.Ownership != windowsRouteAmbiguous ||
+			record.Previous != nil || record.Revision != 2 {
+			t.Fatalf("recovered add record = %#v", record)
+		}
+	})
+}
+
+func TestWindowsRouteManagerIgnoresOwnedRouteNotifications(t *testing.T) {
+	endpoint := netip.MustParseAddr("192.0.2.25")
+	selected := testWindowsSelectedRoute(endpoint, 37, 10)
+	system := &fakeWindowsRouteSystem{
+		selected: map[netip.Addr]windowsSelectedRoute{endpoint: selected},
+		routes:   make(map[windowsRouteKey]windowsSelectedRoute),
+	}
+	store := newFakeWindowsRouteStore()
+	manager := newFakeWindowsRouteManager(system, store, "wg0", "owner-1")
+	lease, err := manager.AcquireEndpointRoute(context.Background(), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notifier := newFakeWindowsRouteNotifier()
+	manager.startRouteWatcher(notifier)
+	notifier.emit(windowsRouteChange{
+		Family:        selected.Key.Family,
+		Destination:   selected.Key.Destination,
+		InterfaceLUID: selected.Key.InterfaceLUID,
+		NextHop:       selected.Key.NextHop,
+		Valid:         true,
+	})
+	select {
+	case <-manager.Changes():
+		t.Fatal("owned route mutation escaped notification filtering")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	notifier.emit(windowsRouteChange{
+		Family:        4,
+		Destination:   "0.0.0.0/0",
+		InterfaceLUID: 99,
+		NextHop:       "192.0.2.254",
+		Valid:         true,
+	})
+	select {
+	case <-manager.Changes():
+	case <-time.After(time.Second):
+		t.Fatal("external route change was not published")
+	}
+	if err := lease.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -422,6 +766,7 @@ func testWindowsOwner(instanceID, tunnel string) windowsRouteOwner {
 		Tunnel:     tunnel,
 		InstanceID: instanceID,
 		LeaseFile:  instanceID + ".lease",
+		References: 1,
 	}
 }
 
@@ -429,7 +774,7 @@ func cloneWindowsRouteLedger(ledger windowsRouteLedger) windowsRouteLedger {
 	clone := ledger
 	clone.Routes = slices.Clone(ledger.Routes)
 	for i := range clone.Routes {
-		clone.Routes[i].Owners = slices.Clone(ledger.Routes[i].Owners)
+		clone.Routes[i] = cloneWindowsRouteRecord(ledger.Routes[i])
 	}
 	return clone
 }

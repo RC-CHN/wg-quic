@@ -23,8 +23,17 @@ type RouteLease interface {
 	Release(context.Context) error
 }
 
+// RefreshableRouteLease re-evaluates the operating system path behind an
+// already selected numeric endpoint. A true result means the effective outer
+// path changed and the transport should establish a fresh session.
+type RefreshableRouteLease interface {
+	RouteLease
+	Refresh(context.Context) (bool, error)
+}
+
 type RouteLeaser interface {
 	AcquireEndpointRoute(context.Context, netip.Addr) (RouteLease, error)
+	Changes() <-chan struct{}
 	Close() error
 }
 
@@ -47,9 +56,4 @@ type CoreControl interface {
 type PeerSpec struct {
 	PublicKey string
 	Endpoint  string
-}
-
-type NetworkChangeSource interface {
-	Changes() <-chan struct{}
-	Close() error
 }

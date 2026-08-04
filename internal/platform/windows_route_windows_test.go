@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestWindowsRawRouteAddressRoundTrip(t *testing.T) {
@@ -26,6 +28,58 @@ func TestWindowsRawRouteAddressRoundTrip(t *testing.T) {
 		if roundTrip != address {
 			t.Fatalf("route address round trip = %s, want %s", roundTrip, address)
 		}
+	}
+}
+
+func TestWindowsRouteNotificationRowConversion(t *testing.T) {
+	destination, err := windowsRawAddress(netip.MustParseAddr("192.0.2.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextHop, err := windowsRawAddress(netip.MustParseAddr("192.0.2.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, ok := windowsRouteChangeFromRow(&windows.MibIpForwardRow2{
+		InterfaceLuid: 77,
+		DestinationPrefix: windows.IpAddressPrefix{
+			Prefix: destination, PrefixLength: 24,
+		},
+		NextHop: nextHop,
+	})
+	if !ok {
+		t.Fatal("valid Windows route notification was rejected")
+	}
+	if change.Family != 4 || change.Destination != "192.0.2.0/24" ||
+		change.InterfaceLUID != 77 || change.NextHop != "192.0.2.1" ||
+		!change.Valid {
+		t.Fatalf("route notification = %#v", change)
+	}
+}
+
+func TestWindowsBestRouteCandidateUsesPrefixThenEffectiveMetric(t *testing.T) {
+	current := windowsNativeRouteCandidate{
+		route: windows.MibIpForwardRow2{
+			InterfaceIndex: 10,
+			DestinationPrefix: windows.IpAddressPrefix{
+				PrefixLength: 0,
+			},
+			Metric: 5,
+		},
+		effectiveMetric: 20,
+	}
+	moreSpecific := current
+	moreSpecific.route.InterfaceIndex = 20
+	moreSpecific.route.DestinationPrefix.PrefixLength = 24
+	moreSpecific.effectiveMetric = 100
+	if !betterWindowsRouteCandidate(moreSpecific, current) {
+		t.Fatal("longer route prefix did not win")
+	}
+	lowerMetric := current
+	lowerMetric.route.InterfaceIndex = 30
+	lowerMetric.effectiveMetric = 10
+	if !betterWindowsRouteCandidate(lowerMetric, current) {
+		t.Fatal("lower effective metric did not win equal-prefix comparison")
 	}
 }
 

@@ -68,11 +68,122 @@ func (windowsNativeRouteSystem) BestRoute(
 	if err != nil {
 		return windowsSelectedRoute{}, err
 	}
+	family := uint16(windows.AF_INET6)
+	if endpoint.Is4() {
+		family = windows.AF_INET
+	}
+	candidate, err := windowsBestRouteExcludingInterface(
+		ctx, family, destination, tunnelLUID,
+	)
+	if err != nil {
+		return windowsSelectedRoute{}, err
+	}
+	nextHop, err := windowsAddressFromRaw(candidate.route.NextHop)
+	if err != nil {
+		return windowsSelectedRoute{}, fmt.Errorf("decode best-route next hop: %w", err)
+	}
+	bestSource, err := windowsAddressFromRaw(candidate.source)
+	if err != nil {
+		return windowsSelectedRoute{}, fmt.Errorf("decode best-route source address: %w", err)
+	}
+	endpoint = endpoint.Unmap()
+	keyFamily := uint8(6)
+	bits := 128
+	if endpoint.Is4() {
+		keyFamily = 4
+		bits = 32
+	}
+	return windowsSelectedRoute{
+		Key: windowsRouteKey{
+			CompartmentID: windowsCurrentCompartmentID(),
+			Family:        keyFamily,
+			Destination:   netip.PrefixFrom(endpoint, bits).String(),
+			InterfaceLUID: candidate.route.InterfaceLuid,
+			NextHop:       nextHop.String(),
+		},
+		InterfaceIndex: candidate.route.InterfaceIndex,
+		Metric:         candidate.route.Metric,
+		BestSource:     bestSource,
+	}, nil
+}
+
+type windowsNativeRouteCandidate struct {
+	route           windows.MibIpForwardRow2
+	source          windows.RawSockaddrInet
+	effectiveMetric uint64
+}
+
+func windowsBestRouteExcludingInterface(
+	ctx context.Context,
+	family uint16,
+	destination windows.RawSockaddrInet,
+	excludedLUID uint64,
+) (windowsNativeRouteCandidate, error) {
+	var table *windows.MibIpForwardTable2
+	if err := windows.GetIpForwardTable2(family, &table); err != nil {
+		return windowsNativeRouteCandidate{}, fmt.Errorf("enumerate Windows routes: %w", err)
+	}
+	defer windows.FreeMibTable(unsafe.Pointer(table))
+
+	interfaces := make(map[uint64]struct{})
+	for _, row := range table.Rows() {
+		if row.InterfaceLuid != 0 && row.InterfaceLuid != excludedLUID {
+			interfaces[row.InterfaceLuid] = struct{}{}
+		}
+	}
+	var best windowsNativeRouteCandidate
+	found := false
+	var candidateErrors []error
+	for luid := range interfaces {
+		if err := ctx.Err(); err != nil {
+			return windowsNativeRouteCandidate{}, err
+		}
+		route, source, err := windowsBestRouteOnInterface(destination, luid)
+		if err != nil {
+			candidateErrors = append(candidateErrors, err)
+			continue
+		}
+		interfaceRow := windows.MibIpInterfaceRow{
+			Family: family, InterfaceLuid: route.InterfaceLuid,
+		}
+		if err := windows.GetIpInterfaceEntry(&interfaceRow); err != nil {
+			candidateErrors = append(candidateErrors, err)
+			continue
+		}
+		if interfaceRow.Connected == 0 || route.InterfaceLuid == excludedLUID {
+			continue
+		}
+		candidate := windowsNativeRouteCandidate{
+			route: route, source: source,
+			effectiveMetric: uint64(route.Metric) + uint64(interfaceRow.Metric),
+		}
+		if !found || betterWindowsRouteCandidate(candidate, best) {
+			best = candidate
+			found = true
+		}
+	}
+	if !found {
+		if cause := errors.Join(candidateErrors...); cause != nil {
+			return windowsNativeRouteCandidate{}, fmt.Errorf(
+				"no Windows route to endpoint outside the tunnel: %w", cause,
+			)
+		}
+		return windowsNativeRouteCandidate{}, errors.New(
+			"no Windows route to endpoint outside the tunnel",
+		)
+	}
+	return best, nil
+}
+
+func windowsBestRouteOnInterface(
+	destination windows.RawSockaddrInet,
+	interfaceLUID uint64,
+) (windows.MibIpForwardRow2, windows.RawSockaddrInet, error) {
 	var route windows.MibIpForwardRow2
 	var source windows.RawSockaddrInet
 	status, _, _ := syscall.SyscallN(
 		windowsProcGetBestRoute.Addr(),
-		0,
+		uintptr(unsafe.Pointer(&interfaceLUID)),
 		0,
 		0,
 		uintptr(unsafe.Pointer(&destination)),
@@ -81,38 +192,27 @@ func (windowsNativeRouteSystem) BestRoute(
 		uintptr(unsafe.Pointer(&source)),
 	)
 	if status != 0 {
-		return windowsSelectedRoute{}, syscall.Errno(status)
+		return windows.MibIpForwardRow2{}, windows.RawSockaddrInet{}, syscall.Errno(status)
 	}
-	if route.InterfaceLuid == tunnelLUID {
-		return windowsSelectedRoute{}, errors.New("best route for wg-quic endpoint resolves through the tunnel")
+	return route, source, nil
+}
+
+func betterWindowsRouteCandidate(
+	candidate windowsNativeRouteCandidate,
+	current windowsNativeRouteCandidate,
+) bool {
+	candidatePrefix := candidate.route.DestinationPrefix.PrefixLength
+	currentPrefix := current.route.DestinationPrefix.PrefixLength
+	if candidatePrefix != currentPrefix {
+		return candidatePrefix > currentPrefix
 	}
-	nextHop, err := windowsAddressFromRaw(route.NextHop)
-	if err != nil {
-		return windowsSelectedRoute{}, fmt.Errorf("decode best-route next hop: %w", err)
+	if candidate.effectiveMetric != current.effectiveMetric {
+		return candidate.effectiveMetric < current.effectiveMetric
 	}
-	bestSource, err := windowsAddressFromRaw(source)
-	if err != nil {
-		return windowsSelectedRoute{}, fmt.Errorf("decode best-route source address: %w", err)
+	if candidate.route.Metric != current.route.Metric {
+		return candidate.route.Metric < current.route.Metric
 	}
-	endpoint = endpoint.Unmap()
-	family := uint8(6)
-	bits := 128
-	if endpoint.Is4() {
-		family = 4
-		bits = 32
-	}
-	return windowsSelectedRoute{
-		Key: windowsRouteKey{
-			CompartmentID: windowsCurrentCompartmentID(),
-			Family:        family,
-			Destination:   netip.PrefixFrom(endpoint, bits).String(),
-			InterfaceLUID: route.InterfaceLuid,
-			NextHop:       nextHop.String(),
-		},
-		InterfaceIndex: route.InterfaceIndex,
-		Metric:         route.Metric,
-		BestSource:     bestSource,
-	}, nil
+	return candidate.route.InterfaceIndex < current.route.InterfaceIndex
 }
 
 func (windowsNativeRouteSystem) RouteExists(

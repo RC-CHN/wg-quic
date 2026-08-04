@@ -19,4 +19,6 @@ func (noopEndpointRouteLeaser) AcquireEndpointRoute(
 
 func (noopEndpointRouteLeaser) Close() error { return nil }
 
+func (noopEndpointRouteLeaser) Changes() <-chan struct{} { return nil }
+
 func (noopEndpointRouteLease) Release(context.Context) error { return nil }
