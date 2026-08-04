@@ -1,0 +1,163 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to validate without publishing
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+
+jobs:
+  verify-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Match tag to release version
+        shell: bash
+        run: test "$(sed -n '1p' VERSION)" = "${RELEASE_VERSION#v}"
+      - run: ./scripts/check-no-reference-deps.sh
+      - run: go test -count=1 ./...
+      - run: go test -race ./...
+      - run: shellcheck scripts/*.sh tests/container/*.sh packaging/freebsd/wg_quic
+
+  verify-container:
+    name: Release Linux tunnel interoperability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: sudo modprobe tun
+      - run: ./tests/container/test.sh
+
+  verify-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Native Windows path, debug, and data-plane tests
+        run: go test -count=1 ./...
+      - name: Windows transport stress
+        run: go test -count=10 -timeout=5m ./internal/transport/quic ./internal/bind ./internal/control ./internal/quick
+      - name: Build and smoke release-versioned amd64 CLIs
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o wg-quic.exe ./cmd/wg-quic
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o wg-quic-quick.exe ./cmd/wg-quic-quick
+          if ((.\wg-quic.exe version) -ne "wg-quic $version") { throw "wrong wg-quic version" }
+          if ((.\wg-quic-quick.exe version) -ne "wg-quic-quick $version") { throw "wrong wg-quic-quick version" }
+
+  verify-freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Native FreeBSD path and data-plane tests
+        uses: vmactions/freebsd-vm@v1.5.2
+        with:
+          release: "14.4"
+          usesh: true
+          copyback: false
+          prepare: pkg install -y go
+          run: |
+            ./scripts/check-no-reference-deps.sh
+            go test -count=1 ./...
+            go test -race ./internal/...
+            sh -n packaging/freebsd/wg_quic
+
+  package:
+    needs:
+      - verify-linux
+      - verify-container
+      - verify-windows
+      - verify-freebsd
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - os: linux
+            arch: amd64
+            extension: tar.gz
+          - os: linux
+            arch: arm64
+            extension: tar.gz
+          - os: freebsd
+            arch: amd64
+            extension: tar.gz
+          - os: freebsd
+            arch: arm64
+            extension: tar.gz
+          - os: windows
+            arch: amd64
+            extension: zip
+          - os: windows
+            arch: arm64
+            extension: zip
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build release archive
+        shell: bash
+        run: ./scripts/package-release.sh "${{ matrix.target.os }}" "${{ matrix.target.arch }}" "${RELEASE_VERSION#v}"
+      - name: Validate archive paths, contents, version, and checksums
+        shell: bash
+        run: |
+          version="${RELEASE_VERSION#v}"
+          archive="dist/wg-quic-v${version}-${{ matrix.target.os }}-${{ matrix.target.arch }}.${{ matrix.target.extension }}"
+          ./scripts/check-release-archive.sh "$archive" "${{ matrix.target.os }}" "${{ matrix.target.arch }}" "$version"
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target.os }}-${{ matrix.target.arch }}
+          path: dist/wg-quic-v*-${{ matrix.target.os }}-${{ matrix.target.arch }}.${{ matrix.target.extension }}
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download all release archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Generate release checksums
+        shell: bash
+        run: cd dist && sha256sum wg-quic-* > SHA256SUMS
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "wg-quic $GITHUB_REF_NAME" \
+            --generate-notes

@@ -23,7 +23,7 @@ jobs:
       - run: shellcheck scripts/*.sh tests/container/*.sh packaging/freebsd/wg_quic
       - run: make build-windows
       - name: Upload self-contained Windows test bundles
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wg-quic-windows
           path: |
