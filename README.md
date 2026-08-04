@@ -7,17 +7,19 @@ frames. Its WireGuard userspace cryptographic and peer state machine is a
 pinned in-repository fork under `third_party/wireguard-go`; production code and
 behavior tests no longer download `golang.zx2c4.com/wireguard`.
 
-The usable runtime is currently Linux. The `wg-quic-quick` host-policy layer
-also builds and runs natively on FreeBSD and includes an rc.d service script,
-but the FreeBSD data plane still needs QEMU runtime validation. Windows
-integration is deferred. All platforms share the same userspace WireGuard,
-QUIC, FEC, obfuscation, and configuration core.
+The fully exercised runtime is currently Linux. The `wg-quic-quick` host-policy
+layer also builds and runs natively on FreeBSD and includes an rc.d service
+script, but the FreeBSD data plane still needs QEMU runtime validation. Windows
+now has a CLI-only Wintun, host-network, Named Pipe, and per-tunnel SCM
+implementation; its privileged data plane still needs Windows VM integration
+testing. All platforms share the same userspace WireGuard, QUIC, FEC,
+obfuscation, and configuration core.
 
 The command boundary mirrors WireGuard's daemon/`wg-quick` split:
 
 - `wg-quic` owns only the TUN-backed userspace data plane, local status socket,
   configuration validation, and key utilities;
-- `wg-quic-quick` owns addresses, routes, DNS, hooks, and Linux/FreeBSD service
+- `wg-quic-quick` owns addresses, routes, DNS, hooks, and platform service
   management. It starts and supervises the separate `wg-quic` executable; it
   does not import or embed the core package.
 
@@ -94,11 +96,24 @@ sudo wg-quic-quick up wg0
 sudo wg-quic-quick down wg0
 ```
 
-Windows will remain CLI-only for its first implementation. It will not ship a
-Unix-shaped `wg-quic-quick.exe`; instead `wg-quic.exe` will expose service
-installation and `up`/`down`/`status` commands backed by the Windows Service
-Control Manager and an ACL-protected Named Pipe. The privileged service, not
-the interactive CLI process, will own Wintun and network policy.
+Windows remains CLI-only and preserves the same two-program boundary:
+`wg-quic.exe` owns the Wintun data plane, while `wg-quic-quick.exe` owns host
+policy and a per-tunnel Windows service. Put profiles under
+`%ProgramData%\wg-quic\interfaces\` and run from an elevated terminal:
+
+```powershell
+wg-quic-quick.exe check wg0
+wg-quic-quick.exe up wg0
+wg-quic.exe show wg0
+wg-quic-quick.exe down wg0
+```
+
+The quick service runs as LocalSystem, supervises a separate sibling
+`wg-quic.exe`, and reports readiness through an Administrators/System-only
+Named Pipe. Its route plan pins every resolved QUIC endpoint through the
+pre-tunnel default route before installing AllowedIPs, including full-tunnel
+defaults. Windows Wintun, SCM, route, DNS, and cleanup behavior is not yet
+claimed VM-validated.
 
 The implementation and tests are under active development. See the local
 `design/architecture.md` when the design checkout is present.
