@@ -16,6 +16,14 @@ This executes every upstream test selected by Go build constraints for the
 current operating system. CI runs it natively on Linux, Windows, and FreeBSD,
 so platform-specific test files are selected on their actual target OS.
 
+The pinned upstream revision has one Windows-only test build defect:
+`tun/checksum_test.go` refers to `x/sys/unix.IPPROTO_TCP`, although the
+identical constant on Windows is `x/sys/windows.IPPROTO_TCP`. The Windows CI
+script copies the pinned module to an ephemeral directory, verifies that exact
+source shape, substitutes only the platform package name, and then runs
+`go test -count=1 ./...`. Neither the module cache nor wg-quic's dependency is
+modified.
+
 ## Privileged `tests/netns.sh` behavior
 
 The upstream shell script cannot run byte-for-byte against `wg-quic`: it starts

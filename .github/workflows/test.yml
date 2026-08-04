@@ -11,7 +11,7 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -24,7 +24,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -32,24 +32,18 @@ jobs:
         run: go test ./...
       - name: All Windows-applicable upstream wireguard-go tests
         shell: pwsh
-        run: |
-          $expected = "v0.0.0-20260522210424-ecfc5a8d5446"
-          $actual = go list -m -f '{{.Version}}' golang.zx2c4.com/wireguard
-          if ($actual -ne $expected) {
-            throw "wireguard-go version mismatch: got $actual, want $expected"
-          }
-          go test -count=1 golang.zx2c4.com/wireguard/...
+        run: ./scripts/test-upstream-wireguard-windows.ps1
       - name: Build Windows CLI
         run: go build ./cmd/wg-quic
 
   freebsd:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Native FreeBSD tests
         uses: vmactions/freebsd-vm@v1.5.2
         with:
-          release: "14"
+          release: "14.4"
           usesh: true
           copyback: false
           prepare: pkg install -y go
@@ -63,7 +57,7 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
