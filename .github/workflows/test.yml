@@ -31,8 +31,17 @@ jobs:
           go-version-file: go.mod
       - name: Project tests
         run: go test ./...
+      - name: QUIC and ArmorBind loopback stress
+        run: go test -count=10 -timeout=5m ./internal/transport/quic ./internal/bind
+      - name: Named Pipe behavior
+        run: go test -count=3 -timeout=5m ./third_party/wireguard-go/ipc/namedpipe
       - name: Build Windows CLI
         run: go build ./cmd/wg-quic
+      - name: Cross-build Windows arm64 CLI
+        shell: pwsh
+        run: |
+          $env:GOARCH = "arm64"
+          go build -o wg-quic-arm64.exe ./cmd/wg-quic
 
   freebsd:
     runs-on: ubuntu-latest
@@ -49,8 +58,13 @@ jobs:
             go version
             ./scripts/check-no-reference-deps.sh
             go test ./...
+            go test -count=1 -run '^TestWireGuard' ./internal/bind
+            go test -count=5 -timeout=5m ./internal/transport/quic ./internal/bind
+            go test -race ./internal/...
             go build ./cmd/wg-quic
             go build ./cmd/wg-quic-quick
+            env GOARCH=arm64 go build -o /tmp/wg-quic-arm64 ./cmd/wg-quic
+            env GOARCH=arm64 go build -o /tmp/wg-quic-quick-arm64 ./cmd/wg-quic-quick
             sh -n packaging/freebsd/wg_quic
 
   container:
