@@ -47,6 +47,12 @@ func TestWireGuardUpperLayerPacketsOverArmorBind(t *testing.T) {
 func TestWireGuardConcurrentBidirectionalTrafficOverArmorBind(t *testing.T) {
 	psk := randomTestKey(t)
 	peers := newBehaviorPair(t, [2][32]byte{psk, psk}, psk[:])
+	exchangeTUNPacket(
+		t,
+		peers[0].tun,
+		peers[1].tun,
+		testIPv4Packet(peers[0].ipv4, peers[1].ipv4, 64, 0xffff),
+	)
 
 	const packetCount = 32
 	leftToRight := make([][]byte, packetCount)
@@ -435,7 +441,16 @@ func expectNoTUNPacket(t *testing.T, destination *tuntest.ChannelTUN, wait time.
 func sendTUNBatch(tun *tuntest.ChannelTUN, packets [][]byte, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	for _, packet := range packets {
+	pacer := time.NewTicker(2 * time.Millisecond)
+	defer pacer.Stop()
+	for i, packet := range packets {
+		if i != 0 {
+			select {
+			case <-pacer.C:
+			case <-timer.C:
+				return fmt.Errorf("timed out pacing packets")
+			}
+		}
 		select {
 		case tun.Outbound <- packet:
 		case <-timer.C:

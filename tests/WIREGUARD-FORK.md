@@ -76,7 +76,8 @@ WireGuard PresharedKeys. Its pinned upper-layer behavior matrix covers:
 - bidirectional plaintext and nonzero WG, wire, FEC-data, and FEC-parity
   counters;
 - IPv4 and IPv6 datagrams from empty payloads through 12,000-byte payloads;
-- concurrent bidirectional traffic with simultaneous session establishment;
+- concurrent bidirectional traffic with paced injection, while a focused Bind
+  regression independently forces simultaneous endpoint dialing;
 - AllowedIPs reverse-path rejection without wedging the valid path;
 - mismatched WireGuard PresharedKeys over a separately verified working
   Salamander transport;

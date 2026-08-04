@@ -415,10 +415,16 @@ func (b *Bind) acceptLoop(state *runState) {
 			qconn.CloseWithError(1, err.Error())
 			continue
 		}
-		ep := b.endpointFor(state, remote)
+		// Keep an accepted QUIC connection's endpoint identity separate from a
+		// configured outbound endpoint for the same address. If both peers dial
+		// simultaneously, replacing each configured endpoint's session with the
+		// accepted session makes both sides cancel the connection that the other
+		// side just selected. A connection-scoped endpoint also makes WireGuard
+		// replies use the exact authenticated path that delivered the packet.
+		ep := &Endpoint{owner: b, addr: remote}
 		sess := b.newSession(state, ep)
+		ep.session = sess
 		sess.setConn(qconn)
-		b.installSession(ep, sess)
 		state.wg.Add(1)
 		go func() { defer state.wg.Done(); b.runSession(sess) }()
 	}
@@ -435,27 +441,6 @@ func (b *Bind) sessionForEndpoint(state *runState, ep *Endpoint) *session {
 	state.wg.Add(1)
 	go b.dialSession(sess)
 	return sess
-}
-
-func (b *Bind) installSession(ep *Endpoint, sess *session) {
-	ep.mu.Lock()
-	old := ep.session
-	ep.session = sess
-	ep.mu.Unlock()
-	if old != nil && old != sess {
-		old.cancel()
-	}
-}
-
-func (b *Bind) endpointFor(state *runState, remote netip.AddrPort) *Endpoint {
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if ep := state.endpoints[remote]; ep != nil {
-		return ep
-	}
-	ep := &Endpoint{owner: b, addr: remote}
-	state.endpoints[remote] = ep
-	return ep
 }
 
 func (b *Bind) newSession(state *runState, ep *Endpoint) *session {

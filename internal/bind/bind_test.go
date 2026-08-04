@@ -90,6 +90,67 @@ func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	}
 }
 
+func TestBindSimultaneousDialKeepsAuthenticatedReplyPaths(t *testing.T) {
+	a, b := New(DefaultConfig()), New(DefaultConfig())
+	aReceive, aPort, err := a.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	bReceive, bPort, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bToA, err := b.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(aPort))))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payloadA := []byte("simultaneous dial from A")
+	payloadB := []byte("simultaneous dial from B")
+	start := make(chan struct{})
+	sendErrors := make(chan error, 2)
+	go func() {
+		<-start
+		sendErrors <- a.Send([][]byte{payloadA}, aToB)
+	}()
+	go func() {
+		<-start
+		sendErrors <- b.Send([][]byte{payloadB}, bToA)
+	}()
+	close(start)
+	for range 2 {
+		if err := <-sendErrors; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	gotA, sourceAtA := receiveOne(t, aReceive[0])
+	gotB, sourceAtB := receiveOne(t, bReceive[0])
+	if !bytes.Equal(gotA, payloadB) || !bytes.Equal(gotB, payloadA) {
+		t.Fatalf("simultaneous payloads changed: A=%q B=%q", gotA, gotB)
+	}
+
+	replyA := []byte("A reply on accepted connection")
+	replyB := []byte("B reply on accepted connection")
+	if err := a.Send([][]byte{replyA}, sourceAtA); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Send([][]byte{replyB}, sourceAtB); err != nil {
+		t.Fatal(err)
+	}
+	gotA, _ = receiveOne(t, aReceive[0])
+	gotB, _ = receiveOne(t, bReceive[0])
+	if !bytes.Equal(gotA, replyB) || !bytes.Equal(gotB, replyA) {
+		t.Fatalf("connection-scoped replies changed: A=%q B=%q", gotA, gotB)
+	}
+}
+
 func TestBindRedialsAfterAbruptPeerRestart(t *testing.T) {
 	config := DefaultConfig()
 	config.MaxIdleTimeout = time.Second
