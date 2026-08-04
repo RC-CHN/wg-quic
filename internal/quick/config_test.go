@@ -46,7 +46,7 @@ func (h *testHost) ValidateInterfaceName(name string) error {
 }
 
 func (h *testHost) ControlPath(name string) string {
-	return filepath.Join(h.controlRoot, name+".sock")
+	return testControlPath(h.controlRoot, name)
 }
 
 func (h *testHost) ConfigPath(name string) string {

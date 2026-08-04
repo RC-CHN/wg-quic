@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/base64"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,7 +32,7 @@ func (h *testDeviceHost) CreateTUN(name string, mtu int) (tun.Device, error) {
 func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	host := &testDeviceHost{
 		tunnel:      tuntest.NewChannelTUN(),
-		controlPath: filepath.Join(t.TempDir(), "wg0.sock"),
+		controlPath: testControlPath(t, "wg0"),
 	}
 	cfg := &config.Config{
 		Interface: config.Interface{

@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,43 +23,25 @@ type Status struct {
 
 type Server struct {
 	listener net.Listener
-	path     string
 	done     chan struct{}
 	once     sync.Once
 	wg       sync.WaitGroup
-}
-
-func SocketPath(name string) string {
-	return filepath.Join("/run/wg-quic", name+".sock")
+	cleanup  func() error
 }
 
 func Start(ctx context.Context, path string, status func() Status) (*Server, error) {
 	if status == nil {
 		return nil, errors.New("status provider is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("refusing to replace non-socket path %s", path)
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", path)
+	listener, cleanup, err := listen(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		listener.Close()
-		os.Remove(path)
-		return nil, err
+	server := &Server{
+		listener: listener,
+		done:     make(chan struct{}),
+		cleanup:  cleanup,
 	}
-	server := &Server{listener: listener, path: path, done: make(chan struct{})}
 	server.wg.Add(1)
 	go server.accept(status)
 	go func() {
@@ -96,8 +75,8 @@ func (s *Server) Close() error {
 	s.once.Do(func() {
 		err = s.listener.Close()
 		s.wg.Wait()
-		if removeErr := os.Remove(s.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) && err == nil {
-			err = removeErr
+		if s.cleanup != nil {
+			err = errors.Join(err, s.cleanup())
 		}
 		close(s.done)
 	})
@@ -105,8 +84,7 @@ func (s *Server) Close() error {
 }
 
 func Read(path string) (Status, error) {
-	dialer := net.Dialer{Timeout: 2 * time.Second}
-	connection, err := dialer.Dial("unix", path)
+	connection, err := dial(path, 2*time.Second)
 	if err != nil {
 		return Status{}, err
 	}
