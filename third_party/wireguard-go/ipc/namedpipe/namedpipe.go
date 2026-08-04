@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -230,8 +231,9 @@ type pipeListener struct {
 	path        string
 	config      ListenConfig
 	acceptCh    chan chan acceptResponse
-	closeCh     chan int
-	doneCh      chan int
+	closeCh     chan struct{}
+	doneCh      chan struct{}
+	closeOnce   sync.Once
 }
 
 func makeServerPipeHandle(path string, sd *windows.SECURITY_DESCRIPTOR, c *ListenConfig, isFirstPipe bool) (windows.Handle, error) {
@@ -412,8 +414,8 @@ func (c *ListenConfig) Listen(path string) (net.Listener, error) {
 		path:        path,
 		config:      *c,
 		acceptCh:    make(chan chan acceptResponse),
-		closeCh:     make(chan int),
-		doneCh:      make(chan int),
+		closeCh:     make(chan struct{}),
+		doneCh:      make(chan struct{}),
 	}
 	// The first connection is swallowed on Windows 7 & 8, so synthesize it.
 	if maj, min, _ := windows.RtlGetNtVersionNumbers(); maj < 6 || (maj == 6 && min < 4) {
@@ -472,11 +474,14 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 }
 
 func (l *pipeListener) Close() error {
-	select {
-	case l.closeCh <- 1:
-		<-l.doneCh
-	case <-l.doneCh:
-	}
+	// Closing a channel makes the shutdown request persistent. A one-shot
+	// send could be consumed by makeConnectedServerPipe; if Windows returned
+	// an unexpected cancellation error, listenerRoutine would continue with
+	// no shutdown signal left and Close would wait forever.
+	l.closeOnce.Do(func() {
+		close(l.closeCh)
+	})
+	<-l.doneCh
 	return nil
 }
 

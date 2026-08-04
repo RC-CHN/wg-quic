@@ -377,6 +377,45 @@ func TestAcceptAfterCloseFails(t *testing.T) {
 	}
 }
 
+func TestCloseInterruptsPendingAcceptRepeatedly(t *testing.T) {
+	for range 100 {
+		pipePath := randomPipePath()
+		l, err := namedpipe.Listen(pipePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acceptDone := make(chan error, 1)
+		go func() {
+			connection, err := l.Accept()
+			if connection != nil {
+				_ = connection.Close()
+			}
+			acceptDone <- err
+		}()
+
+		closeDone := make(chan error, 1)
+		go func() {
+			closeDone <- l.Close()
+		}()
+		select {
+		case err := <-closeDone:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("listener Close blocked with a pending Accept")
+		}
+		select {
+		case err := <-acceptDone:
+			if !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("pending Accept error = %v, want net.ErrClosed", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("pending Accept did not return after listener Close")
+		}
+	}
+}
+
 func TestDialTimesOutByDefault(t *testing.T) {
 	pipePath := randomPipePath()
 	l, err := namedpipe.Listen(pipePath)

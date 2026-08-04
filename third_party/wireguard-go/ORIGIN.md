@@ -32,6 +32,10 @@ Initial local changes:
    prepare endpoint route leases before activating the outer transport.
 5. `device.ProbePeer` exposes the existing handshake initiation path to the
    embedding core after a runtime endpoint update.
+6. The Windows named-pipe listener uses a persistent, close-once shutdown
+   channel. This prevents `Close` from deadlocking when a pending `Accept`
+   consumes a one-shot shutdown notification but Windows reports a
+   non-canonical cancellation error.
 
 From this point, wg-quic production code and tests use this directory rather
 than downloading `golang.zx2c4.com/wireguard`. Future upstream synchronization
