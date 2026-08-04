@@ -54,11 +54,12 @@ New-NetFirewallRule `
   -Direction Inbound -Action Allow -Protocol UDP -LocalPort 51820
 ```
 
-Start in the foreground first so errors remain visible:
+Start with debug mode so errors remain visible and are also written to a
+timestamped log under `%ProgramData%\wg-quic\logs`:
 
 ```powershell
 .\wg-quic-quick.exe check wg0
-.\wg-quic-quick.exe run wg0
+.\wg-quic-quick.exe debug wg0
 ```
 
 From a second elevated terminal:
@@ -70,8 +71,23 @@ Get-NetAdapter -Name wg0
 Get-NetRoute -InterfaceAlias wg0
 ```
 
-After foreground testing succeeds, stop it with Ctrl+C and exercise the
-per-tunnel Windows service:
+Debug logs include version/elevation information, read-only adapter, IP, DNS,
+and route snapshots, host-policy lifecycle, Wintun/WireGuard events, QUIC
+session state, and five-second traffic/FEC counters. Private keys and preshared
+keys are omitted; WireGuard may print an abbreviated peer public-key identifier
+for correlation. Network addresses are included.
+
+After reproducing a problem, stop debug mode with Ctrl+C and collect the newest
+log:
+
+```powershell
+$log = Get-ChildItem "$env:ProgramData\wg-quic\logs\wg0-debug-*.log" |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+Compress-Archive -Path $log.FullName -DestinationPath .\wg-quic-debug.zip
+```
+
+After foreground testing succeeds, exercise the per-tunnel Windows service:
 
 ```powershell
 .\wg-quic-quick.exe up wg0

@@ -119,6 +119,8 @@ claimed VM-validated.
 under `build/`. Each contains both executables, an unmodified official signed
 Wintun 0.14.1 DLL, its original license, checksums, and a LAN test guide.
 GitHub Actions uploads the same directories as the `wg-quic-windows` artifact.
+On Windows, `wg-quic-quick debug wg0` runs the tunnel in the foreground and
+writes a key-redacted diagnostic log under `%ProgramData%\wg-quic\logs`.
 
 The implementation and tests are under active development. See the local
 `design/architecture.md` when the design checkout is present.

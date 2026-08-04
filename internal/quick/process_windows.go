@@ -5,6 +5,7 @@ package quick
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -20,6 +21,15 @@ type execCoreProcess struct {
 }
 
 func newCoreProcess(configPath, name string, fwmark uint32) (coreProcess, error) {
+	return newWindowsCoreProcess(configPath, name, fwmark, false, os.Stdout)
+}
+
+func newWindowsCoreProcess(
+	configPath, name string,
+	fwmark uint32,
+	debug bool,
+	output io.Writer,
+) (coreProcess, error) {
 	executable, err := coreExecutable()
 	if err != nil {
 		return nil, err
@@ -28,9 +38,12 @@ func newCoreProcess(configPath, name string, fwmark uint32) (coreProcess, error)
 	if fwmark != 0 {
 		args = append(args, "--fwmark", strconv.FormatUint(uint64(fwmark), 10))
 	}
+	if debug {
+		args = append(args, "--debug")
+	}
 	cmd := exec.Command(executable, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = output
+	cmd.Stderr = output
 	return &execCoreProcess{cmd: cmd, done: make(chan struct{})}, nil
 }
 

@@ -23,20 +23,17 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
-	case "run":
-		if len(args) < 2 || len(args) > 4 {
+	case "run", "debug":
+		input, name, err := parseQuickRunArgs(args[1:])
+		if err != nil {
 			return usage()
-		}
-		name := ""
-		if len(args) == 4 {
-			if args[2] != "--name" {
-				return usage()
-			}
-			name = args[3]
 		}
 		ctx, stop := commandContext()
 		defer stop()
-		return runQuick(ctx, args[1], name)
+		if args[0] == "debug" {
+			return runQuickDebug(ctx, input, name)
+		}
+		return runQuick(ctx, input, name)
 	case "check":
 		if len(args) != 2 {
 			return usage()
@@ -62,9 +59,23 @@ func run(args []string) error {
 	}
 }
 
+func parseQuickRunArgs(args []string) (input, name string, err error) {
+	if len(args) != 1 && len(args) != 3 {
+		return "", "", errors.New("interface or configuration is required")
+	}
+	if len(args) == 3 {
+		if args[1] != "--name" || args[2] == "" {
+			return "", "", errors.New("invalid --name option")
+		}
+		name = args[2]
+	}
+	return args[0], name, nil
+}
+
 func usage() error {
 	fmt.Fprintln(os.Stderr, `Usage:
   wg-quic-quick run INTERFACE|CONFIG [--name INTERFACE]
+  wg-quic-quick debug INTERFACE|CONFIG [--name INTERFACE]
   wg-quic-quick check INTERFACE|CONFIG
   wg-quic-quick up INTERFACE
   wg-quic-quick down INTERFACE

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,4 +18,8 @@ func commandContext() (context.Context, context.CancelFunc) {
 
 func runQuick(ctx context.Context, input, name string) error {
 	return quick.Run(ctx, input, name)
+}
+
+func runQuickDebug(context.Context, string, string) error {
+	return errors.New("wg-quic-quick debug is currently supported on Windows")
 }

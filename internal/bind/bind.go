@@ -29,6 +29,7 @@ type Config struct {
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
 	ObfsEndpointKeys map[string]obfs.Key
+	Debugf           func(format string, args ...any)
 }
 
 func DefaultConfig() Config {
@@ -144,6 +145,12 @@ func New(cfg Config) *Bind {
 	return &Bind{cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key)}
 }
 
+func (b *Bind) debugf(format string, args ...any) {
+	if b.cfg.Debugf != nil {
+		b.cfg.Debugf(format, args...)
+	}
+}
+
 func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -172,6 +179,10 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	b.state = state
 	state.wg.Add(1)
 	go b.acceptLoop(state)
+		b.debugf(
+			"ArmorBind opened: udp_port=%d fec=%s fec_data_shards=%d obfs=%s queue_size=%d",
+			carrier.Port(), b.cfg.FECMode, b.cfg.FECDataShards, b.cfg.ObfsMode, b.cfg.QueueSize,
+		)
 	return []conn.ReceiveFunc{b.receiveFunc(state)}, carrier.Port(), nil
 }
 
@@ -191,6 +202,12 @@ func (b *Bind) Close() error {
 	state.mu.Unlock()
 	carrierErr := state.carrier.Close()
 	state.wg.Wait()
+	stats := b.Stats()
+	b.debugf(
+		"ArmorBind closed: wg_tx=%d wg_rx=%d wire_tx=%d wire_rx=%d queue_drops=%d fec_recovered=%d fec_unrecovered=%d",
+		stats.WGTxPackets, stats.WGRxPackets, stats.WireTxPackets, stats.WireRxPackets,
+		stats.QueueDrops, stats.FECRecovered, stats.FECUnrecovered,
+	)
 	return carrierErr
 }
 
@@ -256,6 +273,7 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		}
 		state.mu.Unlock()
 	}
+	b.debugf("resolved peer endpoint: configured=%q resolved=%s obfs_key_associated=%t", value, ep.addr, b.cfg.ObfsMode == "salamander")
 	return ep, nil
 }
 
@@ -289,6 +307,7 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 				return net.ErrClosed
 			default:
 				b.stats.queueDrops.Add(1)
+				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
 				return errors.New("wg-quic send queue is full")
 			}
 		}
@@ -339,6 +358,9 @@ func (b *Bind) acceptLoop(state *runState) {
 	for {
 		qconn, remote, err := state.carrier.Accept(state.ctx)
 		if err != nil {
+			if state.ctx.Err() == nil {
+				b.debugf("accept QUIC session failed: %v", err)
+			}
 			return
 		}
 		// Keep an accepted QUIC connection's endpoint identity separate from a
@@ -351,6 +373,7 @@ func (b *Bind) acceptLoop(state *runState) {
 		sess := b.newSession(state, ep)
 		ep.session = sess
 		sess.setConn(qconn)
+		b.debugf("accepted QUIC session: session=%d remote=%s", sess.id, remote)
 		state.wg.Add(1)
 		go func() { defer state.wg.Done(); b.runSession(sess) }()
 	}
@@ -390,14 +413,17 @@ func (b *Bind) newSession(state *runState, ep *Endpoint) *session {
 
 func (b *Bind) dialSession(sess *session) {
 	defer sess.state.wg.Done()
+	b.debugf("dialing QUIC session: session=%d remote=%s", sess.id, sess.endpoint.addr)
 	ctx, cancel := context.WithTimeout(sess.ctx, sess.state.cfg.HandshakeTimeout)
 	defer cancel()
 	qconn, err := sess.state.carrier.Dial(ctx, sess.endpoint.addr)
 	if err != nil {
+		b.debugf("QUIC dial failed: session=%d remote=%s error=%v", sess.id, sess.endpoint.addr, err)
 		sess.close()
 		return
 	}
 	sess.setConn(qconn)
+	b.debugf("QUIC session established: session=%d remote=%s", sess.id, sess.endpoint.addr)
 	b.runSession(sess)
 }
 
@@ -454,6 +480,7 @@ func (s *session) close() {
 			s.endpoint.session = nil
 		}
 		s.endpoint.mu.Unlock()
+		s.endpoint.owner.debugf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
 	})
 }
 
@@ -601,6 +628,12 @@ func (s *session) receiveLoop() {
 		select {
 		case received := <-incoming:
 			if received.err != nil {
+				if s.ctx.Err() == nil {
+					s.endpoint.owner.debugf(
+						"QUIC receive stopped: session=%d remote=%s error=%v",
+						s.id, s.endpoint.addr, received.err,
+					)
+				}
 				return
 			}
 			wirePacket = received.packet

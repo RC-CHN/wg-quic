@@ -25,6 +25,17 @@ type coreProcess interface {
 
 type coreProcessFactory func(configPath, name string, fwmark uint32) (coreProcess, error)
 
+type runLog struct {
+	logger *log.Logger
+	debug  bool
+}
+
+func (l runLog) debugf(format string, args ...any) {
+	if l.debug {
+		l.logger.Printf("debug "+format, args...)
+	}
+}
+
 func runWithHost(
 	ctx context.Context,
 	input, requestedName string,
@@ -41,6 +52,23 @@ func runWithHostReady(
 	newProcess coreProcessFactory,
 	ready func(),
 ) error {
+	return runWithHostReadyLog(
+		ctx, input, requestedName, host, newProcess, ready,
+		runLog{logger: log.Default()},
+	)
+}
+
+func runWithHostReadyLog(
+	ctx context.Context,
+	input, requestedName string,
+	host platform.Host,
+	newProcess coreProcessFactory,
+	ready func(),
+	runLogger runLog,
+) error {
+	if runLogger.logger == nil {
+		runLogger.logger = log.Default()
+	}
 	configPath, name, err := ResolveConfig(input, requestedName, host)
 	if err != nil {
 		return err
@@ -52,14 +80,29 @@ func runWithHostReady(
 	if err := validateConfig(cfg); err != nil {
 		return err
 	}
+	runLogger.debugf(
+		"quick configuration: interface=%q config=%q addresses=%v dns=%v mtu=%d table=%q peers=%d hooks=%d/%d/%d/%d",
+		name, configPath, cfg.Interface.Addresses, cfg.Interface.DNS, cfg.Interface.MTU,
+		cfg.Interface.Table, len(cfg.Peers), len(cfg.Interface.PreUp), len(cfg.Interface.PostUp),
+		len(cfg.Interface.PreDown), len(cfg.Interface.PostDown),
+	)
+	for index, peer := range cfg.Peers {
+		runLogger.debugf(
+			"quick peer %d: endpoint=%q allowed_ips=%v persistent_keepalive=%d preshared_key_present=%t",
+			index+1, peer.Endpoint, peer.AllowedIPs, peer.PersistentKeepalive, peer.PresharedKey != "",
+		)
+	}
+	runLogger.debugf("preparing platform")
 	if err := host.Prepare(ctx, cfg); err != nil {
 		return err
 	}
-	for _, hook := range cfg.Interface.PreUp {
+	for index, hook := range cfg.Interface.PreUp {
+		runLogger.debugf("running PreUp hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
 			return fmt.Errorf("PreUp: %w", err)
 		}
 	}
+	runLogger.debugf("starting wg-quic core process")
 	process, err := newProcess(configPath, name, cfg.Interface.FwMark)
 	if err != nil {
 		return err
@@ -69,18 +112,22 @@ func runWithHostReady(
 	}
 	defer func() {
 		if err := stopCoreProcess(process); err != nil {
-			log.Printf("stop wg-quic core: %v", err)
+			runLogger.logger.Printf("stop wg-quic core: %v", err)
 		}
 	}()
+	runLogger.debugf("waiting for core readiness on %q", host.ControlPath(name))
 	if err := waitForCore(ctx, host.ControlPath(name), name, process); err != nil {
 		return err
 	}
+	runLogger.debugf("core is ready; applying platform address, route, MTU, and DNS policy")
 	networkCleanup, err := host.ConfigureNetwork(ctx, name, cfg)
-	defer cleanupHost(context.Background(), host, name, cfg, &networkCleanup)
+	defer cleanupHost(context.Background(), host, name, cfg, &networkCleanup, runLogger)
 	if err != nil {
 		return err
 	}
-	for _, hook := range cfg.Interface.PostUp {
+	runLogger.debugf("platform network policy applied")
+	for index, hook := range cfg.Interface.PostUp {
+		runLogger.debugf("running PostUp hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
 			return fmt.Errorf("PostUp: %w", err)
 		}
@@ -88,7 +135,7 @@ func runWithHostReady(
 	if ready != nil {
 		ready()
 	}
-	log.Printf("wg-quic-quick configured host policy for interface %s", name)
+	runLogger.logger.Printf("wg-quic-quick configured host policy for interface %s", name)
 	select {
 	case <-ctx.Done():
 		return nil
@@ -145,20 +192,30 @@ func stopCoreProcess(process coreProcess) error {
 	return nil
 }
 
-func cleanupHost(ctx context.Context, host platform.Host, name string, cfg *config.Config, cleanup *platform.Cleanup) {
-	for _, hook := range cfg.Interface.PreDown {
+func cleanupHost(
+	ctx context.Context,
+	host platform.Host,
+	name string,
+	cfg *config.Config,
+	cleanup *platform.Cleanup,
+	runLogger runLog,
+) {
+	for index, hook := range cfg.Interface.PreDown {
+		runLogger.debugf("running PreDown hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
-			log.Printf("PreDown: %v", err)
+			runLogger.logger.Printf("PreDown: %v", err)
 		}
 	}
 	if cleanup != nil && *cleanup != nil {
+		runLogger.debugf("rolling back platform network policy")
 		if err := (*cleanup)(ctx); err != nil {
-			log.Printf("platform network cleanup: %v", err)
+			runLogger.logger.Printf("platform network cleanup: %v", err)
 		}
 	}
-	for _, hook := range cfg.Interface.PostDown {
+	for index, hook := range cfg.Interface.PostDown {
+		runLogger.debugf("running PostDown hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
-			log.Printf("PostDown: %v", err)
+			runLogger.logger.Printf("PostDown: %v", err)
 		}
 	}
 }

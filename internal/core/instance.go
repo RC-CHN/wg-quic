@@ -37,6 +37,10 @@ type Instance struct {
 }
 
 func New(cfg *config.Config, name string, host platform.DeviceHost) (*Instance, error) {
+	return newInstance(cfg, name, host, false)
+}
+
+func newInstance(cfg *config.Config, name string, host platform.DeviceHost, debug bool) (*Instance, error) {
 	if cfg == nil {
 		return nil, errors.New("configuration is required")
 	}
@@ -50,12 +54,20 @@ func New(cfg *config.Config, name string, host platform.DeviceHost) (*Instance, 
 	if err != nil {
 		return nil, err
 	}
+	if debug {
+		transportLogger := device.NewLogger(device.LogLevelVerbose, fmt.Sprintf("(%s/transport) ", name))
+		bindConfig.Debugf = transportLogger.Verbosef
+	}
 	tdev, err := host.CreateTUN(name, InterfaceMTU(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("create TUN %s: %w", name, err)
 	}
 	bind := armorbind.New(bindConfig)
-	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", name))
+	logLevel := device.LogLevelError
+	if debug {
+		logLevel = device.LogLevelVerbose
+	}
+	logger := device.NewLogger(logLevel, fmt.Sprintf("(%s) ", name))
 	dev := device.NewDevice(tdev, bind, logger)
 	if err := wgdevice.Configure(dev, cfg); err != nil {
 		dev.Close()
@@ -122,6 +134,10 @@ func (i *Instance) Close() error {
 
 func (i *Instance) ListenPort() uint16 {
 	return i.bind.Port()
+}
+
+func (i *Instance) Stats() armorbind.Stats {
+	return i.bind.Stats()
 }
 
 func InterfaceMTU(cfg *config.Config) int {

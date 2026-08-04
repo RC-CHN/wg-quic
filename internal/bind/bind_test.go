@@ -3,8 +3,10 @@ package armorbind
 import (
 	"bytes"
 	"errors"
+	"log"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +15,10 @@ import (
 )
 
 func TestBindRoundTripAndClose(t *testing.T) {
-	a, b := New(DefaultConfig()), New(DefaultConfig())
+	var debug bytes.Buffer
+	configA := DefaultConfig()
+	configA.Debugf = log.New(&debug, "", 0).Printf
+	a, b := New(configA), New(DefaultConfig())
 	aReceive, _, err := a.Open(0)
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +56,17 @@ func TestBindRoundTripAndClose(t *testing.T) {
 	eps := make([]conn.Endpoint, 1)
 	if _, err := bReceive[0](packets, sizes, eps); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("receive after Close returned %v, want net.ErrClosed", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []string{
+		"ArmorBind opened", "resolved peer endpoint", "dialing QUIC session",
+		"QUIC session established", "ArmorBind closed",
+	} {
+		if !strings.Contains(debug.String(), message) {
+			t.Errorf("debug log does not contain %q:\n%s", message, debug.String())
+		}
 	}
 }
 
