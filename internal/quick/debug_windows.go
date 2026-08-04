@@ -47,8 +47,8 @@ func RunWindowsDebug(ctx context.Context, input, requestedName string, output io
 	logger := log.New(output, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 	logger.Printf("debug preflight: collecting read-only Windows network state")
 	writeWindowsDiagnostics(ctx, logger, name, "before tunnel")
-	factory := func(configPath, interfaceName string, fwmark uint32) (coreProcess, error) {
-		return newWindowsCoreProcess(configPath, interfaceName, fwmark, true, output)
+	factory := func(configPath, interfaceName string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
+		return newWindowsCoreProcess(configPath, interfaceName, fwmark, deferEndpoints, true, output)
 	}
 	ready := func() {
 		logger.Printf("debug runtime: collecting read-only Windows network state")

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -73,6 +74,31 @@ PersistentKeepalive = 25
 	}
 	if strings.Contains(uapi, testKey(1)) {
 		t.Fatal("UAPI must use WireGuard hex keys, not base64")
+	}
+}
+
+func TestCloneDoesNotShareMutableConfigurationSlices(t *testing.T) {
+	original := &Config{
+		Interface: Interface{
+			DNS:    []string{"1.1.1.1"},
+			PreUp:  []string{"before"},
+			PostUp: []string{"after"},
+		},
+		Peers: []Peer{{
+			Endpoint:   "peer.example:443",
+			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")},
+		}},
+	}
+	clone := original.Clone()
+	clone.Interface.DNS[0] = "9.9.9.9"
+	clone.Interface.PreUp[0] = "changed"
+	clone.Peers[0].Endpoint = "192.0.2.1:443"
+	clone.Peers[0].AllowedIPs[0] = netip.MustParsePrefix("10.1.0.0/24")
+	if original.Interface.DNS[0] != "1.1.1.1" ||
+		original.Interface.PreUp[0] != "before" ||
+		original.Peers[0].Endpoint != "peer.example:443" ||
+		original.Peers[0].AllowedIPs[0] != netip.MustParsePrefix("10.0.0.0/24") {
+		t.Fatalf("clone mutated original: %#v", original)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
@@ -44,25 +44,25 @@ func (freeBSDHost) ConfigPath(name string) string {
 	return "/usr/local/etc/wg-quic/" + name + ".conf"
 }
 
-func (freeBSDHost) Prepare(_ context.Context, cfg *config.Config) error {
-	for i := range cfg.Peers {
-		if cfg.Peers[i].Endpoint == "" {
-			continue
-		}
-		endpoint, err := net.ResolveUDPAddr("udp", cfg.Peers[i].Endpoint)
-		if err != nil {
-			return fmt.Errorf("resolve Peer %d Endpoint: %w", i+1, err)
-		}
-		if endpoint.IP == nil {
-			return fmt.Errorf("resolve Peer %d Endpoint: no IP address", i+1)
-		}
-		cfg.Peers[i].Endpoint = endpoint.String()
-	}
-	return nil
-}
+func (freeBSDHost) Prepare(context.Context, *config.Config) error { return nil }
 
 func (freeBSDHost) CreateTUN(name string, mtu int) (tun.Device, error) {
 	return tun.CreateTUN(name, mtu)
+}
+
+func (freeBSDHost) NewEndpointRouteLeaser(
+	_ context.Context,
+	_ string,
+	cfg *config.Config,
+) (endpoint.RouteLeaser, error) {
+	need4, need6 := false, false
+	if usesFreeBSDAutomaticDefaultRoute(cfg) {
+		need4, need6 = freeBSDDefaultFamilies(cfg)
+	}
+	return &freeBSDEndpointRouteLeaser{
+		need4: need4, need6: need6,
+		entries: make(map[netip.Addr]*freeBSDEndpointRouteEntry),
+	}, nil
 }
 
 func (freeBSDHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.Config) (Cleanup, error) {
@@ -93,11 +93,7 @@ func (freeBSDHost) ConfigureNetwork(ctx context.Context, name string, cfg *confi
 	if err := run(ctx, "ifconfig", name, "mtu", fmt.Sprint(mtu), "up"); err != nil {
 		return cleanup, err
 	}
-	endpointRoutes, err := freeBSDEndpointRouteOperations(ctx, cfg)
-	if err != nil {
-		return cleanup, err
-	}
-	for _, operation := range append(endpointRoutes, freeBSDRouteOperations(name, cfg)...) {
+	for _, operation := range freeBSDRouteOperations(name, cfg) {
 		if err := run(ctx, operation.apply.name, operation.apply.args...); err != nil {
 			return cleanup, err
 		}
@@ -114,62 +110,6 @@ func (freeBSDHost) RunHook(ctx context.Context, hook, name string) error {
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", hook)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
-}
-
-func freeBSDEndpointRouteOperations(ctx context.Context, cfg *config.Config) ([]hostOperation, error) {
-	if !usesFreeBSDAutomaticDefaultRoute(cfg) {
-		return nil, nil
-	}
-	need4, need6 := freeBSDDefaultFamilies(cfg)
-	gateways := make(map[bool]freeBSDGateway)
-	var operations []hostOperation
-	seen := make(map[netip.Addr]struct{})
-	for i, peer := range cfg.Peers {
-		if peer.Endpoint == "" {
-			continue
-		}
-		host, _, err := net.SplitHostPort(peer.Endpoint)
-		if err != nil {
-			return nil, fmt.Errorf("Peer %d Endpoint: %w", i+1, err)
-		}
-		address, err := netip.ParseAddr(strings.Trim(host, "[]"))
-		if err != nil {
-			return nil, fmt.Errorf("Peer %d resolved Endpoint: %w", i+1, err)
-		}
-		if _, ok := seen[address]; ok {
-			continue
-		}
-		seen[address] = struct{}{}
-		is6 := address.Is6()
-		if (is6 && !need6) || (!is6 && !need4) {
-			continue
-		}
-		gateway, ok := gateways[is6]
-		if !ok {
-			gateway, err = freeBSDDefaultGateway(ctx, is6)
-			if err != nil {
-				return nil, err
-			}
-			gateways[is6] = gateway
-		}
-		family := "-inet"
-		if is6 {
-			family = "-inet6"
-		}
-		apply := []string{"-q", "-n", "add", family, address.String()}
-		if gateway.address != "" {
-			apply = append(apply, "-gateway", gateway.address)
-		} else {
-			apply = append(apply, "-interface", gateway.interfaceName)
-		}
-		operations = append(operations, hostOperation{
-			apply: hostCommand{name: "route", args: apply},
-			undo: hostCommand{name: "route", args: []string{
-				"-q", "-n", "delete", family, address.String(),
-			}},
-		})
-	}
-	return operations, nil
 }
 
 type freeBSDGateway struct {

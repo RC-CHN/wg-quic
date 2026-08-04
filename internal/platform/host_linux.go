@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
@@ -60,6 +61,16 @@ func (linuxHost) Prepare(ctx context.Context, cfg *config.Config) error {
 
 func (linuxHost) CreateTUN(name string, mtu int) (tun.Device, error) {
 	return tun.CreateTUN(name, mtu)
+}
+
+func (linuxHost) NewEndpointRouteLeaser(
+	context.Context,
+	string,
+	*config.Config,
+) (endpoint.RouteLeaser, error) {
+	// Linux full-tunnel routing excludes the marked outer socket, so it does
+	// not need per-endpoint host routes.
+	return noopEndpointRouteLeaser{}, nil
 }
 
 func (linuxHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.Config) (Cleanup, error) {

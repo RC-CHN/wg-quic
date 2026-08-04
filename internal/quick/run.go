@@ -9,6 +9,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 )
 
@@ -23,7 +24,7 @@ type coreProcess interface {
 	Err() error
 }
 
-type coreProcessFactory func(configPath, name string, fwmark uint32) (coreProcess, error)
+type coreProcessFactory func(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error)
 
 type runLog struct {
 	logger *log.Logger
@@ -103,7 +104,7 @@ func runWithHostReadyLog(
 		}
 	}
 	runLogger.debugf("starting wg-quic core process")
-	process, err := newProcess(configPath, name, cfg.Interface.FwMark)
+	process, err := newProcess(configPath, name, cfg.Interface.FwMark, true)
 	if err != nil {
 		return err
 	}
@@ -116,13 +117,57 @@ func runWithHostReadyLog(
 		}
 	}()
 	runLogger.debugf("waiting for core readiness on %q", host.ControlPath(name))
-	if err := waitForCore(ctx, host.ControlPath(name), name, process); err != nil {
+	if err := waitForCore(ctx, host.ControlPath(name), name, "prepared", process); err != nil {
 		return err
 	}
-	runLogger.debugf("core is ready; applying platform address, route, MTU, and DNS policy")
-	networkCleanup, err := host.ConfigureNetwork(ctx, name, cfg)
-	defer cleanupHost(context.Background(), host, name, cfg, &networkCleanup, runLogger)
+	runLogger.debugf("core is prepared; resolving peer endpoints and acquiring outer routes")
+	routeLeaser, err := host.NewEndpointRouteLeaser(ctx, name, cfg)
 	if err != nil {
+		return err
+	}
+	specs := make([]endpoint.PeerSpec, 0, len(cfg.Peers))
+	for _, peer := range cfg.Peers {
+		specs = append(specs, endpoint.PeerSpec{
+			PublicKey: peer.PublicKey, Endpoint: peer.Endpoint,
+		})
+	}
+	supervisor, err := endpoint.NewSupervisor(
+		specs,
+		endpoint.SystemResolver{},
+		routeLeaser,
+		localCoreEndpointControl{client: control.NewClient(host.ControlPath(name))},
+		endpoint.Options{Logf: runLogger.debugf},
+	)
+	if err != nil {
+		_ = routeLeaser.Close()
+		return err
+	}
+	defer func() {
+		if err := supervisor.Close(context.Background()); err != nil {
+			runLogger.logger.Printf("close endpoint supervisor: %v", err)
+		}
+	}()
+	selected, err := supervisor.Initialize(ctx)
+	if err != nil {
+		return err
+	}
+	runtimeConfig := cfg.Clone()
+	for index := range runtimeConfig.Peers {
+		if selectedEndpoint, ok := selected[runtimeConfig.Peers[index].PublicKey]; ok {
+			runtimeConfig.Peers[index].Endpoint = selectedEndpoint.String()
+		}
+	}
+	runLogger.debugf("applying platform address, route, MTU, and DNS policy")
+	networkCleanup, err := host.ConfigureNetwork(ctx, name, runtimeConfig)
+	defer func() {
+		supervisor.Stop()
+		cleanupHost(context.Background(), host, name, runtimeConfig, &networkCleanup, runLogger)
+	}()
+	if err != nil {
+		return err
+	}
+	runLogger.debugf("activating prepared core with numeric peer endpoints")
+	if err := supervisor.Activate(ctx); err != nil {
 		return err
 	}
 	runLogger.debugf("platform network policy applied")
@@ -147,7 +192,7 @@ func runWithHostReadyLog(
 	}
 }
 
-func waitForCore(ctx context.Context, path, name string, process coreProcess) error {
+func waitForCore(ctx context.Context, path, name, wantState string, process coreProcess) error {
 	readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -155,7 +200,7 @@ func waitForCore(ctx context.Context, path, name string, process coreProcess) er
 	var lastErr error
 	for {
 		status, err := control.Read(path)
-		if err == nil && status.Interface == name && status.State == "up" {
+		if err == nil && status.Interface == name && status.State == wantState {
 			return nil
 		}
 		if err != nil {

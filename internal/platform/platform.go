@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
@@ -39,6 +40,7 @@ type Host interface {
 	DeviceHost
 	ConfigPath(string) string
 	Prepare(context.Context, *config.Config) error
+	NewEndpointRouteLeaser(context.Context, string, *config.Config) (endpoint.RouteLeaser, error)
 	ConfigureNetwork(context.Context, string, *config.Config) (Cleanup, error)
 	RunHook(context.Context, string, string) error
 }

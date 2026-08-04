@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"context"
 	"net/netip"
 	"strings"
 	"testing"
@@ -80,21 +79,5 @@ func TestWindowsNetworkPlanRejectsUnsupportedTableAndDNSDomains(t *testing.T) {
 	cfg.Interface.DNS = []string{"one.example", "two.example"}
 	if _, err := windowsNetworkOperations("wg0", cfg); err == nil {
 		t.Fatal("multiple Windows DNS suffixes were silently accepted")
-	}
-}
-
-func TestWindowsEndpointAddressesDeduplicatesNumericPeers(t *testing.T) {
-	cfg := &config.Config{Peers: []config.Peer{
-		{Endpoint: "192.0.2.10:443"},
-		{Endpoint: "192.0.2.10:8443"},
-		{Endpoint: "[2001:db8::1]:443"},
-	}}
-	got, err := windowsEndpointAddresses(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []netip.Addr{netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::1")}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("resolved endpoints = %#v, want %#v", got, want)
 	}
 }

@@ -47,6 +47,14 @@ func TestRuntimeEndpointKeyLeasesAreReferenceCounted(t *testing.T) {
 	}
 }
 
+func TestBindRejectsHostnameResolution(t *testing.T) {
+	bind := New(DefaultConfig())
+	if _, err := bind.ParseEndpoint("localhost:443"); err == nil ||
+		!strings.Contains(err.Error(), "numeric IP address") {
+		t.Fatalf("hostname endpoint error = %v, want numeric-only rejection", err)
+	}
+}
+
 func TestBindRoundTripAndClose(t *testing.T) {
 	var debug bytes.Buffer
 	configA := DefaultConfig()

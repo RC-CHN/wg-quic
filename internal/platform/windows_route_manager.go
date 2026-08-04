@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+
+	endpointmgr "github.com/RC-CHN/wg-quic/internal/endpoint"
 )
 
 const windowsRouteLedgerSchemaVersion = 1
@@ -26,12 +28,6 @@ const (
 	windowsRouteActive        windowsRouteState = "active"
 	windowsRoutePendingDelete windowsRouteState = "pending-delete"
 )
-
-// RouteLease represents one process owner's reference to an endpoint host
-// route. Release is idempotent.
-type RouteLease interface {
-	Release(context.Context) error
-}
 
 // windowsRouteKey is the complete identity used by the Windows route APIs.
 // Metric is deliberately not part of the key: Windows uses it as route cost,
@@ -111,7 +107,7 @@ type windowsRouteLease struct {
 func (m *windowsRouteManager) AcquireEndpointRoute(
 	ctx context.Context,
 	endpoint netip.Addr,
-) (RouteLease, error) {
+) (endpointmgr.RouteLease, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {

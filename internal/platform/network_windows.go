@@ -1,11 +1,8 @@
 package platform
 
 import (
-	"context"
 	"fmt"
-	"net"
 	"net/netip"
-	"slices"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
@@ -14,44 +11,6 @@ import (
 type windowsOperation struct {
 	apply string
 	undo  string
-}
-
-func windowsEndpointAddresses(ctx context.Context, cfg *config.Config) ([]netip.Addr, error) {
-	seen := make(map[netip.Addr]struct{})
-	var addresses []netip.Addr
-	for i, peer := range cfg.Peers {
-		if peer.Endpoint == "" {
-			continue
-		}
-		host, _, err := net.SplitHostPort(peer.Endpoint)
-		if err != nil {
-			return nil, fmt.Errorf("Peer %d Endpoint: %w", i+1, err)
-		}
-		host = strings.Trim(host, "[]")
-		if address, err := netip.ParseAddr(host); err == nil {
-			if _, ok := seen[address]; !ok {
-				seen[address] = struct{}{}
-				addresses = append(addresses, address)
-			}
-			continue
-		}
-		resolved, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if err != nil {
-			return nil, fmt.Errorf("resolve Peer %d Endpoint: %w", i+1, err)
-		}
-		for _, address := range resolved {
-			address = address.Unmap()
-			if _, ok := seen[address]; ok {
-				continue
-			}
-			seen[address] = struct{}{}
-			addresses = append(addresses, address)
-		}
-	}
-	slices.SortFunc(addresses, func(a, b netip.Addr) int {
-		return a.Compare(b)
-	})
-	return addresses, nil
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {

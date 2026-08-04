@@ -20,13 +20,14 @@ type execCoreProcess struct {
 	err error
 }
 
-func newCoreProcess(configPath, name string, fwmark uint32) (coreProcess, error) {
-	return newWindowsCoreProcess(configPath, name, fwmark, false, os.Stdout)
+func newCoreProcess(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
+	return newWindowsCoreProcess(configPath, name, fwmark, deferEndpoints, false, os.Stdout)
 }
 
 func newWindowsCoreProcess(
 	configPath, name string,
 	fwmark uint32,
+	deferEndpoints bool,
 	debug bool,
 	output io.Writer,
 ) (coreProcess, error) {
@@ -37,6 +38,9 @@ func newWindowsCoreProcess(
 	args := []string{"run", configPath, "--name", name}
 	if fwmark != 0 {
 		args = append(args, "--fwmark", strconv.FormatUint(uint64(fwmark), 10))
+	}
+	if deferEndpoints {
+		args = append(args, "--defer-endpoints")
 	}
 	if debug {
 		args = append(args, "--debug")

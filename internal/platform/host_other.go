@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
 
@@ -35,6 +36,14 @@ func (unsupportedHost) Prepare(context.Context, *config.Config) error {
 }
 
 func (unsupportedHost) CreateTUN(string, int) (tun.Device, error) {
+	return nil, errHostNotImplemented
+}
+
+func (unsupportedHost) NewEndpointRouteLeaser(
+	context.Context,
+	string,
+	*config.Config,
+) (endpoint.RouteLeaser, error) {
 	return nil, errHostNotImplemented
 }
 

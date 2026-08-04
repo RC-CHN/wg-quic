@@ -52,6 +52,24 @@ type Transport struct {
 	Obfs       string
 }
 
+func (cfg *Config) Clone() *Config {
+	if cfg == nil {
+		return nil
+	}
+	clone := *cfg
+	clone.Interface.Addresses = append([]netip.Prefix(nil), cfg.Interface.Addresses...)
+	clone.Interface.DNS = append([]string(nil), cfg.Interface.DNS...)
+	clone.Interface.PreUp = append([]string(nil), cfg.Interface.PreUp...)
+	clone.Interface.PostUp = append([]string(nil), cfg.Interface.PostUp...)
+	clone.Interface.PreDown = append([]string(nil), cfg.Interface.PreDown...)
+	clone.Interface.PostDown = append([]string(nil), cfg.Interface.PostDown...)
+	clone.Peers = append([]Peer(nil), cfg.Peers...)
+	for index := range clone.Peers {
+		clone.Peers[index].AllowedIPs = append([]netip.Prefix(nil), cfg.Peers[index].AllowedIPs...)
+	}
+	return &clone
+}
+
 func DefaultTransport() Transport {
 	return Transport{Carrier: "quic", Congestion: "auto", FEC: "auto", Obfs: "salamander"}
 }

@@ -294,15 +294,14 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 }
 
 func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", value)
+	addrPort, err := netip.ParseAddrPort(value)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("endpoint must be a numeric IP address: %w", err)
 	}
-	addr, ok := netip.AddrFromSlice(udpAddr.IP)
-	if !ok {
-		return nil, fmt.Errorf("endpoint %q did not resolve to an IP address", value)
+	ep := &Endpoint{
+		owner: b,
+		addr:  netip.AddrPortFrom(addrPort.Addr().Unmap(), addrPort.Port()),
 	}
-	ep := &Endpoint{owner: b, addr: netip.AddrPortFrom(addr.Unmap(), uint16(udpAddr.Port))}
 	b.mu.Lock()
 	if key, ok := b.cfg.ObfsEndpointKeys[value]; ok {
 		b.obfsResolved[ep.addr] = key

@@ -20,7 +20,7 @@ type execCoreProcess struct {
 	err error
 }
 
-func newCoreProcess(configPath, name string, fwmark uint32) (coreProcess, error) {
+func newCoreProcess(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
 	executable, err := coreExecutable()
 	if err != nil {
 		return nil, err
@@ -28,6 +28,9 @@ func newCoreProcess(configPath, name string, fwmark uint32) (coreProcess, error)
 	args := []string{"run", configPath, "--name", name}
 	if fwmark != 0 {
 		args = append(args, "--fwmark", strconv.FormatUint(uint64(fwmark), 10))
+	}
+	if deferEndpoints {
+		args = append(args, "--defer-endpoints")
 	}
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout

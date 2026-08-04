@@ -1,10 +1,12 @@
 package quick
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 )
@@ -24,6 +27,7 @@ type testHost struct {
 	configRoot  string
 	controlRoot string
 	postUp      chan struct{}
+	runtimeCfg  *config.Config
 }
 
 func (h *testHost) record(event string) {
@@ -62,12 +66,49 @@ func (h *testHost) CreateTUN(name string, mtu int) (tun.Device, error) {
 	return nil, errors.New("quick must not create the core TUN")
 }
 
-func (h *testHost) ConfigureNetwork(context.Context, string, *config.Config) (platform.Cleanup, error) {
+func (h *testHost) NewEndpointRouteLeaser(
+	context.Context,
+	string,
+	*config.Config,
+) (endpoint.RouteLeaser, error) {
+	h.record("route-leaser")
+	return &testEndpointRouteLeaser{host: h}, nil
+}
+
+func (h *testHost) ConfigureNetwork(_ context.Context, _ string, cfg *config.Config) (platform.Cleanup, error) {
+	h.runtimeCfg = cfg.Clone()
 	h.record("network-up")
 	return func(context.Context) error {
 		h.record("network-down")
 		return nil
 	}, nil
+}
+
+type testEndpointRouteLeaser struct {
+	host *testHost
+}
+
+type testEndpointRouteLease struct {
+	host *testHost
+	once sync.Once
+}
+
+func (l *testEndpointRouteLeaser) AcquireEndpointRoute(
+	_ context.Context,
+	address netip.Addr,
+) (endpoint.RouteLease, error) {
+	l.host.record("route-acquire:" + address.String())
+	return &testEndpointRouteLease{host: l.host}, nil
+}
+
+func (l *testEndpointRouteLeaser) Close() error {
+	l.host.record("route-leaser-close")
+	return nil
+}
+
+func (l *testEndpointRouteLease) Release(context.Context) error {
+	l.once.Do(func() { l.host.record("route-release") })
+	return nil
 }
 
 func (h *testHost) RunHook(ctx context.Context, hook, name string) error {
@@ -83,14 +124,32 @@ type testCoreProcess struct {
 	name     string
 	done     chan struct{}
 	stopOnce sync.Once
+	mu       sync.Mutex
 	server   *control.Server
 	err      error
+	state    string
 }
 
 func (p *testCoreProcess) Start() error {
 	p.host.record("core-start")
-	server, err := control.Start(context.Background(), p.host.ControlPath(p.name), func() control.Status {
-		return control.Status{Interface: p.name, State: "up"}
+	p.state = "prepared"
+	server, err := control.StartHandler(context.Background(), p.host.ControlPath(p.name), control.Handler{
+		Status: func() control.Status {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return control.Status{Interface: p.name, State: p.state}
+		},
+		SetPeerEndpoint: func(update control.SetPeerEndpointRequest) error {
+			p.host.record("core-set:" + update.Endpoint)
+			return nil
+		},
+		Activate: func() error {
+			p.mu.Lock()
+			p.state = "up"
+			p.mu.Unlock()
+			p.host.record("core-activate")
+			return nil
+		},
 	})
 	if err != nil {
 		return err
@@ -145,13 +204,18 @@ func TestQuickOwnsHostPolicyAroundCoreLifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "wg0.conf")
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	peerKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
 	contents := fmt.Sprintf(`[Interface]
 PrivateKey = %s
 PreUp = pre-up
 PostUp = post-up
 PreDown = pre-down
 PostDown = post-down
-`, key)
+
+[Peer]
+PublicKey = %s
+Endpoint = 192.0.2.10:443
+`, key, peerKey)
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +226,10 @@ PostDown = post-down
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		result <- runWithHost(ctx, path, "wg0", host, func(configPath, name string, fwmark uint32) (coreProcess, error) {
+		result <- runWithHost(ctx, path, "wg0", host, func(configPath, name string, fwmark uint32, deferEndpoints bool) (coreProcess, error) {
+			if !deferEndpoints {
+				return nil, errors.New("quick did not defer core endpoints")
+			}
 			return &testCoreProcess{host: host, name: name, done: make(chan struct{})}, nil
 		})
 	}()
@@ -182,10 +249,16 @@ PostDown = post-down
 		t.Fatal("quick layer did not shut down")
 	}
 	want := []string{
-		"prepare", "pre-up", "core-start", "network-up", "post-up",
-		"pre-down", "network-down", "post-down", "core-stop",
+		"prepare", "pre-up", "core-start", "route-leaser",
+		"route-acquire:192.0.2.10", "core-set:192.0.2.10:443",
+		"network-up", "core-activate", "post-up",
+		"pre-down", "network-down", "post-down",
+		"route-release", "route-leaser-close", "core-stop",
 	}
 	if got := host.snapshot(); !slices.Equal(got, want) {
 		t.Fatalf("quick lifecycle events = %#v, want %#v", got, want)
+	}
+	if host.runtimeCfg == nil || host.runtimeCfg.Peers[0].Endpoint != "192.0.2.10:443" {
+		t.Fatalf("runtime config did not contain selected numeric endpoint: %#v", host.runtimeCfg)
 	}
 }
