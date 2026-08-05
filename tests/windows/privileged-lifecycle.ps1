@@ -134,12 +134,12 @@ PersistentKeepalive = 1
     Wait-For -Description "the Wintun adapter" -Condition {
         $null -ne (Get-NetAdapter -Name $TunnelName -ErrorAction SilentlyContinue)
     }
-    Wait-For -Description "the active runtime status" -Condition {
+    Wait-For -Description "the up runtime status" -Condition {
         $candidate = (Invoke-Native -FilePath $core -Arguments @(
             "show", $TunnelName, "--json"
         )) | ConvertFrom-Json
         $candidate.interface -eq $TunnelName -and
-            $candidate.state -eq "active" -and
+            $candidate.state -eq "up" -and
             [int] $candidate.listen_port -eq $listenPort
     }
 
@@ -203,7 +203,7 @@ PersistentKeepalive = 1
 
     $status = (Invoke-Native -FilePath $core -Arguments @("show", $TunnelName, "--json")) |
         ConvertFrom-Json
-    if ($status.interface -ne $TunnelName -or $status.state -ne "active") {
+    if ($status.interface -ne $TunnelName -or $status.state -ne "up") {
         throw "unexpected runtime status: $($status | ConvertTo-Json -Depth 8)"
     }
     if ([int] $status.listen_port -ne $listenPort) {
