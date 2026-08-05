@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:"
+    />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>wg-quic</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div>
+            <div class="brand-name">wg-quic</div>
+            <div class="brand-subtitle">WireGuard over resilient QUIC</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="button secondary" id="open-directory" type="button">
+            Open config folder
+          </button>
+          <button class="button primary" id="import-config" type="button">
+            Import tunnel…
+          </button>
+        </div>
+      </header>
+
+      <section class="notice hidden" id="notice" role="status">
+        <div class="notice-icon">!</div>
+        <div>
+          <strong id="notice-title"></strong>
+          <p id="notice-detail"></p>
+        </div>
+      </section>
+
+      <main class="workspace">
+        <aside class="tunnel-sidebar" aria-label="Configured tunnels">
+          <div class="sidebar-heading">
+            <div>
+              <div class="eyebrow">TUNNELS</div>
+              <span id="tunnel-count">Loading…</span>
+            </div>
+            <button
+              class="icon-button"
+              id="refresh"
+              type="button"
+              title="Refresh (Ctrl+R)"
+              aria-label="Refresh tunnel status"
+            >
+              ↻
+            </button>
+          </div>
+
+          <div class="tunnel-list" id="tunnel-list" role="listbox"></div>
+          <div class="no-tunnels hidden" id="no-tunnels">
+            <div class="empty-symbol">⌁</div>
+            <strong>No tunnels</strong>
+            <p>Import an existing wg-quic configuration to get started.</p>
+            <button class="button primary" id="empty-import" type="button">
+              Import tunnel…
+            </button>
+          </div>
+
+          <div class="sidebar-runtime">
+            <div class="runtime-line">
+              <span class="runtime-dot" id="runtime-dot"></span>
+              <div>
+                <strong id="runtime-title">Checking runtime</strong>
+                <span id="runtime-version">wg-quic</span>
+              </div>
+            </div>
+            <div class="config-location" id="config-location">
+              Loading configuration directory…
+            </div>
+          </div>
+        </aside>
+
+        <section class="detail-pane">
+          <div class="detail-empty" id="detail-empty">
+            <div class="empty-symbol large">⌁</div>
+            <h1 id="detail-empty-title">Select a tunnel</h1>
+            <p id="detail-empty-copy">
+              Choose a tunnel from the list to inspect or control it.
+            </p>
+          </div>
+
+          <article class="tunnel-detail hidden" id="tunnel-detail">
+            <header class="detail-header">
+              <div class="detail-title">
+                <span class="state-dot large" id="detail-state-dot"></span>
+                <div>
+                  <div class="eyebrow">TUNNEL</div>
+                  <h1 id="detail-name">—</h1>
+                  <p id="detail-path">—</p>
+                </div>
+              </div>
+              <div class="detail-actions">
+                <button class="button secondary" id="check-tunnel" type="button">
+                  Check config
+                </button>
+                <button class="button primary" id="toggle-tunnel" type="button">
+                  Activate
+                </button>
+              </div>
+            </header>
+
+            <section class="status-strip" aria-label="Tunnel state">
+              <div>
+                <span class="section-label">STATUS</span>
+                <strong id="detail-state">Inactive</strong>
+              </div>
+              <p id="detail-state-copy">The tunnel service is not running.</p>
+            </section>
+
+            <div class="detail-grid">
+              <section class="detail-card">
+                <div class="card-heading">
+                  <span>Transport</span>
+                  <span class="card-index">01</span>
+                </div>
+                <strong class="hero-value" id="detail-carrier">QUIC</strong>
+                <p id="detail-modes">Runtime details unavailable while inactive</p>
+              </section>
+
+              <section class="detail-card">
+                <div class="card-heading">
+                  <span>Transfer</span>
+                  <span class="card-index">02</span>
+                </div>
+                <div class="transfer-values">
+                  <div>
+                    <span>RECEIVED</span>
+                    <strong id="detail-rx">0 B</strong>
+                  </div>
+                  <div>
+                    <span>SENT</span>
+                    <strong id="detail-tx">0 B</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section class="detail-card path-card">
+                <div class="card-heading">
+                  <span>QUIC path</span>
+                  <span class="card-index">03</span>
+                </div>
+                <dl class="stat-list">
+                  <div>
+                    <dt>Smoothed RTT</dt>
+                    <dd id="detail-rtt">—</dd>
+                  </div>
+                  <div>
+                    <dt>Bandwidth estimate</dt>
+                    <dd id="detail-bandwidth">—</dd>
+                  </div>
+                  <div>
+                    <dt>Pacing rate</dt>
+                    <dd id="detail-pacing">—</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section class="detail-card fec-card">
+                <div class="card-heading">
+                  <span>Adaptive FEC</span>
+                  <span class="card-index">04</span>
+                </div>
+                <strong class="hero-value green" id="detail-fec-recovered">0</strong>
+                <p id="detail-fec-loss">No observed loss</p>
+                <div class="card-foot" id="detail-fec-parity">
+                  0 current parity · 0 residual
+                </div>
+              </section>
+            </div>
+
+            <section class="peer-panel">
+              <div class="panel-heading">
+                <div>
+                  <div class="eyebrow">RUNTIME</div>
+                  <h2>Peers</h2>
+                </div>
+                <span>Public keys are shortened in this view</span>
+              </div>
+              <div class="peer-list" id="peer-list"></div>
+            </section>
+          </article>
+        </section>
+      </main>
+
+      <footer>
+        <span id="last-refresh">Not refreshed yet</span>
+        <span>CLI remains the source of truth · Ctrl+O to import</span>
+      </footer>
+    </div>
+    <div class="toast hidden" id="toast" role="alert"></div>
+  </body>
+</html>

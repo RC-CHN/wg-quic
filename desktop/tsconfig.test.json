@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-build",
+    "rootDir": ".",
+    "sourceMap": false
+  },
+  "include": [
+    "src/types.ts",
+    "src/paths.ts",
+    "src/paths.test.ts",
+    "src/view-model.ts",
+    "src/view-model.test.ts"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "wg-quic-desktop",
+  "productName": "wg-quic",
+  "version": "0.1.1",
+  "description": "Desktop shell for wg-quic-quick",
+  "main": ".webpack/main",
+  "private": true,
+  "os": [
+    "linux",
+    "win32"
+  ],
+  "engines": {
+    "node": ">=22.12 <23"
+  },
+  "scripts": {
+    "clean": "node scripts/clean-output.mjs",
+    "native": "node scripts/prepare-native.mjs",
+    "start": "npm run native && electron-forge start",
+    "check": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "smoke:native": "node scripts/smoke-native.mjs",
+    "smoke:app": "node scripts/smoke-app.mjs",
+    "package": "npm run clean && npm run native && electron-forge package",
+    "make": "npm run clean && npm run native && electron-forge make",
+    "verify": "npm run check && npm test && npm run package && npm run smoke:native"
+  },
+  "author": {
+    "name": "RC-CHN"
+  },
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  },
+  "overrides": {
+    "tar": "7.5.22",
+    "tmp": "0.2.7",
+    "uuid": "11.1.1",
+    "webpack-dev-server": "5.2.6"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-deb": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-webpack": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@electron/fuses": "^1.8.0",
+    "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/node": "^22.0.0",
+    "css-loader": "^7.1.2",
+    "electron": "43.2.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "webpack": "^5.100.0",
+    "webpack-cli": "^6.0.1"
+  }
+}
