@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.1.2 - 2026-08-05
+
+Degraded-link control, applications, and Windows lifecycle hardening release.
+
+- Added adaptive degraded-link congestion/FEC control, high-RTT tuning, and
+  telemetry-backed benchmark fixtures with a direct wireguard-go baseline.
+- Removed avoidable QUIC framing, receive, and queue copies and pooled received
+  datagrams.
+- Added the `wg-quic` OPNsense plugin, official-framework packaging, and
+  FreeBSD 14/15 CI coverage.
+- Added the Windows and Linux Electron desktop shell around the existing
+  `wg-quic-quick` lifecycle, including native packaging and application smoke
+  tests.
+- Added a privileged Windows CI lifecycle covering a real LocalSystem service,
+  Wintun, address/MTU/DNS policy, AllowedIPs, endpoint route leases, runtime
+  status, and complete cleanup.
+- Bounded endpoint, host-policy, core-process, and SCM shutdown; added
+  StopPending checkpoints, wait hints, stage diagnostics, and a kill-on-close
+  Windows Job Object for the supervised core.
+- Added explicit `wg-quic-quick down INTERFACE --repair` recovery. Normal
+  `down` never force-terminates; repair preserves live-owner and ambiguous
+  routes and may terminate only the exact stuck tunnel service after a final
+  graceful-stop window.
+
 ## v0.1.1 - 2026-08-04
 
 Routing, endpoint lifecycle, and architecture hardening release.
