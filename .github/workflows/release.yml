@@ -70,6 +70,8 @@ jobs:
           go build -trimpath -ldflags "-s -w -X main.version=$version" -o wg-quic-quick.exe ./cmd/wg-quic-quick
           if ((.\wg-quic.exe version) -ne "wg-quic $version") { throw "wrong wg-quic version" }
           if ((.\wg-quic-quick.exe version) -ne "wg-quic-quick $version") { throw "wrong wg-quic-quick version" }
+          Copy-Item third_party/wintun/amd64/wintun.dll .
+          ./tests/windows/privileged-lifecycle.ps1 -BinDirectory .
 
   verify-freebsd:
     runs-on: ubuntu-latest

@@ -10,10 +10,12 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, '..');
 const platformDirectory = `wg-quic-${process.platform}-${process.arch}`;
 const packageDirectory = path.join(desktopDir, 'out', platformDirectory);
-const executable = {
-  linux: path.join(packageDirectory, 'wg-quic'),
-  win32: path.join(packageDirectory, 'wg-quic.exe'),
-}[process.platform];
+const executable =
+  process.env.WG_QUIC_DESKTOP_EXECUTABLE ||
+  {
+    linux: path.join(packageDirectory, 'wg-quic'),
+    win32: path.join(packageDirectory, 'wg-quic.exe'),
+  }[process.platform];
 
 if (!executable) {
   throw new Error(`unsupported desktop smoke platform ${process.platform}`);
@@ -29,6 +31,7 @@ try {
     cwd: packageDirectory,
     env: {
       ...process.env,
+      ELECTRON_ENABLE_LOGGING: '1',
       WG_QUIC_CONFIG_DIR: configDirectory,
       WG_QUIC_DESKTOP_SMOKE: '1',
     },
@@ -57,7 +60,11 @@ try {
     child.once('exit', (code, signal) => {
       clearTimeout(timeout);
       if (signal) {
-        reject(new Error(`packaged desktop app exited via ${signal}`));
+        reject(
+          new Error(
+            `packaged desktop app exited via ${signal}\n${output}`,
+          ),
+        );
         return;
       }
       resolve(code);

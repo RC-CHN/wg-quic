@@ -11,6 +11,7 @@ on:
       - "go.sum"
       - "cmd/**"
       - "internal/**"
+      - "tests/windows/**"
       - "third_party/**"
       - "desktop/**"
   pull_request:
@@ -21,6 +22,7 @@ on:
       - "go.sum"
       - "cmd/**"
       - "internal/**"
+      - "tests/windows/**"
       - "third_party/**"
       - "desktop/**"
   workflow_dispatch:
@@ -67,13 +69,23 @@ jobs:
       - name: Smoke bundled wg-quic commands
         working-directory: desktop
         run: npm run smoke:native
+      - name: Privileged Wintun and Windows service lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/windows/privileged-lifecycle.ps1 -BinDirectory ./desktop/resources/bin
       - name: Smoke packaged desktop app
         if: runner.os != 'Linux'
         working-directory: desktop
         run: npm run smoke:app
+      - name: Install Linux desktop package
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: sudo apt-get install --no-install-recommends --yes ./out/make/deb/x64/*.deb
       - name: Smoke packaged desktop app
         if: runner.os == 'Linux'
         working-directory: desktop
+        env:
+          WG_QUIC_DESKTOP_EXECUTABLE: /usr/bin/wg-quic-desktop
         run: xvfb-run --auto-servernum npm run smoke:app
       - name: Upload desktop distributable
         uses: actions/upload-artifact@v7
