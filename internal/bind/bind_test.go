@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -311,10 +312,7 @@ func TestBindRedialsAfterAbruptPeerRestart(t *testing.T) {
 	}
 
 	restarted := New(config)
-	restartedReceive, reboundPort, err := restarted.Open(bPort)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restartedReceive, reboundPort := openRestartedBind(t, restarted, bPort)
 	defer restarted.Close()
 	if reboundPort != bPort {
 		t.Fatalf("restarted peer bound port %d, want %d", reboundPort, bPort)
@@ -349,6 +347,28 @@ func TestBindRedialsAfterAbruptPeerRestart(t *testing.T) {
 	}
 	if !bytes.Equal(got, afterRestart) {
 		t.Fatal("payload changed after restart")
+	}
+}
+
+func openRestartedBind(
+	t *testing.T,
+	bind *Bind,
+	port uint16,
+) ([]conn.ReceiveFunc, uint16) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		receive, reboundPort, err := bind.Open(port)
+		if err == nil {
+			return receive, reboundPort
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+			t.Fatalf("rebind restarted peer to UDP port %d: %v", port, err)
+		}
+		// Other Go packages run concurrently and may briefly acquire the
+		// just-released ephemeral port. Retry only that transient collision;
+		// all other bind failures remain immediate test failures.
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
