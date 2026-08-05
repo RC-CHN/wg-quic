@@ -850,6 +850,78 @@ func (m *windowsRouteManager) reconcile(
 	return changed, nil
 }
 
+// reconcileAbandonedWindowsRoutes is the conservative repair variant of
+// normal startup reconciliation. It never changes a route with a live owner
+// and deletes only routes whose managed ownership was made durable before the
+// owning process disappeared.
+func reconcileAbandonedWindowsRoutes(
+	ctx context.Context,
+	manager *windowsRouteManager,
+	ledger *windowsRouteLedger,
+) (bool, error) {
+	changed := false
+	for index := 0; index < len(ledger.Routes); {
+		record := &ledger.Routes[index]
+		if record.Key.CompartmentID != manager.system.CurrentCompartmentID() {
+			index++
+			continue
+		}
+		ownersBefore := len(record.Owners)
+		liveOwners := record.Owners[:0]
+		for _, owner := range record.Owners {
+			alive, err := manager.store.OwnerAlive(owner)
+			if err != nil {
+				return false, fmt.Errorf(
+					"check route owner %s during repair: %w",
+					owner.InstanceID, err,
+				)
+			}
+			if alive {
+				liveOwners = append(liveOwners, owner)
+			}
+		}
+		record.Owners = liveOwners
+		changed = changed || ownersBefore != len(liveOwners)
+		if len(liveOwners) != 0 {
+			// Repair never mutates or migrates a route with a live owner.
+			index++
+			continue
+		}
+		exists, err := manager.system.RouteExists(ctx, record.Key)
+		if err != nil {
+			return false, fmt.Errorf(
+				"check abandoned route %s: %w",
+				record.Key.Destination, err,
+			)
+		}
+		if record.Ownership == windowsRouteManaged &&
+			record.State != windowsRoutePendingAdd &&
+			record.State != windowsRoutePendingMigrateAdd &&
+			exists {
+			if record.State != windowsRoutePendingDelete {
+				record.State = windowsRoutePendingDelete
+				if err := manager.saveLedger(ledger); err != nil {
+					return false, err
+				}
+			}
+			if err := manager.system.DeleteRoute(ctx, record.Key); err != nil {
+				return false, fmt.Errorf(
+					"delete abandoned route %s: %w",
+					record.Key.Destination, err,
+				)
+			}
+		}
+		// An existing pending-add route is intentionally leaked: the ledger
+		// cannot prove whether our create completed or an external actor
+		// installed the identical route.
+		ledger.Routes = slices.Delete(
+			ledger.Routes, index, index+1,
+		)
+		changed = true
+	}
+	return changed, nil
+}
+
 func validateWindowsRouteLedger(ledger windowsRouteLedger) error {
 	seenRoutes := make(map[windowsRouteKey]struct{}, len(ledger.Routes))
 	for index, record := range ledger.Routes {

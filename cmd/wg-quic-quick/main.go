@@ -43,11 +43,32 @@ func run(args []string) error {
 		}
 		fmt.Println("configuration is valid for wg-quic-quick")
 		return nil
-	case "up", "down":
+	case "up":
 		if len(args) != 2 {
 			return usage()
 		}
 		return quick.Manage(context.Background(), args[0], args[1])
+	case "down":
+		name, repair, err := parseQuickDownArgs(args[1:])
+		if err != nil {
+			return usage()
+		}
+		if repair {
+			result, err := quick.Repair(context.Background(), name)
+			if err != nil {
+				return err
+			}
+			if result.ForcedServiceTermination {
+				fmt.Printf(
+					"repair completed for %s; the stuck service process was explicitly terminated\n",
+					name,
+				)
+			} else {
+				fmt.Printf("repair completed for %s\n", name)
+			}
+			return nil
+		}
+		return quick.Manage(context.Background(), args[0], name)
 	case "version", "--version":
 		if len(args) != 1 {
 			return usage()
@@ -72,13 +93,24 @@ func parseQuickRunArgs(args []string) (input, name string, err error) {
 	return args[0], name, nil
 }
 
+func parseQuickDownArgs(args []string) (name string, repair bool, err error) {
+	switch {
+	case len(args) == 1 && args[0] != "":
+		return args[0], false, nil
+	case len(args) == 2 && args[0] != "" && args[1] == "--repair":
+		return args[0], true, nil
+	default:
+		return "", false, errors.New("invalid down arguments")
+	}
+}
+
 func usage() error {
 	fmt.Fprintln(os.Stderr, `Usage:
   wg-quic-quick run INTERFACE|CONFIG [--name INTERFACE]
   wg-quic-quick debug INTERFACE|CONFIG [--name INTERFACE]
   wg-quic-quick check INTERFACE|CONFIG
   wg-quic-quick up INTERFACE
-  wg-quic-quick down INTERFACE
+  wg-quic-quick down INTERFACE [--repair]
   wg-quic-quick version`)
 	return errors.New("invalid command line")
 }

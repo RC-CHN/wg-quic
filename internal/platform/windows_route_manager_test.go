@@ -218,6 +218,135 @@ func TestWindowsRouteManagerBorrowsExternalRouteWithoutDeletingIt(t *testing.T) 
 	}
 }
 
+func TestWindowsRouteRepairLeavesLiveOwnerUntouched(t *testing.T) {
+	selected := testWindowsSelectedRoute(
+		netip.MustParseAddr("192.0.2.40"), 40, 4,
+	)
+	system := &fakeWindowsRouteSystem{
+		routes: map[windowsRouteKey]windowsSelectedRoute{
+			selected.Key: selected,
+		},
+	}
+	store := &fakeWindowsRouteStore{
+		alive: map[string]bool{"owner-live": true},
+	}
+	ledger := windowsRouteLedger{Routes: []windowsRouteRecord{{
+		Key:       selected.Key,
+		Ownership: windowsRouteManaged,
+		State:     windowsRouteActive,
+		Owners: []windowsRouteOwner{{
+			Tunnel: "wg-live", InstanceID: "owner-live",
+		}},
+	}}}
+	manager := &windowsRouteManager{system: system, store: store}
+
+	changed, err := reconcileAbandonedWindowsRoutes(
+		context.Background(), manager, &ledger,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("repair changed a route with a live owner")
+	}
+	if len(system.deleted) != 0 || len(ledger.Routes) != 1 {
+		t.Fatalf(
+			"live route repair deleted=%v ledger=%#v",
+			system.deleted, ledger.Routes,
+		)
+	}
+}
+
+func TestWindowsRouteRepairDeletesProvenAbandonedManagedRoute(t *testing.T) {
+	selected := testWindowsSelectedRoute(
+		netip.MustParseAddr("192.0.2.41"), 41, 4,
+	)
+	system := &fakeWindowsRouteSystem{
+		routes: map[windowsRouteKey]windowsSelectedRoute{
+			selected.Key: selected,
+		},
+	}
+	store := &fakeWindowsRouteStore{alive: map[string]bool{}}
+	ledger := windowsRouteLedger{Routes: []windowsRouteRecord{{
+		Key:       selected.Key,
+		Ownership: windowsRouteManaged,
+		State:     windowsRouteActive,
+		Owners: []windowsRouteOwner{{
+			Tunnel: "wg-dead", InstanceID: "owner-dead",
+		}},
+	}}}
+	manager := &windowsRouteManager{system: system, store: store}
+
+	changed, err := reconcileAbandonedWindowsRoutes(
+		context.Background(), manager, &ledger,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || len(ledger.Routes) != 0 {
+		t.Fatalf("abandoned managed ledger = %#v, changed=%v", ledger.Routes, changed)
+	}
+	if !slices.Equal(system.deleted, []windowsRouteKey{selected.Key}) {
+		t.Fatalf("deleted routes = %#v, want %#v", system.deleted, []windowsRouteKey{selected.Key})
+	}
+}
+
+func TestWindowsRouteRepairDoesNotDeleteUnprovenKernelRoutes(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		ownership windowsRouteOwnership
+		state     windowsRouteState
+	}{
+		{
+			name:      "external",
+			ownership: windowsRouteExternal,
+			state:     windowsRouteActive,
+		},
+		{
+			name:      "ambiguous-pending-add",
+			ownership: windowsRouteManaged,
+			state:     windowsRoutePendingAdd,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := testWindowsSelectedRoute(
+				netip.MustParseAddr("192.0.2.42"), 42, 4,
+			)
+			system := &fakeWindowsRouteSystem{
+				routes: map[windowsRouteKey]windowsSelectedRoute{
+					selected.Key: selected,
+				},
+			}
+			store := &fakeWindowsRouteStore{alive: map[string]bool{}}
+			ledger := windowsRouteLedger{Routes: []windowsRouteRecord{{
+				Key:       selected.Key,
+				Ownership: test.ownership,
+				State:     test.state,
+				Owners: []windowsRouteOwner{{
+					Tunnel: "wg-dead", InstanceID: "owner-dead",
+				}},
+			}}}
+			manager := &windowsRouteManager{system: system, store: store}
+
+			changed, err := reconcileAbandonedWindowsRoutes(
+				context.Background(), manager, &ledger,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !changed || len(ledger.Routes) != 0 {
+				t.Fatalf("unproven ledger = %#v, changed=%v", ledger.Routes, changed)
+			}
+			if len(system.deleted) != 0 {
+				t.Fatalf("repair deleted an unproven route: %#v", system.deleted)
+			}
+			if _, exists := system.routes[selected.Key]; !exists {
+				t.Fatal("unproven kernel route no longer exists")
+			}
+		})
+	}
+}
+
 func TestWindowsRouteManagerReferenceCountsMultipleOwners(t *testing.T) {
 	endpoint := netip.MustParseAddr("192.0.2.20")
 	selected := testWindowsSelectedRoute(endpoint, 30, 3)

@@ -151,12 +151,22 @@ wg-quic-quick.exe check wg0
 wg-quic-quick.exe up wg0
 wg-quic.exe show wg0
 wg-quic-quick.exe down wg0
+# Explicit recovery only, if a previous stop left residual state:
+wg-quic-quick.exe down wg0 --repair
 ```
 
 The quick service runs as LocalSystem, supervises a separate sibling
 `wg-quic.exe`, and reports readiness through an Administrators/System-only
 Named Pipe using the same JSON request/response control protocol as Unix
-sockets. Before installing AllowedIPs, its endpoint supervisor asks the
+sockets. Shutdown uses bounded cleanup contexts, reports SCM checkpoints and
+wait hints for the current cleanup stage, and contains the core in a Windows
+Job Object. Normal `down` never force-terminates the service. The explicit
+`down --repair` path gives it a final graceful-stop window, may terminate only
+that tunnel's stuck service process, then removes the exact named residual
+Wintun adapter and reconciles only dead, provably managed route leases. Routes
+with live owners and ambiguous kernel routes are left untouched.
+
+Before installing AllowedIPs, its endpoint supervisor asks the
 Windows route manager for a lease on every resolved endpoint. The manager uses
 per-interface `GetBestRoute2`, excludes Wintun, compares prefix length and
 effective route cost, and owns pins through a persistent reference-counted

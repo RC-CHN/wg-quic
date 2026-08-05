@@ -95,6 +95,20 @@ After foreground testing succeeds, exercise the per-tunnel Windows service:
 .\wg-quic-quick.exe down wg0
 ```
 
+Normal `down` waits for the service's bounded shutdown and never force-kills
+it. If a failed or interrupted stop leaves a service, Wintun adapter, or route
+ledger lease behind, run the explicit recovery command from an elevated
+terminal:
+
+```powershell
+.\wg-quic-quick.exe down wg0 --repair
+```
+
+Repair first requests a graceful stop. If that final grace period expires, it
+may terminate only the exact per-tunnel service process. It then cleans the
+named adapter and dead, provably managed route leases; live-owner and ambiguous
+routes are preserved.
+
 Remove the temporary firewall rule after testing:
 
 ```powershell

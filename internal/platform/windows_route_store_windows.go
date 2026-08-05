@@ -45,17 +45,7 @@ var windowsRouteProcessLock = func() chan struct{} {
 }()
 
 func newWindowsRouteManager(tunnel string) (*windowsRouteManager, error) {
-	root := os.Getenv("ProgramData")
-	if root == "" {
-		root = `C:\ProgramData`
-	}
-	store := &windowsDiskRouteStore{
-		stateDirectory:  filepath.Join(root, "wg-quic", "state"),
-		ownersDirectory: filepath.Join(root, "wg-quic", "state", "owners"),
-		ledgerPath:      filepath.Join(root, "wg-quic", "state", windowsRouteLedgerFile),
-		backupPath:      filepath.Join(root, "wg-quic", "state", windowsRouteBackupFile),
-		lockPath:        filepath.Join(root, "wg-quic", "state", windowsRouteLockFile),
-	}
+	store := newWindowsDiskRouteStore()
 	if err := store.prepare(); err != nil {
 		return nil, err
 	}
@@ -82,6 +72,20 @@ func newWindowsRouteManager(tunnel string) (*windowsRouteManager, error) {
 	}
 	manager.startRouteWatcher(notifier)
 	return manager, nil
+}
+
+func newWindowsDiskRouteStore() *windowsDiskRouteStore {
+	root := os.Getenv("ProgramData")
+	if root == "" {
+		root = `C:\ProgramData`
+	}
+	return &windowsDiskRouteStore{
+		stateDirectory:  filepath.Join(root, "wg-quic", "state"),
+		ownersDirectory: filepath.Join(root, "wg-quic", "state", "owners"),
+		ledgerPath:      filepath.Join(root, "wg-quic", "state", windowsRouteLedgerFile),
+		backupPath:      filepath.Join(root, "wg-quic", "state", windowsRouteBackupFile),
+		lockPath:        filepath.Join(root, "wg-quic", "state", windowsRouteLockFile),
+	}
 }
 
 func (s *windowsDiskRouteStore) prepare() error {

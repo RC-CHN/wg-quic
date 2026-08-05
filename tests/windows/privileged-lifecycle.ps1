@@ -380,6 +380,11 @@ PersistentKeepalive = 1
     }
     Wait-ForAll -Checks $cleanupChecks
 
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @(
+        "down", $TunnelName, "--repair"
+    ))
+    Wait-ForAll -Checks $cleanupChecks
+
     Write-Host "privileged Windows Wintun/service/network lifecycle cleanup passed"
 }
 finally {
@@ -389,8 +394,16 @@ finally {
         }
         catch {
             Write-Warning "normal tunnel cleanup failed: $_"
-            Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-            & sc.exe delete $serviceName | Out-Null
+            try {
+                $null = Invoke-Native -FilePath $quick -Arguments @(
+                    "down", $TunnelName, "--repair"
+                )
+            }
+            catch {
+                Write-Warning "explicit tunnel repair failed: $_"
+                Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+                & sc.exe delete $serviceName | Out-Null
+            }
         }
     }
 
