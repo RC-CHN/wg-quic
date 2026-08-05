@@ -54,5 +54,10 @@ test('keeps untrusted request values out of the PowerShell program', () => {
   assert.equal(windowsElevationScript.includes(source), false);
   assert.match(windowsElevationScript, /-Verb RunAs/);
   assert.match(windowsElevationScript, /desktop-helper/);
+  assert.match(
+    windowsElevationScript,
+    /\$ErrorActionPreference = 'Stop'; \$process = Start-Process/,
+  );
+  assert.match(windowsElevationScript, /-WindowStyle Hidden; exit \$process/);
   assert.doesNotMatch(windowsElevationScript, /RedirectStandard/);
 });

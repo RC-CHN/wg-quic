@@ -42,14 +42,14 @@ export function windowsElevationError(
 }
 
 export const windowsElevationScript = [
-  "$ErrorActionPreference = 'Stop'",
+  "$ErrorActionPreference = 'Stop';",
   '$process = Start-Process',
   '-FilePath $env:WG_QUIC_ELEVATED_EXE',
   "-ArgumentList @('desktop-helper')",
   '-Verb RunAs',
   '-Wait',
   '-PassThru',
-  '-WindowStyle Hidden',
+  '-WindowStyle Hidden;',
   'exit $process.ExitCode',
 ].join(' ');
 
