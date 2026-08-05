@@ -61,16 +61,21 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
-      - name: Install pinned WiX Toolset
+      - name: Verify WiX Toolset
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install wixtoolset --version=3.14.0 --yes --no-progress
-          $wixBin = Join-Path ${env:ProgramFiles(x86)} "WiX Toolset v3.14\bin"
-          if (-not (Test-Path -LiteralPath $wixBin -PathType Container)) {
-            throw "missing pinned WiX Toolset directory $wixBin"
+          $candle = Get-Command candle.exe -ErrorAction Stop
+          $light = Get-Command light.exe -ErrorAction Stop
+          $wixVersion = (
+            Get-Item -LiteralPath $candle.Source
+          ).VersionInfo.ProductVersion
+          if ($wixVersion -notmatch '^3\.14\.') {
+            throw "expected WiX 3.14, found $wixVersion at $($candle.Source)"
           }
-          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
+          Write-Host "WiX $wixVersion"
+          Write-Host "candle=$($candle.Source)"
+          Write-Host "light=$($light.Source)"
       - name: Audit desktop dependencies
         working-directory: desktop
         run: npm audit
