@@ -1,6 +1,13 @@
 name: desktop
 
 on:
+  workflow_call:
+    inputs:
+      release:
+        description: Collect versioned installers for the GitHub release
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - "**"
@@ -87,10 +94,23 @@ jobs:
         env:
           WG_QUIC_DESKTOP_EXECUTABLE: /usr/bin/wg-quic-desktop
         run: xvfb-run --auto-servernum npm run smoke:app
+      - name: Collect versioned release installers
+        if: inputs.release
+        working-directory: desktop
+        run: node scripts/collect-release.mjs ${{ matrix.artifact }}
       - name: Upload desktop distributable
+        if: ${{ !inputs.release }}
         uses: actions/upload-artifact@v7
         with:
           name: wg-quic-desktop-${{ matrix.artifact }}
           path: desktop/out/make/**
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload desktop release installers
+        if: inputs.release
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-desktop-${{ matrix.artifact }}
+          path: dist/release-desktop/*
           if-no-files-found: error
           retention-days: 14

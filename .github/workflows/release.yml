@@ -148,10 +148,21 @@ jobs:
       - verify-freebsd
     uses: ./.github/workflows/opnsense-package.yml
 
+  package-desktop:
+    needs:
+      - verify-linux
+      - verify-container
+      - verify-windows
+      - verify-freebsd
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release: true
+
   publish:
     needs:
       - package
       - package-opnsense
+      - package-desktop
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
