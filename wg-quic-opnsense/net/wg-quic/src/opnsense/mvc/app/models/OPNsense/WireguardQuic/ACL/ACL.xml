@@ -1,0 +1,28 @@
+<acl>
+    <page-wireguardquic-config>
+        <name>VPN: wg-quic: Configuration</name>
+        <patterns>
+            <pattern>ui/wireguardquic/*</pattern>
+            <pattern>api/wireguardquic/server/*</pattern>
+            <pattern>api/wireguardquic/client/*</pattern>
+            <pattern>api/wireguardquic/general/*</pattern>
+            <pattern>api/wireguardquic/service/*</pattern>
+        </patterns>
+    </page-wireguardquic-config>
+    <page-wireguardquic-status>
+        <name>VPN: wg-quic: Status</name>
+        <patterns>
+            <pattern>ui/wireguardquic/status*</pattern>
+            <pattern>api/wireguardquic/service/status</pattern>
+            <pattern>api/wireguardquic/service/show</pattern>
+            <pattern>api/wireguardquic/service/version</pattern>
+        </patterns>
+    </page-wireguardquic-status>
+    <page-wireguardquic-logs>
+        <name>VPN: wg-quic: Log</name>
+        <patterns>
+            <pattern>ui/diagnostics/log/core/wireguardquic/*</pattern>
+            <pattern>api/diagnostics/log/core/wireguardquic/*</pattern>
+        </patterns>
+    </page-wireguardquic-logs>
+</acl>

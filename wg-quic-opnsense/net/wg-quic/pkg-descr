@@ -1,0 +1,7 @@
+wg-quic is an independent userspace VPN implementation with native-style
+OPNsense instance, peer, endpoint generator, status, and dashboard interfaces.
+It ships the wg-quic data plane and wg-quic-quick FreeBSD host-policy
+supervisor. Its configuration, control sockets, interfaces, and Web UI stay
+separate from the built-in WireGuard subsystem.
+
+WWW: https://github.com/RC-CHN/wg-quic/tree/main/wg-quic-opnsense

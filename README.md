@@ -11,9 +11,9 @@ The complete quic-go v0.61.0 source and tests are likewise pinned under
 through a local `replace` and `go.work`; production builds do not substitute a
 module-cache or `references/` copy.
 
-The fully exercised runtime is currently Linux. The `wg-quic-quick` host-policy
-layer also builds and runs natively on FreeBSD and includes an rc.d service
-script, but the FreeBSD data plane still needs QEMU runtime validation. Windows
+The broadest exercised runtime is currently Linux. The FreeBSD data plane and
+`wg-quic-quick` host-policy layer are also QEMU-validated through the OPNsense
+plugin on FreeBSD 14 and 15, and an rc.d service script is included. Windows
 now has a CLI-only Wintun, host-network, Named Pipe, and per-tunnel SCM
 implementation; its privileged data plane still needs Windows VM integration
 testing. All platforms share the same userspace WireGuard, QUIC, FEC,
@@ -88,6 +88,11 @@ TCP/UDP, large packets, carrier MTU, loss/FEC, reordering, NAT rebinding, and
 peer restart recovery. See
 [`tests/WIREGUARD-FORK.md`](tests/WIREGUARD-FORK.md) for the mapping to
 the pinned WireGuard fork and its imported test suite.
+
+The OPNsense plugin lives in
+[`wg-quic-opnsense/`](wg-quic-opnsense/README.md) as a separate monorepo
+subtree. Its Web UI, Dashboard widget, package, services, and `quicN`
+interfaces are isolated from OPNsense's built-in WireGuard integration.
 
 Check a configuration without changing the host:
 

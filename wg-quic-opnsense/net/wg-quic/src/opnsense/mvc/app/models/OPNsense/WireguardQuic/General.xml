@@ -1,0 +1,11 @@
+<model>
+    <mount>//OPNsense/wireguardquic/general</mount>
+    <description>wg-quic settings</description>
+    <version>1.0.0</version>
+    <items>
+        <enabled type="BooleanField">
+            <Default>0</Default>
+            <Required>Y</Required>
+        </enabled>
+    </items>
+</model>

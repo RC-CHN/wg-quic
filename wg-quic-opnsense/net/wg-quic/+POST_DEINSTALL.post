@@ -1,0 +1,2 @@
+rm -f /usr/local/etc/wg-quic/quic*.conf
+rmdir /usr/local/etc/wg-quic >/dev/null 2>&1 || true

@@ -1,0 +1,2 @@
+/usr/bin/install -d -m 0700 /usr/local/etc/wg-quic
+find /usr/local/etc/wg-quic -type f -name 'quic*.conf' -exec chmod 0600 {} \;

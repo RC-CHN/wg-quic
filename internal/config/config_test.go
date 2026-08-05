@@ -54,6 +54,12 @@ PersistentKeepalive = 25
 	if got, want := len(cfg.Interface.Addresses), 2; got != want {
 		t.Fatalf("addresses = %d, want %d", got, want)
 	}
+	if got, want := cfg.Interface.Addresses[0].String(), "10.0.0.1/24"; got != want {
+		t.Fatalf("IPv4 interface address = %q, want %q", got, want)
+	}
+	if got, want := cfg.Interface.Addresses[1].String(), "fd00::1/64"; got != want {
+		t.Fatalf("IPv6 interface address = %q, want %q", got, want)
+	}
 	if got, want := cfg.Transport.FEC, "off"; got != want {
 		t.Fatalf("FEC = %q, want %q", got, want)
 	}

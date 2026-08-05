@@ -1,0 +1,103 @@
+<model>
+    <mount>//OPNsense/wireguardquic/server</mount>
+    <description>wg-quic instance configuration</description>
+    <version>1.0.0</version>
+    <items>
+        <servers>
+            <server type=".\ServerField">
+                <enabled type="BooleanField">
+                    <Default>1</Default>
+                    <Required>Y</Required>
+                </enabled>
+                <name type="TextField">
+                    <Required>Y</Required>
+                    <Mask>/^([0-9a-zA-Z._\-]){1,64}$/u</Mask>
+                    <ValidationMessage>Should be a string between 1 and 64 characters. Allowed characters are alphanumeric characters, dash and underscores.</ValidationMessage>
+                </name>
+                <instance type="AutoNumberField">
+                    <Required>Y</Required>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>999</MaximumValue>
+                </instance>
+                <pubkey type="Base64Field"/>
+                <privkey type="Base64Field">
+                    <Required>Y</Required>
+                    <ValidationMessage>A private key is required.</ValidationMessage>
+                </privkey>
+                <port type="PortField"/>
+                <mtu type="IntegerField">
+                    <MinimumValue>576</MinimumValue>
+                    <MaximumValue>9300</MaximumValue>
+                </mtu>
+                <congestion type="OptionField">
+                    <Default>auto</Default>
+                    <Required>Y</Required>
+                    <OptionValues>
+                        <auto>Automatic</auto>
+                        <model>Delivery model</model>
+                        <cubic>CUBIC</cubic>
+                        <reno>Reno</reno>
+                    </OptionValues>
+                </congestion>
+                <fec type="OptionField">
+                    <Default>auto</Default>
+                    <Required>Y</Required>
+                    <OptionValues>
+                        <auto>Automatic</auto>
+                        <off>Disabled</off>
+                    </OptionValues>
+                </fec>
+                <obfs type="OptionField">
+                    <Default>salamander</Default>
+                    <Required>Y</Required>
+                    <OptionValues>
+                        <salamander>Salamander</salamander>
+                        <none>Disabled</none>
+                    </OptionValues>
+                </obfs>
+                <dns type="NetworkField">
+                    <AsList>Y</AsList>
+                    <NetMaskAllowed>N</NetMaskAllowed>
+                    <WildcardEnabled>N</WildcardEnabled>
+                    <ValidationMessage>Please use valid IPv4 or IPv6 addresses.</ValidationMessage>
+                </dns>
+                <tunneladdress type="NetworkField">
+                    <AsList>Y</AsList>
+                </tunneladdress>
+                <disableroutes type="BooleanField">
+                    <Default>1</Default>
+                    <Required>Y</Required>
+                    <Constraints>
+                        <check001>
+                            <ValidationMessage>You have to enable Disable Routes option.</ValidationMessage>
+                            <type>DependConstraint</type>
+                            <addFields>
+                                <field1>gateway</field1>
+                            </addFields>
+                        </check001>
+                    </Constraints>
+                </disableroutes>
+                <gateway type="NetworkField"/>
+                <carp_depend_on type="VirtualIPField">
+                    <type>carp</type>
+                    <key>mvc</key>
+                </carp_depend_on>
+                <peers type="ModelRelationField">
+                    <Model>
+                        <template>
+                            <source>OPNsense.WireguardQuic.Client</source>
+                            <items>clients.client</items>
+                            <display>name</display>
+                        </template>
+                    </Model>
+                    <Multiple>Y</Multiple>
+                    <ValidationMessage>Choose a peer.</ValidationMessage>
+                </peers>
+                <cnfFilename type="TextField" volatile="true"/>
+                <interface type="TextField" volatile="true"/>
+                <endpoint type="TextField"/>
+                <peer_dns type="TextField"/>
+            </server>
+        </servers>
+    </items>
+</model>

@@ -1,0 +1,81 @@
+<model>
+    <mount>//OPNsense/wireguardquic/client</mount>
+    <description>wg-quic peer configuration</description>
+    <version>1.0.0</version>
+    <items>
+        <clients>
+            <client type=".\ClientField">
+                <enabled type="BooleanField">
+                    <Default>1</Default>
+                    <Required>Y</Required>
+                </enabled>
+                <name type="TextField">
+                    <Required>Y</Required>
+                    <Mask>/^([0-9a-zA-Z._\-]){1,64}$/u</Mask>
+                    <ValidationMessage>Should be a string between 1 and 64 characters. Allowed characters are alphanumeric characters, dash and underscores.</ValidationMessage>
+                </name>
+                <pubkey type="Base64Field">
+                    <Required>Y</Required>
+                    <Constraints>
+                        <check001>
+                            <ValidationMessage>Public keys should be unique.</ValidationMessage>
+                            <type>UniqueConstraint</type>
+                            <addFields>
+                                <field1>serveraddress</field1>
+                                <field2>serverport</field2>
+                            </addFields>
+                        </check001>
+                    </Constraints>
+                </pubkey>
+                <psk type="Base64Field"/>
+                <tunneladdress type="NetworkField">
+                    <NetMaskRequired>Y</NetMaskRequired>
+                    <Required>Y</Required>
+                    <AsList>Y</AsList>
+                </tunneladdress>
+                <serveraddress type="HostnameField">
+                    <Constraints>
+                        <check001>
+                            <reference>pubkey.check001</reference>
+                        </check001>
+                    </Constraints>
+                </serveraddress>
+                <serverport type="PortField">
+                    <Constraints>
+                        <check001>
+                            <reference>pubkey.check001</reference>
+                        </check001>
+                    </Constraints>
+                </serverport>
+                <endpoint type="IPPortField" volatile="true">
+                    <HostnameAllowed>Y</HostnameAllowed>
+                    <ValidationMessage>Please specify a valid host:port combination.</ValidationMessage>
+                </endpoint>
+                <keepalive type="IntegerField">
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>65535</MaximumValue>
+                    <ValidationMessage>Please specify a value between 1 and 65535.</ValidationMessage>
+                </keepalive>
+                <fec_policy type="OptionField">
+                    <Default>balanced</Default>
+                    <Required>Y</Required>
+                    <OptionValues>
+                        <balanced>Balanced</balanced>
+                        <latency>Latency</latency>
+                        <throughput>Throughput</throughput>
+                    </OptionValues>
+                </fec_policy>
+                <servers type="ModelRelationField" volatile="true">
+                    <Model>
+                        <template>
+                            <source>OPNsense.WireguardQuic.Server</source>
+                            <items>servers.server</items>
+                            <display>name</display>
+                        </template>
+                    </Model>
+                    <Multiple>Y</Multiple>
+                </servers>
+            </client>
+        </clients>
+    </items>
+</model>

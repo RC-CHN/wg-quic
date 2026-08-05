@@ -1,0 +1,8 @@
+<form>
+    <field>
+        <id>general.enabled</id>
+        <label>Enable wg-quic</label>
+        <type>checkbox</type>
+        <help>This will activate wg-quic and start all enabled instances.</help>
+    </field>
+</form>

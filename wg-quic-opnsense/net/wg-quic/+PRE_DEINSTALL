@@ -1,0 +1,5 @@
+#!/bin/sh
+
+/usr/local/sbin/configctl wireguardquic stop >/dev/null 2>&1 || true
+rmdir /var/run/wg-quic >/dev/null 2>&1 || true
+exit 0

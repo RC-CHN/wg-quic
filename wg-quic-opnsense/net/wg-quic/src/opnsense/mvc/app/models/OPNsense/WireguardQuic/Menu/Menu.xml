@@ -1,0 +1,11 @@
+<menu>
+    <VPN>
+        <WireGuardQuic VisibleName="wg-quic" cssClass="fa fa-lock fa-fw">
+            <Instances order="10" url="/ui/wireguardquic/general#instances"/>
+            <Peers order="20" url="/ui/wireguardquic/general#peers"/>
+            <PeerGenerator order="30" VisibleName="Peer generator" url="/ui/wireguardquic/general#configbuilder"/>
+            <Status order="40" url="/ui/wireguardquic/status"/>
+            <LogFile order="50" VisibleName="Log File" url="/ui/diagnostics/log/core/wireguardquic"/>
+        </WireGuardQuic>
+    </VPN>
+</menu>

@@ -1,0 +1,86 @@
+name: opnsense-package
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - ".github/workflows/opnsense-package.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "wg-quic-opnsense/**"
+  pull_request:
+    paths:
+      - ".github/workflows/opnsense-package.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "wg-quic-opnsense/**"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install plugin lint tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-utils shellcheck
+      - name: Cross-build FreeBSD programs
+        run: ./wg-quic-opnsense/scripts/build-wg-quic.sh
+      - name: Check plugin sources
+        run: ./wg-quic-opnsense/scripts/check-static.sh
+
+  package:
+    needs: static
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: "26.1"
+            freebsd: "14.3"
+          - target: "26.7"
+            freebsd: "15.1"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build with the official OPNsense plugin framework
+        uses: vmactions/freebsd-vm@v1.5.2
+        with:
+          release: ${{ matrix.freebsd }}
+          usesh: true
+          copyback: true
+          prepare: pkg install -y git go libxml2 php84
+          run: |
+            ./wg-quic-opnsense/scripts/build-package-freebsd.sh \
+              "${{ matrix.target }}"
+      - name: Verify package manifest and payload
+        shell: bash
+        run: |
+          packages=(wg-quic-opnsense/dist/${{ matrix.target }}/*.pkg)
+          test "${#packages[@]}" -eq 1
+          ./wg-quic-opnsense/scripts/verify-package.sh \
+            "${packages[0]}" \
+            "${{ matrix.target }}"
+      - name: Upload OPNsense package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-opnsense-${{ matrix.target }}
+          path: wg-quic-opnsense/dist/${{ matrix.target }}/*.pkg
+          if-no-files-found: error
+          retention-days: 14

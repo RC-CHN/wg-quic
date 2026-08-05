@@ -185,7 +185,7 @@ func parseInterface(iface *Interface, key, value string) error {
 	case "privatekey":
 		iface.PrivateKey = value
 	case "address":
-		prefixes, err := parsePrefixes(value)
+		prefixes, err := parseAddresses(value)
 		if err != nil {
 			return fmt.Errorf("Address: %w", err)
 		}
@@ -404,6 +404,21 @@ func parsePrefixes(value string) ([]netip.Prefix, error) {
 			return nil, err
 		}
 		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
+func parseAddresses(value string) ([]netip.Prefix, error) {
+	values := splitList(value)
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, item := range values {
+		prefix, err := netip.ParsePrefix(item)
+		if err != nil {
+			return nil, err
+		}
+		// Interface addresses carry both the host address and its prefix
+		// length. Unlike AllowedIPs, masking them changes their meaning.
+		prefixes = append(prefixes, prefix)
 	}
 	return prefixes, nil
 }

@@ -138,8 +138,18 @@ jobs:
           path: dist/wg-quic-v*-${{ matrix.target.os }}-${{ matrix.target.arch }}.${{ matrix.target.extension }}
           if-no-files-found: error
 
+  package-opnsense:
+    needs:
+      - verify-linux
+      - verify-container
+      - verify-windows
+      - verify-freebsd
+    uses: ./.github/workflows/opnsense-package.yml
+
   publish:
-    needs: package
+    needs:
+      - package
+      - package-opnsense
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -154,7 +164,7 @@ jobs:
           merge-multiple: true
       - name: Generate release checksums
         shell: bash
-        run: cd dist && sha256sum wg-quic-* > SHA256SUMS
+        run: cd dist && sha256sum wg-quic-* os-wg-quic-* > SHA256SUMS
       - name: Publish GitHub release
         shell: bash
         env:

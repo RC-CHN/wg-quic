@@ -1,0 +1,25 @@
+# Generated packages and virtual-machine validation state
+/dist/
+/.qemu/
+
+# Cross-compiled FreeBSD binaries
+/net/wg-quic/src/sbin/wg-quic
+/net/wg-quic/src/sbin/wg-quic-quick
+
+# Local Codex workspace metadata
+/.agents/
+/.codex/
+
+# Local secrets and editor/OS files
+/.env
+/.env.*
+!/.env.example
+/.idea/
+/.vscode/
+.DS_Store
+*~
+*.swp
+
+# Language caches
+**/__pycache__/
+*.pyc

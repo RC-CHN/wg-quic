@@ -1,0 +1,19 @@
+<metadata>
+    <WireguardQuic>
+        <filename>WireguardQuic.js</filename>
+        <link>/ui/wireguardquic/status</link>
+        <endpoints>
+            <endpoint>/api/wireguardquic/service/show</endpoint>
+            <endpoint>/api/wireguardquic/general/get</endpoint>
+        </endpoints>
+        <translations>
+            <title>wg-quic</title>
+            <unconfigured>wg-quic is currently disabled. Click to configure wg-quic.</unconfigured>
+            <notunnels>No tunnels connected</notunnels>
+            <online>Online</online>
+            <stale>Stale</stale>
+            <offline>Offline</offline>
+            <notavailable>N/A</notavailable>
+        </translations>
+    </WireguardQuic>
+</metadata>

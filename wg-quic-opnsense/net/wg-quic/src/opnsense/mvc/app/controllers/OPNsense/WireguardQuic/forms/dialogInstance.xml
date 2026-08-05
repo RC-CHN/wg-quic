@@ -1,0 +1,146 @@
+<form>
+    <field>
+        <id>server.enabled</id>
+        <label>Enabled</label>
+        <type>checkbox</type>
+        <help>This will enable or disable the instance.</help>
+        <grid_view>
+            <width>6em</width>
+            <type>boolean</type>
+            <formatter>rowtoggle</formatter>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.name</id>
+        <label>Name</label>
+        <type>text</type>
+        <help>Set the name for this instance.</help>
+    </field>
+    <field>
+        <id>server.instance</id>
+        <label>Instance</label>
+        <type>info</type>
+        <help>This is the instance number used to give the wg-quic device a unique name (quicX).</help>
+        <grid_view>
+            <column-id>interface</column-id>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.pubkey</id>
+        <label>Public key</label>
+        <type>text</type>
+        <help>Public key of this instance. You can specify your own one, or generate one with the gear button.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.privkey</id>
+        <label>Private key</label>
+        <type>text</type>
+        <help>Private key of this instance. You can specify your own one, or generate one with the gear button. Please keep this key safe.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.port</id>
+        <label>Listen port</label>
+        <type>text</type>
+        <help>Optionally set a fixed port for this instance to listen on. The standard port range starts at 51820.</help>
+    </field>
+    <field>
+        <id>server.mtu</id>
+        <label>MTU</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Set a specific device MTU for this instance.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.congestion</id>
+        <label>Congestion control</label>
+        <type>dropdown</type>
+        <advanced>true</advanced>
+        <help>Automatic uses the wg-quic delivery model. Reno and CUBIC are intended for controlled comparisons.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.fec</id>
+        <label>Forward error correction</label>
+        <type>dropdown</type>
+        <help>Automatic dynamically adjusts FEC protection from measured path conditions.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.obfs</id>
+        <label>Obfuscation</label>
+        <type>dropdown</type>
+        <help>Salamander is the recommended wg-quic outer-packet profile. Both peers must use matching settings.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.dns</id>
+        <label>DNS servers</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <advanced>true</advanced>
+        <help>Set specific DNS servers for this instance. Use with care.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.tunneladdress</id>
+        <label>Tunnel address</label>
+        <style>tokenize</style>
+        <type>select_multiple</type>
+        <allownew>true</allownew>
+        <help>List of addresses to configure on the device. Please use CIDR notation like 10.0.0.1/24.</help>
+    </field>
+    <field>
+        <id>server.carp_depend_on</id>
+        <label>Depend on (CARP)</label>
+        <type>dropdown</type>
+        <help>The CARP VHID to depend on. When this virtual address is not in master state, then the instance will be shutdown.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.peers</id>
+        <label>Peers</label>
+        <type>select_multiple</type>
+        <help>List of peers for this instance.</help>
+    </field>
+    <field>
+        <id>server.disableroutes</id>
+        <label>Disable routes</label>
+        <type>checkbox</type>
+        <help>This will prevent installing routes. Usually you only enable this to do own routing decisions via a local gateway and gateway rules.</help>
+        <grid_view>
+            <visible>false</visible>
+            <type>boolean</type>
+            <formatter>boolean</formatter>
+        </grid_view>
+    </field>
+    <field>
+        <id>server.gateway</id>
+        <label>Gateway</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Set the gateway IP here when using "Disable routes" feature. You also have to add this as a system gateway.</help>
+        <grid_view>
+            <visible>false</visible>
+        </grid_view>
+    </field>
+</form>
