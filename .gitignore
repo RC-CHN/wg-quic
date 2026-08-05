@@ -9,3 +9,4 @@
 /tests/benchmark/build/
 /tests/benchmark/.generated/
 /tests/benchmark/results/
+.rcoder/
