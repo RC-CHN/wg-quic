@@ -88,6 +88,21 @@ func TestDatagramQueueReceive(t *testing.T) {
 	require.Equal(t, []byte("bar"), data)
 }
 
+func TestDatagramQueueReceiveTakesPayloadOwnership(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	payload := []byte("owned receive payload")
+	payloadStart := &payload[0]
+	frame := &wire.DatagramFrame{Data: payload}
+
+	queue.HandleDatagramFrame(frame)
+
+	require.Nil(t, frame.Data)
+	data, err := queue.Receive(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, payloadStart, &data[0])
+	require.Equal(t, []byte("owned receive payload"), data)
+}
+
 func TestDatagramQueueReceiveBlocking(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		queue := newDatagramQueue(func() {}, utils.DefaultLogger)

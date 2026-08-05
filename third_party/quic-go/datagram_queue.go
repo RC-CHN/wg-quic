@@ -95,14 +95,14 @@ func (h *datagramQueue) Len() int {
 	return h.sendQueue.Len()
 }
 
-// HandleDatagramFrame handles a received DATAGRAM frame.
+// HandleDatagramFrame handles a received DATAGRAM frame. When it queues the
+// frame, ownership of f.Data transfers to the receive queue.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
-	data := make([]byte, len(f.Data))
-	copy(data, f.Data)
 	var queued bool
 	h.rcvMx.Lock()
 	if len(h.rcvQueue) < maxDatagramRcvQueueLen {
-		h.rcvQueue = append(h.rcvQueue, data)
+		h.rcvQueue = append(h.rcvQueue, f.Data)
+		f.Data = nil
 		queued = true
 		select {
 		case h.rcvd <- struct{}{}:

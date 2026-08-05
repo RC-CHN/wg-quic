@@ -183,6 +183,20 @@ LAN goodput, with the ArmorBind queue reaching 774/1024 and the quic-go
 DATAGRAM queue reaching 32/32. Those observations make framing/packet-builder
 allocation and send-loop backpressure the next clean-path profiling targets.
 
+The next copy-reduction pass combined the required WireGuard queue-lifetime
+copy with the common one-fragment carrier frame: the destination allocation now
+reserves and fills the 21-byte framing header instead of copying the payload
+again in the session send loop. On receive, quic-go's parser-owned DATAGRAM
+payload transfers directly into its receive queue instead of being cloned a
+second time. The framing microbenchmark moved from about 1.33 us, 2840 B, and
+three allocations to 0.63 us, 1408 B, and one allocation. In three matched
+8-second LAN trials against `c1ed524`, median goodput moved from 753.8 to
+805.7 Mbit/s, combined allocation rate from 608 to 410 MiB/s, GC cycles from
+273 to 178, and GC pause CPU from 5.55 to 3.86 seconds. The send queues still
+reached their limits, so the result is attributable to less copying rather
+than hidden queue growth. A cellular FEC-obfs regression delivered 9.30 Mbit/s,
+recovered 114 of 115 missing shards, and had no local queue drops.
+
 One post-change 10-second-per-cell diagnostic matrix produced the following
 directional sample:
 
@@ -426,14 +440,16 @@ than ending at the local send channel.
 
 ### 4. Remove avoidable FEC implementation cost
 
-**First pass implemented.** Codec caching, the parity-zero raw path, dynamic
-single-datagram framing, Salamander GSO, decoded `ReadBatch`, and ownership
-transfer from ArmorBind into quic-go's DATAGRAM send queue are active. The
-owned-buffer API removes quic-go's per-DATAGRAM payload copy; it is an
-in-process zero-copy handoff, not kernel/NIC zero-copy. The initial
+**Two copy-reduction passes implemented.** Codec caching, the parity-zero raw
+path, dynamic single-datagram framing, Salamander GSO, decoded `ReadBatch`, and
+ownership transfer through both quic-go DATAGRAM queues are active. The
+owned-buffer API removes quic-go's per-DATAGRAM send copy, while the receive
+parser transfers its already-owned payload into the application queue. These
+are in-process zero-copy handoffs, not kernel/NIC zero-copy. The initial
 wireguard-go bind buffer still has to be copied because its lifetime ends when
-`Send` returns. Broader buffer reuse and parallel/batched Reed-Solomon work
-remain profiling-driven follow-ups.
+`Send` returns, but that allocation now includes carrier framing headroom and
+avoids another copy. Broader buffer reuse and parallel/batched Reed-Solomon
+work remain profiling-driven follow-ups.
 
 Profile before changing the code, then evaluate:
 

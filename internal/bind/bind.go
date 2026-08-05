@@ -51,8 +51,8 @@ type receivedPacket struct {
 }
 
 type outboundPacket struct {
-	data []byte
-	id   uint64
+	preparedFrame []byte
+	id            uint64
 }
 
 type runState struct {
@@ -499,9 +499,11 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		if priorityWireGuardDatagram(buf) {
 			queue = sess.priority
 		}
+		preparedFrame := make([]byte, frameHeaderSize+len(buf))
+		copy(preparedFrame[frameHeaderSize:], buf)
 		packet := outboundPacket{
-			data: append([]byte(nil), buf...),
-			id:   b.nextPacket.Add(1),
+			preparedFrame: preparedFrame,
+			id:            b.nextPacket.Add(1),
 		}
 		select {
 		case queue <- packet:
@@ -776,7 +778,12 @@ func (s *session) sendLoop() {
 			fragmentData -= fec.DataPacketOverhead
 		}
 		fragmentData = min(fragmentData, maxFragmentData)
-		frames, err := fragmentPacketSized(packet.data, packet.id, fragmentData)
+		payload := packet.preparedFrame[frameHeaderSize:]
+		if len(payload) <= fragmentData {
+			frame, err := framePreparedPacket(packet.preparedFrame, packet.id)
+			return err == nil && sendFrame(frame)
+		}
+		frames, err := fragmentPacketSized(payload, packet.id, fragmentData)
 		if err != nil {
 			return false
 		}

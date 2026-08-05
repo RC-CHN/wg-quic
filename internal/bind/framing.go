@@ -44,16 +44,33 @@ func fragmentPacketSized(packet []byte, packetID uint64, fragmentData int) ([][]
 	for i, off := 0, 0; off < len(packet); i, off = i+1, off+fragmentData {
 		end := min(off+fragmentData, len(packet))
 		frame := make([]byte, frameHeaderSize+end-off)
-		copy(frame[:4], frameMagic[:])
-		frame[4] = 1
-		binary.BigEndian.PutUint64(frame[5:13], packetID)
-		binary.BigEndian.PutUint16(frame[13:15], uint16(i))
-		binary.BigEndian.PutUint16(frame[15:17], uint16(count))
-		binary.BigEndian.PutUint32(frame[17:21], uint32(len(packet)))
+		writeFragmentHeader(frame, packetID, uint16(i), uint16(count), uint32(len(packet)))
 		copy(frame[frameHeaderSize:], packet[off:end])
 		frames = append(frames, frame)
 	}
 	return frames, nil
+}
+
+// framePreparedPacket fills the reserved header in a buffer containing one
+// complete WireGuard datagram. The caller allocates frameHeaderSize bytes of
+// headroom before copying the WireGuard payload into the buffer, combining the
+// queue-lifetime copy and the common one-fragment framing copy.
+func framePreparedPacket(frame []byte, packetID uint64) ([]byte, error) {
+	payloadLen := len(frame) - frameHeaderSize
+	if payloadLen <= 0 || payloadLen > maxDatagramSize {
+		return nil, fmt.Errorf("invalid prepared WireGuard datagram size %d", payloadLen)
+	}
+	writeFragmentHeader(frame, packetID, 0, 1, uint32(payloadLen))
+	return frame, nil
+}
+
+func writeFragmentHeader(frame []byte, packetID uint64, index, count uint16, total uint32) {
+	copy(frame[:4], frameMagic[:])
+	frame[4] = 1
+	binary.BigEndian.PutUint64(frame[5:13], packetID)
+	binary.BigEndian.PutUint16(frame[13:15], index)
+	binary.BigEndian.PutUint16(frame[15:17], count)
+	binary.BigEndian.PutUint32(frame[17:21], total)
 }
 
 func priorityWireGuardDatagram(packet []byte) bool {

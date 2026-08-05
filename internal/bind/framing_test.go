@@ -57,6 +57,71 @@ func TestCommonWireGuardPacketFitsOneProtectedQUICDatagram(t *testing.T) {
 	}
 }
 
+func TestPreparedPacketReusesQueueBuffer(t *testing.T) {
+	payload := bytes.Repeat([]byte{0x5a}, 1312)
+	prepared := make([]byte, frameHeaderSize+len(payload))
+	copy(prepared[frameHeaderSize:], payload)
+	start := &prepared[0]
+
+	frame, err := framePreparedPacket(prepared, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &frame[0] != start {
+		t.Fatal("prepared packet allocated a different frame buffer")
+	}
+	fragment, err := parseFragment(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fragment.packetID != 42 || fragment.index != 0 || fragment.count != 1 {
+		t.Fatalf("prepared fragment metadata = %#v", fragment)
+	}
+	if !bytes.Equal(fragment.data, payload) {
+		t.Fatal("prepared fragment payload changed")
+	}
+}
+
+func TestPreparedPacketRejectsInvalidPayloadSize(t *testing.T) {
+	for _, frame := range [][]byte{
+		make([]byte, frameHeaderSize),
+		make([]byte, frameHeaderSize+maxDatagramSize+1),
+	} {
+		if _, err := framePreparedPacket(frame, 42); err == nil {
+			t.Fatalf("prepared frame length %d was accepted", len(frame))
+		}
+	}
+}
+
+var benchmarkFrame []byte
+
+func BenchmarkFrameCommonWireGuardPacket(b *testing.B) {
+	payload := bytes.Repeat([]byte{0x5a}, 1312)
+	b.Run("copy-then-frame", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			queued := append([]byte(nil), payload...)
+			frames, err := fragmentPacketSized(queued, 42, 1365)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkFrame = frames[0]
+		}
+	})
+	b.Run("copy-with-header-reserve", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			prepared := make([]byte, frameHeaderSize+len(payload))
+			copy(prepared[frameHeaderSize:], payload)
+			frame, err := framePreparedPacket(prepared, 42)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkFrame = frame
+		}
+	})
+}
+
 func packetLengths(packets [][]byte) []int {
 	lengths := make([]int, len(packets))
 	for i, packet := range packets {
