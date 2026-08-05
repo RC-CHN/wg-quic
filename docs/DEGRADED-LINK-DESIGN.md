@@ -197,6 +197,29 @@ reached their limits, so the result is attributable to less copying rather
 than hidden queue growth. A cellular FEC-obfs regression delivered 9.30 Mbit/s,
 recovered 114 of 115 missing shards, and had no local queue drops.
 
+The third copy-reduction pass changed receive ownership. DATAGRAM parsing now
+borrows the decrypted packet bytes and reuses the small frame object. The QUIC
+receive queue makes the one copy required to outlive packet processing into a
+fixed-size pooled buffer. ArmorBind receives an explicit owned handle and
+releases it only after FEC decoding or carrier reassembly has copied anything
+it retains. The ordinary quic-go `ReceiveDatagram` contract is unchanged and
+still returns a caller-owned copy. Parsing ten DATAGRAM frames moved from about
+1.62 us, 2416 B, and 20 allocations to 0.34 us with zero allocations; the
+owned receive-queue microbenchmark is about 58 ns with zero allocations.
+
+Five matched 8-second LAN samples against `51903b0` moved median goodput from
+709.4 to 772.3 Mbit/s (+8.9%), combined allocation rate from 370.1 to
+276.6 MiB/s (-25.3%), allocation-object rate from 1.036 million to 0.837
+million objects/s (-19.3%), GC cycles from 169 to 120, and GC pause CPU from
+3.42 to 2.79 seconds. Combined process CPU rose only 3.1% while carrying 8.9%
+more goodput, and both groups had zero local queue drops. Individual throughput
+samples were noisy and included one low outlier in each group, so the
+allocation and microbenchmark reductions are stronger evidence than the
+throughput delta alone. Three 10-second cellular FEC-obfs lifecycle checks
+recovered all 170 observed missing shards, left zero unrecovered shards and
+zero local queue drops, and delivered a 5.80 Mbit/s median. These short runs
+are a safety regression, not updated degraded-link acceptance evidence.
+
 One post-change 10-second-per-cell diagnostic matrix produced the following
 directional sample:
 
@@ -440,14 +463,16 @@ than ending at the local send channel.
 
 ### 4. Remove avoidable FEC implementation cost
 
-**Two copy-reduction passes implemented.** Codec caching, the parity-zero raw
+**Three copy-reduction passes implemented.** Codec caching, the parity-zero raw
 path, dynamic single-datagram framing, Salamander GSO, decoded `ReadBatch`, and
 ownership transfer through both quic-go DATAGRAM queues are active. The
-owned-buffer API removes quic-go's per-DATAGRAM send copy, while the receive
-parser transfers its already-owned payload into the application queue. These
-are in-process zero-copy handoffs, not kernel/NIC zero-copy. The initial
-wireguard-go bind buffer still has to be copied because its lifetime ends when
-`Send` returns, but that allocation now includes carrier framing headroom and
+send owned-buffer API removes quic-go's per-DATAGRAM send copy. On receive, the
+parser borrows the decrypted packet buffer, the queue copies once into a pooled
+buffer to cross the packet lifetime boundary, and ArmorBind releases that
+buffer after processing. The queue-to-application handoff is therefore
+zero-copy, but the complete path is not kernel/NIC zero-copy. The initial
+wireguard-go bind buffer also has to be copied because its lifetime ends when
+`Send` returns, but that allocation includes carrier framing headroom and
 avoids another copy. Broader buffer reuse and parallel/batched Reed-Solomon
 work remain profiling-driven follow-ups.
 
@@ -455,7 +480,9 @@ Profile before changing the code, then evaluate:
 
 - caching Reed-Solomon codecs by `(k, r)`;
 - reusing shard and packet buffers;
-- avoiding the remaining framing, padding, and receive-side copies;
+- evaluating packet-buffer reference counting before attempting to remove the
+  remaining decrypted-packet-to-queue copy;
+- avoiding remaining padding copies;
 - batching encode/decode and QUIC DATAGRAM submission;
 - keeping small groups on a low-overhead path;
 - moving expensive work away from the single session send loop while

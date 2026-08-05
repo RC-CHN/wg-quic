@@ -2,6 +2,7 @@ package wire
 
 import (
 	"io"
+	"sync"
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/quicvarint"
@@ -17,15 +18,22 @@ var MaxDatagramSize protocol.ByteCount = 16383
 type DatagramFrame struct {
 	DataLenPresent bool
 	Data           []byte
+
+	fromPool bool
+}
+
+var datagramFramePool = sync.Pool{
+	New: func() any {
+		return &DatagramFrame{fromPool: true}
+	},
 }
 
 func parseDatagramFrame(b []byte, typ FrameType, _ protocol.Version) (*DatagramFrame, int, error) {
 	startLen := len(b)
-	f := &DatagramFrame{}
-	f.DataLenPresent = uint64(typ)&0x1 > 0
+	dataLenPresent := uint64(typ)&0x1 > 0
 
 	var length uint64
-	if f.DataLenPresent {
+	if dataLenPresent {
 		var err error
 		var l int
 		length, l, err = quicvarint.Parse(b)
@@ -39,9 +47,24 @@ func parseDatagramFrame(b []byte, typ FrameType, _ protocol.Version) (*DatagramF
 	} else {
 		length = uint64(len(b))
 	}
-	f.Data = make([]byte, length)
-	copy(f.Data, b)
+	f := datagramFramePool.Get().(*DatagramFrame)
+	f.DataLenPresent = dataLenPresent
+	// DATAGRAM frames are handled synchronously before the decrypted packet
+	// buffer is released. The connection copies accepted payloads into its
+	// receive queue before returning this frame to the pool.
+	f.Data = b[:length]
 	return f, startLen - len(b) + int(length), nil
+}
+
+// PutBack returns a parsed DATAGRAM frame to the parser pool. Frames created by
+// callers are ignored.
+func (f *DatagramFrame) PutBack() {
+	if !f.fromPool {
+		return
+	}
+	f.DataLenPresent = false
+	f.Data = nil
+	datagramFramePool.Put(f)
 }
 
 func (f *DatagramFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

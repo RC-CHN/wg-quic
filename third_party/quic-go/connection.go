@@ -1910,10 +1910,12 @@ func (c *Conn) handleFrames(
 			}
 			// an error occurred handling a previous frame, don't handle the current frame
 			if skipHandling {
+				datagramFrame.PutBack()
 				continue
 			}
 			wire.LogFrame(c.logger, datagramFrame, false)
 			handleErr = c.handleDatagramFrame(datagramFrame)
+			datagramFrame.PutBack()
 		} else {
 			frame, l, err := c.frameParser.ParseLessCommonFrame(frameType, data, c.version)
 			if err != nil {
@@ -3141,6 +3143,15 @@ func (c *Conn) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 		return nil, errors.New("datagram support disabled")
 	}
 	return c.datagramQueue.Receive(ctx)
+}
+
+// ReceiveDatagramOwned gets a DATAGRAM backed by an internal receive buffer.
+// The caller must call Release after it finishes reading the payload.
+func (c *Conn) ReceiveDatagramOwned(ctx context.Context) (ReceivedDatagram, error) {
+	if !c.config.EnableDatagrams {
+		return ReceivedDatagram{}, errors.New("datagram support disabled")
+	}
+	return c.datagramQueue.ReceiveOwned(ctx)
 }
 
 // LocalAddr returns the local address of the QUIC connection.

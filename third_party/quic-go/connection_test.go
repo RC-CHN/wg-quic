@@ -3478,7 +3478,9 @@ func testConnectionDatagrams(t *testing.T, enabled bool) {
 	d, err := tc.conn.ReceiveDatagram(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("foo"), d)
-	d, err = tc.conn.ReceiveDatagram(ctx)
+	owned, err := tc.conn.ReceiveDatagramOwned(ctx)
 	require.NoError(t, err)
-	require.Equal(t, []byte("bar"), d)
+	require.Equal(t, []byte("bar"), owned.Data)
+	owned.Release()
+	require.Nil(t, owned.Data)
 }

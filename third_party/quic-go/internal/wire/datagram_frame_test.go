@@ -14,6 +14,7 @@ func TestParseDatagramFrameWithLength(t *testing.T) {
 	data = append(data, []byte("foobar")...)
 	frame, l, err := parseDatagramFrame(data, 0x30^0x1, protocol.Version1)
 	require.NoError(t, err)
+	defer frame.PutBack()
 	require.Equal(t, []byte("foobar"), frame.Data)
 	require.True(t, frame.DataLenPresent)
 	require.Equal(t, len(data), l)
@@ -23,9 +24,19 @@ func TestParseDatagramFrameWithoutLength(t *testing.T) {
 	data := []byte("Lorem ipsum dolor sit amet")
 	frame, l, err := parseDatagramFrame(data, 0x30, protocol.Version1)
 	require.NoError(t, err)
+	defer frame.PutBack()
 	require.Equal(t, []byte("Lorem ipsum dolor sit amet"), frame.Data)
 	require.False(t, frame.DataLenPresent)
 	require.Equal(t, len(data), l)
+}
+
+func TestParseDatagramFrameBorrowsInputBuffer(t *testing.T) {
+	data := append(encodeVarInt(0x6), []byte("foobar")...)
+	frame, _, err := parseDatagramFrame(data, 0x30^0x1, protocol.Version1)
+	require.NoError(t, err)
+	require.Equal(t, &data[1], &frame.Data[0])
+	frame.PutBack()
+	require.Nil(t, frame.Data)
 }
 
 func TestParseDatagramFrameErrorsOnLengthLongerThanFrame(t *testing.T) {
@@ -39,8 +50,9 @@ func TestParseDatagramFrameErrorsOnEOFs(t *testing.T) {
 	const typ = 0x30 ^ 0x1
 	data := encodeVarInt(6) // length
 	data = append(data, []byte("foobar")...)
-	_, l, err := parseDatagramFrame(data, typ, protocol.Version1)
+	frame, l, err := parseDatagramFrame(data, typ, protocol.Version1)
 	require.NoError(t, err)
+	frame.PutBack()
 	require.Equal(t, len(data), l)
 	for i := range data {
 		_, _, err = parseDatagramFrame(data[0:i], typ, protocol.Version1)

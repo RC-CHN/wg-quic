@@ -518,6 +518,7 @@ func TestFrameParserDatagramFrame(t *testing.T) {
 	// parseDatagramFrame should be used for this type
 	datagramFrame, l, err := parser.ParseDatagramFrame(frameType, b[l:], protocol.Version1)
 	require.NoError(t, err)
+	defer datagramFrame.PutBack()
 	require.IsType(t, &DatagramFrame{}, datagramFrame)
 	require.Equal(t, 6, l)
 	require.Equal(t, f.Data, datagramFrame.Data)
@@ -669,6 +670,7 @@ func parseFrames(tb testing.TB, parser *FrameParser, data []byte, frames ...Fram
 			if df.DataLenPresent != f.DataLenPresent || !bytes.Equal(df.Data, f.Data) {
 				tb.Fatalf("DATAGRAM frame does not match: %v vs %v", df, f)
 			}
+			f.PutBack()
 			data = data[l:]
 			continue
 		}
@@ -756,6 +758,17 @@ func TestFrameParserAllocs(t *testing.T) {
 				ECT0:      uint64(5000 + i),
 				ECT1:      uint64(i),
 				ECNCE:     uint64(10 + i),
+			})
+		}
+		require.Zero(t, testFrameParserAllocs(t, frames))
+	})
+
+	t.Run("DATAGRAM", func(t *testing.T) {
+		var frames []Frame
+		for i := range 10 {
+			frames = append(frames, &DatagramFrame{
+				Data:           make([]byte, 200+i),
+				DataLenPresent: true,
 			})
 		}
 		require.Zero(t, testFrameParserAllocs(t, frames))
@@ -1017,6 +1030,9 @@ func FuzzFrames(f *testing.F) {
 			}
 			if sf, ok := frame.(*StreamFrame); ok {
 				sf.PutBack()
+			}
+			if df, ok := frame.(*DatagramFrame); ok {
+				df.PutBack()
 			}
 			require.LessOrEqual(t, frameLen, protocol.ByteCount(parsedLen), "serialized length vs parsed length")
 		}

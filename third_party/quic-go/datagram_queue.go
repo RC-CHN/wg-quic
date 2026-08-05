@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/utils/ringbuffer"
 	"github.com/quic-go/quic-go/internal/wire"
@@ -14,13 +15,39 @@ const (
 	maxDatagramRcvQueueLen  = 128
 )
 
+type datagramReceiveBuffer [protocol.MaxPacketBufferSize]byte
+
+var datagramReceiveBufferPool = sync.Pool{
+	New: func() any {
+		return new(datagramReceiveBuffer)
+	},
+}
+
+// ReceivedDatagram owns a DATAGRAM payload returned by ReceiveDatagramOwned.
+// Release must be called after the payload is no longer needed. Release is
+// idempotent.
+type ReceivedDatagram struct {
+	Data   []byte
+	buffer *datagramReceiveBuffer
+}
+
+func (d *ReceivedDatagram) Release() {
+	if d.buffer == nil {
+		d.Data = nil
+		return
+	}
+	d.Data = nil
+	datagramReceiveBufferPool.Put(d.buffer)
+	d.buffer = nil
+}
+
 type datagramQueue struct {
 	sendMx    sync.Mutex
 	sendQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
 	sent      chan struct{} // used to notify Add that a datagram was dequeued
 
 	rcvMx    sync.Mutex
-	rcvQueue [][]byte
+	rcvQueue ringbuffer.RingBuffer[ReceivedDatagram]
 	rcvd     chan struct{} // used to notify Receive that a new datagram was received
 
 	closeErr error
@@ -32,13 +59,15 @@ type datagramQueue struct {
 }
 
 func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
-	return &datagramQueue{
+	queue := &datagramQueue{
 		hasData: hasData,
 		rcvd:    make(chan struct{}, 1),
 		sent:    make(chan struct{}, 1),
 		closed:  make(chan struct{}),
 		logger:  logger,
 	}
+	queue.rcvQueue.Init(maxDatagramRcvQueueLen)
+	return queue
 }
 
 // Add queues a new DATAGRAM frame for sending.
@@ -95,14 +124,24 @@ func (h *datagramQueue) Len() int {
 	return h.sendQueue.Len()
 }
 
-// HandleDatagramFrame handles a received DATAGRAM frame. When it queues the
-// frame, ownership of f.Data transfers to the receive queue.
+// HandleDatagramFrame handles a received DATAGRAM frame. The frame payload
+// borrows the decrypted packet buffer, so copy it into a pooled queue buffer
+// before packet processing returns.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
+	if len(f.Data) > protocol.MaxPacketBufferSize {
+		if h.logger.Debug() {
+			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
+		}
+		return
+	}
+	buffer := datagramReceiveBufferPool.Get().(*datagramReceiveBuffer)
+	data := buffer[:len(f.Data)]
+	copy(data, f.Data)
+	datagram := ReceivedDatagram{Data: data, buffer: buffer}
 	var queued bool
 	h.rcvMx.Lock()
-	if len(h.rcvQueue) < maxDatagramRcvQueueLen {
-		h.rcvQueue = append(h.rcvQueue, f.Data)
-		f.Data = nil
+	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
+		h.rcvQueue.PushBack(datagram)
 		queued = true
 		select {
 		case h.rcvd <- struct{}{}:
@@ -110,34 +149,52 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 		}
 	}
 	h.rcvMx.Unlock()
-	if !queued && h.logger.Debug() {
-		h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
+	if !queued {
+		datagram.Release()
+		if h.logger.Debug() {
+			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
+		}
 	}
 }
 
 // Receive gets a received DATAGRAM frame.
 func (h *datagramQueue) Receive(ctx context.Context) ([]byte, error) {
+	datagram, err := h.ReceiveOwned(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data := append([]byte(nil), datagram.Data...)
+	datagram.Release()
+	return data, nil
+}
+
+func (h *datagramQueue) ReceiveOwned(ctx context.Context) (ReceivedDatagram, error) {
 	for {
 		h.rcvMx.Lock()
-		if len(h.rcvQueue) > 0 {
-			data := h.rcvQueue[0]
-			h.rcvQueue = h.rcvQueue[1:]
+		if !h.rcvQueue.Empty() {
+			datagram := h.rcvQueue.PopFront()
 			h.rcvMx.Unlock()
-			return data, nil
+			return datagram, nil
 		}
 		h.rcvMx.Unlock()
 		select {
 		case <-h.rcvd:
 			continue
 		case <-h.closed:
-			return nil, h.closeErr
+			return ReceivedDatagram{}, h.closeErr
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ReceivedDatagram{}, ctx.Err()
 		}
 	}
 }
 
 func (h *datagramQueue) CloseWithError(e error) {
+	h.rcvMx.Lock()
+	for !h.rcvQueue.Empty() {
+		datagram := h.rcvQueue.PopFront()
+		datagram.Release()
+	}
+	h.rcvMx.Unlock()
 	h.closeErr = e
 	close(h.closed)
 }

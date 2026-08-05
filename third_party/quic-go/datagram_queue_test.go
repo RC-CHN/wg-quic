@@ -88,19 +88,38 @@ func TestDatagramQueueReceive(t *testing.T) {
 	require.Equal(t, []byte("bar"), data)
 }
 
-func TestDatagramQueueReceiveTakesPayloadOwnership(t *testing.T) {
+func TestDatagramQueueReceiveOwnedUsesIndependentPooledBuffer(t *testing.T) {
 	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
 	payload := []byte("owned receive payload")
 	payloadStart := &payload[0]
 	frame := &wire.DatagramFrame{Data: payload}
 
 	queue.HandleDatagramFrame(frame)
+	payload[0] = 'X'
 
-	require.Nil(t, frame.Data)
-	data, err := queue.Receive(context.Background())
+	datagram, err := queue.ReceiveOwned(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, payloadStart, &data[0])
-	require.Equal(t, []byte("owned receive payload"), data)
+	require.NotEqual(t, payloadStart, &datagram.Data[0])
+	require.Equal(t, []byte("owned receive payload"), datagram.Data)
+	require.NotNil(t, datagram.buffer)
+	datagram.Release()
+	require.Nil(t, datagram.Data)
+	require.Nil(t, datagram.buffer)
+	datagram.Release()
+}
+
+func TestDatagramQueueReceiveReturnsCallerOwnedCopy(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("first payload")})
+
+	first, err := queue.Receive(context.Background())
+	require.NoError(t, err)
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("second payload")})
+	second, err := queue.Receive(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, []byte("first payload"), first)
+	require.Equal(t, []byte("second payload"), second)
 }
 
 func TestDatagramQueueReceiveBlocking(t *testing.T) {
@@ -192,6 +211,54 @@ func TestDatagramQueueClose(t *testing.T) {
 			require.ErrorIs(t, err, assert.AnError)
 		default:
 			t.Fatal("should have received an error")
+		}
+	})
+}
+
+func TestDatagramQueueCloseDrainsReceiveBuffers(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("foo")})
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("bar")})
+	require.Equal(t, 2, queue.rcvQueue.Len())
+
+	queue.CloseWithError(assert.AnError)
+
+	require.Zero(t, queue.rcvQueue.Len())
+}
+
+func BenchmarkDatagramReceiveQueue(b *testing.B) {
+	payload := make([]byte, 1200)
+	b.Run("caller-owned-copy", func(b *testing.B) {
+		queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+		b.SetBytes(int64(len(payload)))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			queue.HandleDatagramFrame(&wire.DatagramFrame{Data: payload})
+			data, err := queue.Receive(context.Background())
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(data) != len(payload) {
+				b.Fatalf("received %d bytes", len(data))
+			}
+		}
+	})
+	b.Run("owned-pooled", func(b *testing.B) {
+		queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+		b.SetBytes(int64(len(payload)))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			queue.HandleDatagramFrame(&wire.DatagramFrame{Data: payload})
+			datagram, err := queue.ReceiveOwned(context.Background())
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(datagram.Data) != len(payload) {
+				b.Fatalf("received %d bytes", len(datagram.Data))
+			}
+			datagram.Release()
 		}
 	})
 }

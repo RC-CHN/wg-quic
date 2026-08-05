@@ -102,6 +102,8 @@ type Connection struct {
 	conn *quicgo.Conn
 }
 
+type ReceivedDatagram = quicgo.ReceivedDatagram
+
 func (c *Connection) SendDatagram(packet []byte) error {
 	return c.conn.SendDatagram(packet)
 }
@@ -114,6 +116,10 @@ func (c *Connection) SendDatagramOwned(packet []byte) error {
 
 func (c *Connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 	return c.conn.ReceiveDatagram(ctx)
+}
+
+func (c *Connection) ReceiveDatagramOwned(ctx context.Context) (ReceivedDatagram, error) {
+	return c.conn.ReceiveDatagramOwned(ctx)
 }
 
 func (c *Connection) CloseWithError(message string) error {

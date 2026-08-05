@@ -849,16 +849,17 @@ func (s *session) receiveLoop() {
 	qconn := s.conn
 	s.mu.Unlock()
 	type receiveResult struct {
-		packet []byte
-		err    error
+		datagram quiccarrier.ReceivedDatagram
+		err      error
 	}
 	incoming := make(chan receiveResult)
 	go func() {
 		for {
-			packet, err := qconn.ReceiveDatagram(s.ctx)
+			datagram, err := qconn.ReceiveDatagramOwned(s.ctx)
 			select {
-			case incoming <- receiveResult{packet: packet, err: err}:
+			case incoming <- receiveResult{datagram: datagram, err: err}:
 			case <-s.ctx.Done():
+				datagram.Release()
 				return
 			}
 			if err != nil {
@@ -866,33 +867,14 @@ func (s *session) receiveLoop() {
 			}
 		}
 	}()
-	expiry := time.NewTicker(fecExpiryPoll)
-	defer expiry.Stop()
-	for {
-		var wirePacket []byte
-		select {
-		case received := <-incoming:
-			if received.err != nil {
-				if s.ctx.Err() == nil {
-					s.endpoint.owner.debugf(
-						"QUIC receive stopped: session=%d remote=%s error=%v",
-						s.id, s.endpoint.addr, received.err,
-					)
-				}
-				return
-			}
-			wirePacket = received.packet
-		case now := <-expiry.C:
-			s.sendFECFeedback(s.fecDecoder.Expire(now))
-			continue
-		case <-s.ctx.Done():
-			return
-		}
+	handleDatagram := func(datagram quiccarrier.ReceivedDatagram) {
+		defer datagram.Release()
+		wirePacket := datagram.Data
 		s.endpoint.owner.stats.wireRxPackets.Add(1)
 		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
 		result, err := s.fecDecoder.Handle(time.Now(), wirePacket)
 		if err != nil {
-			continue
+			return
 		}
 		if result.Handled {
 			if result.ObservedFeedback != nil && s.fecEncoder != nil {
@@ -907,9 +889,32 @@ func (s *session) receiveLoop() {
 			for _, frame := range result.Frames {
 				s.deliverFrame(frame)
 			}
-			continue
+			return
 		}
 		s.deliverFrame(wirePacket)
+	}
+	expiry := time.NewTicker(fecExpiryPoll)
+	defer expiry.Stop()
+	for {
+		select {
+		case received := <-incoming:
+			if received.err != nil {
+				received.datagram.Release()
+				if s.ctx.Err() == nil {
+					s.endpoint.owner.debugf(
+						"QUIC receive stopped: session=%d remote=%s error=%v",
+						s.id, s.endpoint.addr, received.err,
+					)
+				}
+				return
+			}
+			handleDatagram(received.datagram)
+		case now := <-expiry.C:
+			s.sendFECFeedback(s.fecDecoder.Expire(now))
+			continue
+		case <-s.ctx.Done():
+			return
+		}
 	}
 }
 
