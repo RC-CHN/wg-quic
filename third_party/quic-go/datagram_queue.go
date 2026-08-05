@@ -89,6 +89,12 @@ func (h *datagramQueue) Pop() {
 	}
 }
 
+func (h *datagramQueue) Len() int {
+	h.sendMx.Lock()
+	defer h.sendMx.Unlock()
+	return h.sendQueue.Len()
+}
+
 // HandleDatagramFrame handles a received DATAGRAM frame.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	data := make([]byte, len(f.Data))

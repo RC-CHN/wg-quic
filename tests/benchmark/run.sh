@@ -491,22 +491,80 @@ stop_link_schedule() {
 	fi
 }
 
+init_trial_events() {
+	local trial_dir=$1
+	trial_epoch_ns=$(date +%s%N)
+	printf '%s\n' 'elapsed_s,unix_ns,event,detail' >"$trial_dir/events.csv"
+	record_trial_event "$trial_dir" telemetry_start ""
+}
+
+record_trial_event() {
+	local trial_dir=$1
+	local event=$2
+	local detail=${3:-}
+	local now_ns elapsed
+	now_ns=$(date +%s%N)
+	elapsed=$(awk -v now="$now_ns" -v started="$trial_epoch_ns" \
+		'BEGIN {printf "%.6f", (now - started) / 1000000000}')
+	jq -rn \
+		--arg elapsed "$elapsed" \
+		--arg unix_ns "$now_ns" \
+		--arg event "$event" \
+		--arg detail "$detail" \
+		'[$elapsed, $unix_ns, $event, $detail] | @csv' \
+		>>"$trial_dir/events.csv"
+}
+
+start_tcp_telemetry() {
+	local trial_dir=$1
+	local port=$2
+	local interval=${TCP_TELEMETRY_INTERVAL_SECONDS:-0}
+	validate_number TCP_TELEMETRY_INTERVAL_SECONDS "$interval"
+	tcp_telemetry_pid=
+	: >"$trial_dir/tcp-info.log"
+	if [[ $interval == 0 ]]; then
+		return
+	fi
+	(
+		local now_ns elapsed service
+		while :; do
+			now_ns=$(date +%s%N)
+			elapsed=$(awk -v now="$now_ns" -v started="$trial_epoch_ns" \
+				'BEGIN {printf "%.6f", (now - started) / 1000000000}')
+			for service in a b; do
+				printf '### elapsed_s=%s side=%s port=%s\n' "$elapsed" "$service" "$port"
+				compose_run exec -T "$service" sh -c \
+					"ss -tinH state established | grep ':$port' || true"
+			done
+			sleep "$interval"
+		done
+	) >"$trial_dir/tcp-info.log" 2>"$trial_dir/tcp-sampler.log" &
+	tcp_telemetry_pid=$!
+}
+
+stop_tcp_telemetry() {
+	if [[ -n ${tcp_telemetry_pid:-} ]]; then
+		kill "$tcp_telemetry_pid" >/dev/null 2>&1 || true
+		wait "$tcp_telemetry_pid" >/dev/null 2>&1 || true
+		tcp_telemetry_pid=
+	fi
+}
+
 start_controller_telemetry() {
 	local trial_dir=$1
 	local interval=${TELEMETRY_INTERVAL_SECONDS:-0.5}
 	validate_number TELEMETRY_INTERVAL_SECONDS "$interval"
 	telemetry_pid=
 	printf '%s\n' \
-		'elapsed_s,fec_parity_shards,fec_loss_estimate_ppm,quic_bytes_acked,quic_packets_lost,quic_min_rtt_us,quic_path_rtt_us,quic_smoothed_rtt_us,quic_latest_rtt_us,quic_cwnd_bytes,quic_bytes_in_flight,quic_bandwidth_estimate_bps,quic_pacing_rate_bps,quic_queue_delay_us,quic_fec_recoverable_loss_ppm,quic_fec_residual_loss_ppm,quic_model_state' \
+		'elapsed_s,fec_parity_shards,fec_loss_estimate_ppm,quic_bytes_acked,quic_packets_lost,quic_min_rtt_us,quic_path_rtt_us,quic_smoothed_rtt_us,quic_latest_rtt_us,quic_cwnd_bytes,quic_bytes_in_flight,quic_bandwidth_estimate_bps,quic_pacing_rate_bps,quic_queue_delay_us,quic_fec_recoverable_loss_ppm,quic_fec_residual_loss_ppm,quic_model_state,send_queue_depth,priority_queue_depth,control_queue_depth,quic_datagram_queue_depth,runtime_alloc_bytes,runtime_alloc_objects,runtime_heap_objects,runtime_gc_cycles,runtime_gc_pause_cpu_ns' \
 		>"$trial_dir/controller.csv"
 	(
-		local started_ns now_ns elapsed sample_file
-		started_ns=$(date +%s%N)
+		local now_ns elapsed sample_file
 		sample_file="$trial_dir/.controller-status.json"
 		while :; do
 			if snapshot_status a "$sample_file" 2>/dev/null; then
 				now_ns=$(date +%s%N)
-				elapsed=$(awk -v now="$now_ns" -v started="$started_ns" \
+				elapsed=$(awk -v now="$now_ns" -v started="$trial_epoch_ns" \
 					'BEGIN {printf "%.3f", (now - started) / 1000000000}')
 				jq -r --arg elapsed "$elapsed" '
 					[
@@ -526,7 +584,16 @@ start_controller_telemetry() {
 						(.stats.quic_queue_delay_us // 0),
 						(.stats.quic_fec_recoverable_loss_ppm // 0),
 						(.stats.quic_fec_residual_loss_ppm // 0),
-						(.stats.quic_congestion_model_state // 0)
+						(.stats.quic_congestion_model_state // 0),
+						(.stats.send_queue_depth // 0),
+						(.stats.priority_queue_depth // 0),
+						(.stats.control_queue_depth // 0),
+						(.stats.quic_datagram_send_queue_len // 0),
+						(.stats.runtime_alloc_bytes // 0),
+						(.stats.runtime_alloc_objects // 0),
+						(.stats.runtime_heap_objects // 0),
+						(.stats.runtime_gc_cycles // 0),
+						(.stats.runtime_gc_pause_cpu_ns // 0)
 					] | @csv
 				' "$sample_file" >>"$trial_dir/controller.csv"
 			fi
@@ -652,17 +719,41 @@ stat_delta() {
 		'(($after[0].stats[$field] // 0) - ($before[0].stats[$field] // 0))'
 }
 
+csv_column_max() {
+	local input=$1
+	local column=$2
+	awk -F, -v wanted="$column" '
+		NR == 1 {
+			for (i = 1; i <= NF; i++) {
+				gsub(/^"|"$/, "", $i)
+				if ($i == wanted) {
+					column_index = i
+				}
+			}
+			next
+		}
+		column_index > 0 {
+			value = $column_index
+			gsub(/^"|"$/, "", value)
+			if (value + 0 > maximum) {
+				maximum = value + 0
+			}
+		}
+		END {printf "%.0f", maximum + 0}
+	' "$input"
+}
+
 init_run_directory() {
 	if [[ -z ${run_dir:-} ]]; then
 		local run_id
+		local expected_summary_header
 		run_id=${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 		run_dir="$results_root/$run_id"
 		mkdir -p "$run_dir"
 		summary_csv="$run_dir/summary.csv"
+		expected_summary_header='trial_id,mode,congestion,protocol_policy,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,measured_duration_s,parallel,offered_mbit,disable_offloads,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,first_delivery_s,longest_stall_s,total_stall_s,stall_count,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,fec_current_parity_a,fec_loss_estimate_ppm_a,queue_drops_a,queue_drops_b,send_queue_depth_max_a,priority_queue_depth_max_a,quic_datagram_queue_depth_max_a,quic_bytes_acked_a,quic_acked_bps_a,quic_bytes_lost_a,quic_packets_lost_a,quic_min_rtt_us_a,quic_path_rtt_us_a,quic_smoothed_rtt_us_a,quic_latest_rtt_us_a,quic_cwnd_bytes_a,quic_bytes_in_flight_a,quic_bandwidth_estimate_bps_a,quic_pacing_rate_bps_a,quic_queue_delay_us_a,quic_fec_recoverable_loss_ppm_a,quic_fec_residual_loss_ppm_a,quic_model_state_a,runtime_alloc_bytes_a,runtime_alloc_bytes_b,runtime_alloc_objects_a,runtime_alloc_objects_b,runtime_heap_objects_max_a,runtime_gc_cycles_a,runtime_gc_cycles_b,runtime_gc_pause_cpu_ns_a,runtime_gc_pause_cpu_ns_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json'
 		if [[ ! -f $summary_csv ]]; then
-			printf '%s\n' \
-				'trial_id,mode,congestion,protocol_policy,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,parallel,offered_mbit,disable_offloads,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,fec_current_parity_a,fec_loss_estimate_ppm_a,queue_drops_a,queue_drops_b,quic_bytes_acked_a,quic_acked_bps_a,quic_bytes_lost_a,quic_packets_lost_a,quic_min_rtt_us_a,quic_path_rtt_us_a,quic_smoothed_rtt_us_a,quic_latest_rtt_us_a,quic_cwnd_bytes_a,quic_bytes_in_flight_a,quic_bandwidth_estimate_bps_a,quic_pacing_rate_bps_a,quic_queue_delay_us_a,quic_fec_recoverable_loss_ppm_a,quic_fec_residual_loss_ppm_a,quic_model_state_a,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json' \
-				>"$summary_csv"
+			printf '%s\n' "$expected_summary_header" >"$summary_csv"
 			{
 				date -u
 				uname -a
@@ -671,6 +762,9 @@ init_run_directory() {
 				docker compose version
 				git -C "$repo_dir" rev-parse HEAD
 			} >"$run_dir/environment.txt"
+		elif [[ $(head -n 1 "$summary_csv") != "$expected_summary_header" ]]; then
+			echo "RUN_ID $run_id uses an incompatible summary.csv schema; choose a new RUN_ID" >&2
+			return 1
 		fi
 		echo "results: $run_dir"
 	fi
@@ -701,6 +795,10 @@ run_trial() {
 	validate_integer DURATION "$duration"
 	validate_integer PARALLEL "$parallel"
 	validate_number OFFERED_MBIT "$offered_mbit"
+	local iperf_interval=${IPERF_INTERVAL_SECONDS:-0.25}
+	local stall_bps_threshold=${STALL_BPS_THRESHOLD:-0}
+	validate_number IPERF_INTERVAL_SECONDS "$iperf_interval"
+	validate_number STALL_BPS_THRESHOLD "$stall_bps_threshold"
 	validate_integer CONTROL_GRACE_SECONDS "${CONTROL_GRACE_SECONDS:-20}"
 	benchmark_transport=$(transport_for_mode "$mode")
 	benchmark_mtu=$mtu
@@ -805,6 +903,8 @@ run_trial() {
 		--argjson queue_packets "$link_queue_packets" \
 		--argjson mtu "$mtu" \
 		--argjson duration_s "$duration" \
+		--argjson iperf_interval_s "$iperf_interval" \
+		--argjson stall_bps_threshold "$stall_bps_threshold" \
 		--argjson parallel "$parallel" \
 		--argjson offered_mbit "$offered_mbit" \
 		--argjson disable_offloads "$benchmark_disable_offloads" \
@@ -835,6 +935,8 @@ run_trial() {
 			queue_packets: $queue_packets,
 			mtu: $mtu,
 			duration_s: $duration_s,
+			iperf_interval_s: $iperf_interval_s,
+			stall_bps_threshold: $stall_bps_threshold,
 			parallel: $parallel,
 			offered_mbit: $offered_mbit,
 			disable_offloads: $disable_offloads
@@ -881,18 +983,25 @@ run_trial() {
 	fi
 	local port=5201
 	start_iperf_server "$destination" "$port"
-	local iperf_args=(-c "$destination" -p "$port" -t "$duration" -P "$parallel" --json --get-server-output)
+	local iperf_args=(-c "$destination" -p "$port" -t "$duration" -P "$parallel" \
+		-i "$iperf_interval" --json --get-server-output)
 	if [[ $workload == udp || $workload == outer-udp ]]; then
 		iperf_args+=(-u -b "${offered_mbit}M" -l 1200)
 	fi
+	init_trial_events "$trial_dir"
+	record_trial_event "$trial_dir" workload_server_ready "$destination:$port"
 	start_link_schedule "$trial_dir"
 	start_controller_telemetry "$trial_dir"
+	start_tcp_telemetry "$trial_dir" "$port"
+	record_trial_event "$trial_dir" iperf_exec_start "$workload"
 	local iperf_exit
 	set +e
 	compose_timeout "$((duration + ${CONTROL_GRACE_SECONDS:-20}))" \
 		exec -T a iperf3 "${iperf_args[@]}" >"$trial_dir/iperf-client.json"
 	iperf_exit=$?
 	set -e
+	record_trial_event "$trial_dir" iperf_exec_end "exit=$iperf_exit"
+	stop_tcp_telemetry
 	stop_controller_telemetry "$trial_dir"
 	stop_link_schedule
 	local workload_status=ok
@@ -910,7 +1019,8 @@ run_trial() {
 		fi
 	fi
 	compose_run exec -T b sh -c "sed -n '1,400p' /tmp/wgq-bench-server-5201.json" >"$trial_dir/iperf-server.json" || true
-	printf '%s\n' 'start_s,end_s,seconds,bits_per_second,retransmits,lost_percent,omitted' \
+	printf '%s\n' \
+		'start_s,end_s,seconds,bytes,bits_per_second,retransmits,lost_percent,omitted,snd_cwnd_bytes,snd_rtt_us,snd_rttvar_us,snd_pmtu_bytes' \
 		>"$trial_dir/intervals.csv"
 	jq -r '
 		.intervals[]? |
@@ -918,10 +1028,15 @@ run_trial() {
 			(.sum.start // 0),
 			(.sum.end // 0),
 			(.sum.seconds // 0),
+			([.streams[]?.bytes // 0] | add // 0),
 			(.sum.bits_per_second // 0),
 			(.sum.retransmits // 0),
 			(.sum.lost_percent // 0),
-			(.sum.omitted // false)
+			(.sum.omitted // false),
+			([.streams[]?.snd_cwnd // 0] | add // 0),
+			([.streams[]?.rtt // 0] | max // 0),
+			([.streams[]?.rttvar // 0] | max // 0),
+			([.streams[]?.pmtu // 0] | min // 0)
 		] |
 		@csv
 	' "$trial_dir/iperf-client.json" >>"$trial_dir/intervals.csv"
@@ -939,13 +1054,46 @@ run_trial() {
 	compose_run exec -T a tc -s filter show dev eth0 egress >"$trial_dir/tc-filter-a.txt" || true
 	compose_run exec -T b tc -s filter show dev eth0 egress >"$trial_dir/tc-filter-b.txt" || true
 
-	local goodput retransmits udp_lost
+	local goodput retransmits udp_lost measured_duration
+	local first_delivery longest_stall total_stall stall_count
 	goodput=$(jq -r '
 		.end.sum_received.bits_per_second //
 		.end.sum.bits_per_second //
 		.end.streams[0].udp.bits_per_second //
 		0
 	' "$trial_dir/iperf-client.json")
+	measured_duration=$(jq -r --argjson configured "$duration" '
+		(
+			.end.sum_received.seconds //
+			.end.sum.seconds //
+			.end.streams[0].udp.seconds //
+			$configured
+		) as $measured |
+		if $measured > 0 then $measured else $configured end
+	' "$trial_dir/iperf-client.json")
+	read -r first_delivery longest_stall total_stall stall_count < <(
+		jq -r --argjson threshold "$stall_bps_threshold" '
+			[.intervals[]? | {
+				end: (.sum.end // 0),
+				seconds: (.sum.seconds // 0),
+				bps: (.sum.bits_per_second // 0)
+			}] as $intervals |
+			($intervals | map(select(.bps > $threshold)) |
+				if length > 0 then .[0].end else 0 end) as $first |
+			(reduce $intervals[] as $interval (
+				{current: 0, longest: 0, total: 0, count: 0, active: false};
+				if $interval.bps <= $threshold then
+					.current += $interval.seconds |
+					.total += $interval.seconds |
+					(if .active then . else .active = true | .count += 1 end) |
+					.longest = ([.longest, .current] | max)
+				else
+					.current = 0 | .active = false
+				end
+			)) as $stalls |
+			[$first, $stalls.longest, $stalls.total, $stalls.count] | @tsv
+		' "$trial_dir/iperf-client.json"
+	)
 	retransmits=$(jq -r '.end.sum_sent.retransmits // 0' "$trial_dir/iperf-client.json")
 	udp_lost=$(jq -r '
 		.end.sum.lost_percent //
@@ -955,9 +1103,12 @@ run_trial() {
 	if [[ $workload == outer-* ]]; then
 		outer_baseline=$goodput
 	fi
+	record_trial_event "$trial_dir" workload_metrics \
+		"measured_s=$measured_duration first_delivery_s=$first_delivery longest_stall_s=$longest_stall"
 
 	local wire_tx wg_tx fec_data fec_parity raw_lost recovered unrecovered
 	local fec_current_parity fec_loss_estimate drops_a drops_b
+	local send_queue_max priority_queue_max quic_datagram_queue_max
 	wire_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wire_tx_bytes)
 	wg_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wg_tx_bytes)
 	fec_data=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" fec_data_tx)
@@ -969,12 +1120,15 @@ run_trial() {
 	fec_loss_estimate=$(jq -r '.stats.fec_loss_estimate_ppm // 0' "$trial_dir/status-a-after.json")
 	drops_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" queue_drops)
 	drops_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" queue_drops)
+	send_queue_max=$(csv_column_max "$trial_dir/controller.csv" send_queue_depth)
+	priority_queue_max=$(csv_column_max "$trial_dir/controller.csv" priority_queue_depth)
+	quic_datagram_queue_max=$(csv_column_max "$trial_dir/controller.csv" quic_datagram_queue_depth)
 	local quic_acked quic_acked_bps quic_lost quic_packets_lost
 	local quic_min_rtt quic_path_rtt quic_smoothed_rtt quic_latest_rtt quic_cwnd quic_inflight
 	local quic_bandwidth quic_pacing quic_queue_delay
 	local quic_fec_recoverable quic_fec_residual quic_model_state
 	quic_acked=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_bytes_acked)
-	quic_acked_bps=$(jq -n --argjson bytes "$quic_acked" --argjson duration "$duration" \
+	quic_acked_bps=$(jq -n --argjson bytes "$quic_acked" --argjson duration "$measured_duration" \
 		'$bytes * 8 / $duration')
 	quic_lost=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_bytes_lost)
 	quic_packets_lost=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" quic_packets_lost)
@@ -991,6 +1145,21 @@ run_trial() {
 	quic_fec_residual=$(jq -r '.stats.quic_fec_residual_loss_ppm // 0' "$trial_dir/status-a-after.json")
 	quic_model_state=$(jq -r '.stats.quic_congestion_model_state // 0' "$trial_dir/status-a-after.json")
 
+	local runtime_alloc_bytes_a runtime_alloc_bytes_b
+	local runtime_alloc_objects_a runtime_alloc_objects_b
+	local runtime_heap_objects_max_a
+	local runtime_gc_cycles_a runtime_gc_cycles_b
+	local runtime_gc_pause_a runtime_gc_pause_b
+	runtime_alloc_bytes_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" runtime_alloc_bytes)
+	runtime_alloc_bytes_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" runtime_alloc_bytes)
+	runtime_alloc_objects_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" runtime_alloc_objects)
+	runtime_alloc_objects_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" runtime_alloc_objects)
+	runtime_heap_objects_max_a=$(csv_column_max "$trial_dir/controller.csv" runtime_heap_objects)
+	runtime_gc_cycles_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" runtime_gc_cycles)
+	runtime_gc_cycles_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" runtime_gc_cycles)
+	runtime_gc_pause_a=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" runtime_gc_pause_cpu_ns)
+	runtime_gc_pause_b=$(stat_delta "$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" runtime_gc_pause_cpu_ns)
+
 	local clock_ticks cpu_a_s cpu_b_s rss_a rss_b
 	clock_ticks=$(getconf CLK_TCK)
 	cpu_a_s=$(jq -n --argjson delta "$((cpu_a_after - cpu_a_before))" --argjson hz "$clock_ticks" '$delta / $hz')
@@ -998,10 +1167,10 @@ run_trial() {
 	rss_a=$(core_rss_kib a)
 	rss_b=$(core_rss_kib b)
 	local wire_tx_bps outer_tx outer_tx_bps outer_utilization goodput_to_wire goodput_to_outer
-	wire_tx_bps=$(jq -n --argjson bytes "$wire_tx" --argjson duration "$duration" \
+	wire_tx_bps=$(jq -n --argjson bytes "$wire_tx" --argjson duration "$measured_duration" \
 		'$bytes * 8 / $duration')
 	outer_tx=$((outer_tx_a_after - outer_tx_a_before))
-	outer_tx_bps=$(jq -n --argjson bytes "$outer_tx" --argjson duration "$duration" \
+	outer_tx_bps=$(jq -n --argjson bytes "$outer_tx" --argjson duration "$measured_duration" \
 		'$bytes * 8 / $duration')
 	outer_utilization=$(jq -n --argjson goodput "$goodput" --argjson outer "$outer_baseline" \
 		'if $outer > 0 then $goodput / $outer else 0 end')
@@ -1013,7 +1182,7 @@ run_trial() {
 	csv_schedule=${csv_schedule//,/;}
 
 	printf '%s\n' \
-		"$trial_id,$mode,$congestion,$benchmark_protocol_policy,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$parallel,$offered_mbit,$benchmark_disable_offloads,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$fec_current_parity,$fec_loss_estimate,$drops_a,$drops_b,$quic_acked,$quic_acked_bps,$quic_lost,$quic_packets_lost,$quic_min_rtt,$quic_path_rtt,$quic_smoothed_rtt,$quic_latest_rtt,$quic_cwnd,$quic_inflight,$quic_bandwidth,$quic_pacing,$quic_queue_delay,$quic_fec_recoverable,$quic_fec_residual,$quic_model_state,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
+		"$trial_id,$mode,$congestion,$benchmark_protocol_policy,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$measured_duration,$parallel,$offered_mbit,$benchmark_disable_offloads,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$first_delivery,$longest_stall,$total_stall,$stall_count,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$fec_current_parity,$fec_loss_estimate,$drops_a,$drops_b,$send_queue_max,$priority_queue_max,$quic_datagram_queue_max,$quic_acked,$quic_acked_bps,$quic_lost,$quic_packets_lost,$quic_min_rtt,$quic_path_rtt,$quic_smoothed_rtt,$quic_latest_rtt,$quic_cwnd,$quic_inflight,$quic_bandwidth,$quic_pacing,$quic_queue_delay,$quic_fec_recoverable,$quic_fec_residual,$quic_model_state,$runtime_alloc_bytes_a,$runtime_alloc_bytes_b,$runtime_alloc_objects_a,$runtime_alloc_objects_b,$runtime_heap_objects_max_a,$runtime_gc_cycles_a,$runtime_gc_cycles_b,$runtime_gc_pause_a,$runtime_gc_pause_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
 		>>"$summary_csv"
 	echo "$trial_id: $workload_status, $(awk -v bps="$goodput" -v outer="$outer_baseline" \
 		'BEGIN {printf "%.2f Mbit/s (outer %.2f Mbit/s)", bps / 1000000, outer / 1000000}')"
@@ -1154,6 +1323,8 @@ The trial command is configured with environment variables. Common values:
   FWD_RATE_MBIT=0 REV_RATE_MBIT=0 FWD_LOSS_PCT=0 REV_LOSS_PCT=0
   LINK_SCHEDULE=5:cellular,10:fiber
   TELEMETRY_INTERVAL_SECONDS=0.5
+  IPERF_INTERVAL_SECONDS=0.25 STALL_BPS_THRESHOLD=0
+  TCP_TELEMETRY_INTERVAL_SECONDS=0
   PROTOCOL_POLICY=none|wireguard-block|wireguard-throttle|quic-handshake-block
   MODES='direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs'
   OFFERED_RATES='10 25 50 100 200 500'

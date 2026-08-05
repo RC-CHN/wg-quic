@@ -102,6 +102,19 @@ writes `intervals.csv` and samples controller state into `controller.csv`
 (0.5-second cadence by default), making rate collapse, protection changes, and
 recovery visible instead of only as one run-wide average.
 
+Iperf reports quarter-second intervals by default
+(`IPERF_INTERVAL_SECONDS=0.25`). `summary.csv` derives the first nonzero
+delivery interval, longest and total zero-throughput stall, and stall count.
+Set `STALL_BPS_THRESHOLD` to treat very-low-throughput intervals as stalls.
+These values have interval resolution; `first_delivery_s` is an upper bound,
+not a packet-level latency measurement.
+
+`events.csv` puts fixture lifecycle events and controller samples on the same
+monotonic trial-relative timeline. For occasional TCP diagnosis, set
+`TCP_TELEMETRY_INTERVAL_SECONDS=0.5` to capture sender and receiver `ss -tin`
+state in `tcp-info.log`. This sampler is disabled by default because repeated
+container execs can perturb a ceiling test.
+
 Every iperf client has a hard deadline of `DURATION + CONTROL_GRACE_SECONDS`
 (20 seconds of grace by default). A broken or extremely lossy path is recorded
 as a failed CSV row instead of blocking the rest of a matrix. Increase the
@@ -247,13 +260,19 @@ Stop any retained fixture:
 - connection minimum, current path baseline, latest, and smoothed RTT;
 - congestion window, in-flight bytes, delivery-capacity estimate, total pacing
   budget, queue delay, FEC-classified loss, and model state;
-- local queue drops;
+- local queue drops and peak ArmorBind/QUIC DATAGRAM queue depth;
+- actual measured workload duration, first-delivery bound, and
+  zero/low-throughput stall measurements;
+- Go allocation bytes/objects and per-second rates, peak live heap objects, GC
+  cycles, and GC pause CPU consumed during the measured workload;
 - core process CPU seconds and final RSS;
 - explicit `status` and `error` fields for timeouts and failed paths.
 
-`controller.csv` records the dynamic fields throughout the workload. The
-connection-lifetime `quic_min_rtt_us` and controller-local
-`quic_path_rtt_us` intentionally differ after an access-path change.
+`controller.csv` records the dynamic fields throughout the workload, including
+all three local send queues, the quic-go DATAGRAM queue, and cumulative Go
+allocation/GC counters. The connection-lifetime `quic_min_rtt_us` and
+controller-local `quic_path_rtt_us` intentionally differ after an access-path
+change.
 
 `outer_baseline_bps` is a short protocol-matched sanity measurement, not an
 oracle for bottleneck capacity. In high-RTT TCP profiles such as `satellite`,
@@ -286,9 +305,10 @@ Aggregate repeated rows without external Python packages:
 
 The report groups identical transport/link/workload conditions and emits the
 outer and tunnel medians, goodput P10/P90, sender outer bit rate, UDP loss,
-queue drops, combined core CPU time, and both internal-payload and comparable
-outer-wire efficiency. Dynamic and static link trials remain separate groups
-through the `link_schedule` field.
+stall statistics, peak queue depths, combined core CPU time, allocation/GC
+cost, and both internal-payload and comparable outer-wire efficiency. Dynamic
+and static link trials remain separate groups through the `link_schedule`
+field.
 
 For the loss matrix, keep outer rate, RTT, MTU, offered UDP rate, direction,
 duration, and queue limit unchanged while varying only FEC mode and loss. For

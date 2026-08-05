@@ -106,6 +106,12 @@ func (c *Connection) SendDatagram(packet []byte) error {
 	return c.conn.SendDatagram(packet)
 }
 
+// SendDatagramOwned transfers packet to the QUIC send queue on success. The
+// caller must not access packet after a nil return.
+func (c *Connection) SendDatagramOwned(packet []byte) error {
+	return c.conn.SendDatagramOwned(packet)
+}
+
 func (c *Connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 	return c.conn.ReceiveDatagram(ctx)
 }

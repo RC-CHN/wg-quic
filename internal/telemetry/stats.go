@@ -24,6 +24,9 @@ type Stats struct {
 	FECCurrentParityShards uint64 `json:"fec_current_parity_shards"`
 	FECLossEstimatePPM     uint64 `json:"fec_loss_estimate_ppm"`
 	ActiveSessions         uint64 `json:"active_sessions"`
+	SendQueueDepth         uint64 `json:"send_queue_depth"`
+	PriorityQueueDepth     uint64 `json:"priority_queue_depth"`
+	ControlQueueDepth      uint64 `json:"control_queue_depth"`
 
 	QUICBytesAcked            uint64 `json:"quic_bytes_acked"`
 	QUICPacketsAcked          uint64 `json:"quic_packets_acked"`
@@ -41,4 +44,11 @@ type Stats struct {
 	QUICFECRecoverableLossPPM uint64 `json:"quic_fec_recoverable_loss_ppm"`
 	QUICFECResidualLossPPM    uint64 `json:"quic_fec_residual_loss_ppm"`
 	QUICCongestionModelState  uint64 `json:"quic_congestion_model_state"`
+	QUICDatagramSendQueueLen  uint64 `json:"quic_datagram_send_queue_len"`
+
+	RuntimeAllocBytes      uint64 `json:"runtime_alloc_bytes"`
+	RuntimeAllocObjects    uint64 `json:"runtime_alloc_objects"`
+	RuntimeHeapObjects     uint64 `json:"runtime_heap_objects"`
+	RuntimeGCCycles        uint64 `json:"runtime_gc_cycles"`
+	RuntimeGCPauseCPUNanos uint64 `json:"runtime_gc_pause_cpu_ns"`
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	runtimemetrics "runtime/metrics"
 	"sync"
 
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
@@ -251,7 +252,9 @@ func (i *Instance) ListenPort() uint16 {
 }
 
 func (i *Instance) Stats() telemetry.Stats {
-	return i.bind.Stats()
+	stats := i.bind.Stats()
+	addRuntimeStats(&stats)
+	return stats
 }
 
 func (i *Instance) status() control.Status {
@@ -278,8 +281,26 @@ func (i *Instance) status() control.Status {
 	return control.Status{
 		Interface: i.name, State: state, ListenPort: i.bind.Port(),
 		Carrier: i.cfg.Transport.Carrier, FECMode: i.cfg.Transport.FEC,
-		ObfsMode: i.cfg.Transport.Obfs, Peers: peers, Stats: i.bind.Stats(),
+		ObfsMode: i.cfg.Transport.Obfs, Peers: peers, Stats: i.Stats(),
 	}
+}
+
+func addRuntimeStats(stats *telemetry.Stats) {
+	samples := []runtimemetrics.Sample{
+		{Name: "/gc/heap/allocs:bytes"},
+		{Name: "/gc/heap/allocs:objects"},
+		{Name: "/gc/heap/objects:objects"},
+		{Name: "/gc/cycles/total:gc-cycles"},
+		{Name: "/cpu/classes/gc/pause:cpu-seconds"},
+	}
+	runtimemetrics.Read(samples)
+	stats.RuntimeAllocBytes = samples[0].Value.Uint64()
+	stats.RuntimeAllocObjects = samples[1].Value.Uint64()
+	stats.RuntimeHeapObjects = samples[2].Value.Uint64()
+	stats.RuntimeGCCycles = samples[3].Value.Uint64()
+	stats.RuntimeGCPauseCPUNanos = uint64(
+		samples[4].Value.Float64() * 1_000_000_000,
+	)
 }
 
 func (i *Instance) setPeerEndpoint(update control.SetPeerEndpointRequest) error {

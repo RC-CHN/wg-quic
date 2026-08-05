@@ -172,6 +172,36 @@ and lower-stall target. The short duration also makes this evidence about
 startup resilience, not capacity; the next gate remains 30–60 second runs with
 at least five repetitions.
 
+The owned-DATAGRAM handoff was checked separately before treating it as a
+throughput optimization. Its queue-only microbenchmark moved from roughly
+680 ns, 1312 B, and two allocations per 1200-byte DATAGRAM to 82 ns, 32 B, and
+one allocation. Three matched 8-second LAN trials moved from a 708.2 Mbit/s
+median to 725.9 Mbit/s, but their ranges overlapped; this proves the removed
+copy, not a statistically stable end-to-end throughput gain. The new runtime
+telemetry found about 590 MiB/s of remaining allocation churn at a 725 Mbit/s
+LAN goodput, with the ArmorBind queue reaching 774/1024 and the quic-go
+DATAGRAM queue reaching 32/32. Those observations make framing/packet-builder
+allocation and send-loop backpressure the next clean-path profiling targets.
+
+One post-change 10-second-per-cell diagnostic matrix produced the following
+directional sample:
+
+| Mode | LAN | Fiber | Wi-Fi | Cellular | Satellite |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| direct `wireguard-go` | 906.35 | 277.43 | 9.21 | 2.29 | 1.38 |
+| no-FEC, plain | 725.31 | 125.69 | 4.29 | 1.25 | 1.88 |
+| no-FEC, obfuscated | 705.54 | 194.49 | 4.81 | 1.35 | 0.99 |
+| FEC, plain | 746.16 | 114.37 | 12.23 | 5.29 | 1.09 |
+| FEC, obfuscated | 687.88 | 127.35 | 5.90 | 10.56 | 1.58 |
+
+Values are Mbit/s. All 25 trials completed. ArmorBind queue drops were zero
+except for LAN no-FEC obfuscated (4), Fiber no-FEC obfuscated (1), and LAN FEC
+obfuscated (6). FEC improved the single Wi-Fi and cellular samples, but mode
+rankings varied substantially from earlier short runs. The three-second outer
+TCP calibration also underestimated several high-RTT trials. This matrix
+validates instrumentation and identifies candidate conditions; it is not new
+acceptance evidence.
+
 The IPv4 protocol-policy fixture also establishes three synthetic DPI/QoS
 controls:
 
@@ -189,9 +219,6 @@ The original 5-by-5 sample at commit `b81b7fc` is retained as historical
 motivation. It used one 10-second run per cell and was later found to combine a
 fixed-fragment/FEC cost with an offload setup that could hide configured
 per-packet loss. It must not be used as current performance evidence:
-
-The first controlled 5-by-5 sample at commit `b81b7fc` used one 10-second TCP
-run per cell. It is directional evidence, not a stable benchmark:
 
 | Mode | LAN | Fiber | Wi-Fi | Cellular | Satellite |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -400,15 +427,19 @@ than ending at the local send channel.
 ### 4. Remove avoidable FEC implementation cost
 
 **First pass implemented.** Codec caching, the parity-zero raw path, dynamic
-single-datagram framing, Salamander GSO, and decoded `ReadBatch` are active.
-Buffer reuse and parallel/batched Reed-Solomon work remain profiling-driven
-follow-ups.
+single-datagram framing, Salamander GSO, decoded `ReadBatch`, and ownership
+transfer from ArmorBind into quic-go's DATAGRAM send queue are active. The
+owned-buffer API removes quic-go's per-DATAGRAM payload copy; it is an
+in-process zero-copy handoff, not kernel/NIC zero-copy. The initial
+wireguard-go bind buffer still has to be copied because its lifetime ends when
+`Send` returns. Broader buffer reuse and parallel/batched Reed-Solomon work
+remain profiling-driven follow-ups.
 
 Profile before changing the code, then evaluate:
 
 - caching Reed-Solomon codecs by `(k, r)`;
 - reusing shard and packet buffers;
-- avoiding repeated padding and copying;
+- avoiding the remaining framing, padding, and receive-side copies;
 - batching encode/decode and QUIC DATAGRAM submission;
 - keeping small groups on a low-overhead path;
 - moving expensive work away from the single session send loop while

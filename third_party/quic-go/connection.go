@@ -854,6 +854,9 @@ type ConnectionStats struct {
 	// CongestionModelState is 0 during startup and 1 during steady probing.
 	// It is meaningful when the model controller is selected.
 	CongestionModelState uint64
+	// DatagramSendQueueLen is the number of application DATAGRAM frames waiting
+	// to be packed into QUIC packets.
+	DatagramSendQueueLen uint64
 }
 
 func (c *Conn) ConnectionStats() ConnectionStats {
@@ -880,6 +883,7 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		FECRecoverableLossPPM: c.connStats.FECRecoverableLossPPM.Load(),
 		FECResidualLossPPM:    c.connStats.FECResidualLossPPM.Load(),
 		CongestionModelState:  c.connStats.CongestionModelState.Load(),
+		DatagramSendQueueLen:  uint64(c.datagramQueue.Len()),
 	}
 }
 
@@ -3081,6 +3085,21 @@ func (c *Conn) onStreamCompleted(id protocol.StreamID) {
 // In addition, a datagram may be dropped before being sent out if the available packet size suddenly decreases.
 // If the payload is too large to be sent at the current time, a DatagramTooLargeError is returned.
 func (c *Conn) SendDatagram(p []byte) error {
+	return c.sendDatagram(p, false)
+}
+
+// SendDatagramOwned sends a message using a QUIC datagram without copying the
+// payload. If this function returns nil, ownership of p transfers to QUIC and
+// the caller must not access or reuse it. On error, ownership remains with the
+// caller.
+//
+// This API is intended for adapters that already allocate one buffer per
+// outgoing datagram. Most callers should use SendDatagram.
+func (c *Conn) SendDatagramOwned(p []byte) error {
+	return c.sendDatagram(p, true)
+}
+
+func (c *Conn) sendDatagram(p []byte, owned bool) error {
 	if !c.supportsDatagrams() {
 		return errors.New("datagram support disabled")
 	}
@@ -3090,8 +3109,12 @@ func (c *Conn) SendDatagram(p []byte) error {
 	if protocol.ByteCount(len(p)) > maxDataLen {
 		return &DatagramTooLargeError{MaxDatagramPayloadSize: int64(maxDataLen)}
 	}
-	f.Data = make([]byte, len(p))
-	copy(f.Data, p)
+	if owned {
+		f.Data = p
+	} else {
+		f.Data = make([]byte, len(p))
+		copy(f.Data, p)
+	}
 	return c.datagramQueue.Add(f)
 }
 

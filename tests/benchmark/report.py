@@ -80,13 +80,21 @@ def main():
         "samples",
         "ok",
         "failed",
+        "measured_duration_median_s",
         "outer_median_mbit",
         "goodput_median_mbit",
         "goodput_p10_mbit",
         "goodput_p90_mbit",
+        "first_delivery_median_s",
+        "longest_stall_median_s",
+        "total_stall_median_s",
+        "stall_count_median",
         "sender_outer_median_mbit",
         "udp_loss_median_pct",
         "queue_drops_median",
+        "send_queue_depth_max",
+        "priority_queue_depth_max",
+        "quic_datagram_queue_depth_max",
         "fec_current_parity_median",
         "fec_loss_estimate_median_pct",
         "quic_acked_median_mbit",
@@ -100,6 +108,13 @@ def main():
         "quic_fec_recoverable_loss_median_pct",
         "quic_fec_residual_loss_median_pct",
         "cpu_median_s",
+        "runtime_alloc_median_mib",
+        "runtime_alloc_median_mib_per_s",
+        "runtime_alloc_objects_median",
+        "runtime_alloc_objects_median_per_s",
+        "runtime_heap_objects_max",
+        "runtime_gc_cycles_median",
+        "runtime_gc_pause_cpu_median_ms",
         "goodput_to_wire_median",
         "goodput_to_outer_median",
     ]
@@ -116,6 +131,9 @@ def main():
                 "samples": len(samples),
                 "ok": len(good),
                 "failed": len(samples) - len(good),
+                "measured_duration_median_s": statistics.median(
+                    number(row, "measured_duration_s") for row in measured
+                ),
                 "outer_median_mbit": statistics.median(
                     number(row, "outer_baseline_bps") / 1_000_000
                     for row in measured
@@ -123,6 +141,18 @@ def main():
                 "goodput_median_mbit": statistics.median(goodputs),
                 "goodput_p10_mbit": percentile(goodputs, 0.10),
                 "goodput_p90_mbit": percentile(goodputs, 0.90),
+                "first_delivery_median_s": statistics.median(
+                    number(row, "first_delivery_s") for row in measured
+                ),
+                "longest_stall_median_s": statistics.median(
+                    number(row, "longest_stall_s") for row in measured
+                ),
+                "total_stall_median_s": statistics.median(
+                    number(row, "total_stall_s") for row in measured
+                ),
+                "stall_count_median": statistics.median(
+                    number(row, "stall_count") for row in measured
+                ),
                 "sender_outer_median_mbit": statistics.median(
                     number(row, "outer_tx_bps_a") / 1_000_000
                     for row in measured
@@ -132,6 +162,16 @@ def main():
                 ),
                 "queue_drops_median": statistics.median(
                     number(row, "queue_drops_a") for row in measured
+                ),
+                "send_queue_depth_max": max(
+                    number(row, "send_queue_depth_max_a") for row in measured
+                ),
+                "priority_queue_depth_max": max(
+                    number(row, "priority_queue_depth_max_a") for row in measured
+                ),
+                "quic_datagram_queue_depth_max": max(
+                    number(row, "quic_datagram_queue_depth_max_a")
+                    for row in measured
                 ),
                 "fec_current_parity_median": statistics.median(
                     number(row, "fec_current_parity_a") for row in measured
@@ -194,6 +234,60 @@ def main():
                 ),
                 "cpu_median_s": statistics.median(
                     number(row, "core_cpu_a_s") + number(row, "core_cpu_b_s")
+                    for row in measured
+                ),
+                "runtime_alloc_median_mib": statistics.median(
+                    (
+                        number(row, "runtime_alloc_bytes_a")
+                        + number(row, "runtime_alloc_bytes_b")
+                    )
+                    / (1024 * 1024)
+                    for row in measured
+                ),
+                "runtime_alloc_median_mib_per_s": statistics.median(
+                    (
+                        (
+                            number(row, "runtime_alloc_bytes_a")
+                            + number(row, "runtime_alloc_bytes_b")
+                        )
+                        / (1024 * 1024)
+                        / number(row, "measured_duration_s")
+                    )
+                    if number(row, "measured_duration_s") > 0
+                    else 0
+                    for row in measured
+                ),
+                "runtime_alloc_objects_median": statistics.median(
+                    number(row, "runtime_alloc_objects_a")
+                    + number(row, "runtime_alloc_objects_b")
+                    for row in measured
+                ),
+                "runtime_alloc_objects_median_per_s": statistics.median(
+                    (
+                        (
+                            number(row, "runtime_alloc_objects_a")
+                            + number(row, "runtime_alloc_objects_b")
+                        )
+                        / number(row, "measured_duration_s")
+                    )
+                    if number(row, "measured_duration_s") > 0
+                    else 0
+                    for row in measured
+                ),
+                "runtime_heap_objects_max": max(
+                    number(row, "runtime_heap_objects_max_a") for row in measured
+                ),
+                "runtime_gc_cycles_median": statistics.median(
+                    number(row, "runtime_gc_cycles_a")
+                    + number(row, "runtime_gc_cycles_b")
+                    for row in measured
+                ),
+                "runtime_gc_pause_cpu_median_ms": statistics.median(
+                    (
+                        number(row, "runtime_gc_pause_cpu_ns_a")
+                        + number(row, "runtime_gc_pause_cpu_ns_b")
+                    )
+                    / 1_000_000
                     for row in measured
                 ),
                 "goodput_to_wire_median": statistics.median(

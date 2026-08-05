@@ -65,6 +65,9 @@ func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	if status.Interface != "wg0" || status.Carrier != "quic" || status.ObfsMode != "salamander" {
 		t.Fatalf("core status = %#v", status)
 	}
+	if status.Stats.RuntimeAllocBytes == 0 || status.Stats.RuntimeAllocObjects == 0 {
+		t.Fatalf("runtime allocation telemetry is empty: %#v", status.Stats)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	wait := make(chan error, 1)

@@ -258,6 +258,9 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 	}
 	state.mu.Unlock()
 	for _, sess := range sessions {
+		stats.SendQueueDepth += uint64(len(sess.send))
+		stats.PriorityQueueDepth += uint64(len(sess.priority))
+		stats.ControlQueueDepth += uint64(len(sess.control))
 		if sess.fecEncoder != nil {
 			parity, lossEstimatePPM := sess.fecEncoder.Stats()
 			stats.FECCurrentParityShards = max(stats.FECCurrentParityShards, uint64(parity))
@@ -298,6 +301,7 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 			stats.QUICCongestionModelState,
 			current.CongestionModelState,
 		)
+		stats.QUICDatagramSendQueueLen += current.DatagramSendQueueLen
 		minRTTUs := uint64(current.MinRTT / time.Microsecond)
 		if minRTTUs != 0 && (stats.QUICMinRTTUs == 0 || minRTTUs < stats.QUICMinRTTUs) {
 			stats.QUICMinRTTUs = minRTTUs
@@ -703,20 +707,28 @@ func (s *session) sendLoop() {
 	timerActive := false
 	defer timer.Stop()
 
+	sendPacket := func(packet []byte) bool {
+		packetBytes := len(packet)
+		kind, fecPacket := fec.PacketKind(packet)
+		if err := qconn.SendDatagramOwned(packet); err != nil {
+			return false
+		}
+		s.endpoint.owner.stats.wireTxPackets.Add(1)
+		s.endpoint.owner.stats.wireTxBytes.Add(uint64(packetBytes))
+		if fecPacket {
+			switch kind {
+			case fec.KindData:
+				s.endpoint.owner.stats.fecDataTx.Add(1)
+			case fec.KindParity:
+				s.endpoint.owner.stats.fecParityTx.Add(1)
+			}
+		}
+		return true
+	}
 	sendPackets := func(packets [][]byte) bool {
 		for _, packet := range packets {
-			if err := qconn.SendDatagram(packet); err != nil {
+			if !sendPacket(packet) {
 				return false
-			}
-			s.endpoint.owner.stats.wireTxPackets.Add(1)
-			s.endpoint.owner.stats.wireTxBytes.Add(uint64(len(packet)))
-			if kind, ok := fec.PacketKind(packet); ok {
-				switch kind {
-				case fec.KindData:
-					s.endpoint.owner.stats.fecDataTx.Add(1)
-				case fec.KindParity:
-					s.endpoint.owner.stats.fecParityTx.Add(1)
-				}
 			}
 		}
 		return true
@@ -737,7 +749,7 @@ func (s *session) sendLoop() {
 	}
 	sendFrame := func(frame []byte) bool {
 		if s.fecEncoder == nil {
-			return sendPackets([][]byte{frame})
+			return sendPacket(frame)
 		}
 		s.fecPathSampleFrames++
 		if s.fecPathSampleFrames%32 == 0 {
@@ -779,7 +791,7 @@ func (s *session) sendLoop() {
 	for {
 		select {
 		case control := <-s.control:
-			if !sendPackets([][]byte{control}) {
+			if !sendPacket(control) {
 				return
 			}
 			continue
@@ -803,7 +815,7 @@ func (s *session) sendLoop() {
 				return
 			}
 		case control := <-s.control:
-			if !sendPackets([][]byte{control}) {
+			if !sendPacket(control) {
 				return
 			}
 		case <-timer.C:
