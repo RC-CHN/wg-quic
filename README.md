@@ -94,6 +94,11 @@ The OPNsense plugin lives in
 subtree. Its Web UI, Dashboard widget, package, services, and `quicN`
 interfaces are isolated from OPNsense's built-in WireGuard integration.
 
+The Windows and Linux desktop shell lives in
+[`desktop/`](desktop/README.md). It is a sandboxed Electron UI over the
+existing `wg-quic-quick check/up/down` and `wg-quic show --json` commands;
+there is no separate desktop tunnel implementation or configuration model.
+
 Check a configuration without changing the host:
 
 ```sh
