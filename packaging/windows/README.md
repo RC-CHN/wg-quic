@@ -107,6 +107,8 @@ split tunnel passes; a default route affects all Windows traffic.
 ## Current validation boundary
 
 Hosted Windows CI runs the Named Pipe, QUIC/ArmorBind, host-network plan, and
-SCM state-machine tests and smokes both CLIs. It does not mutate the hosted
-runner's adapters or routes. This LAN procedure is the first privileged Wintun
-and Windows network-policy integration test.
+SCM state-machine tests and smokes both CLIs. Its privileged lifecycle gate
+also installs a real LocalSystem tunnel service, creates Wintun, applies and
+checks an address, MTU, DNS policy, AllowedIPs route, and outer endpoint pin,
+reads the Named Pipe status, then verifies service and network cleanup. This LAN
+procedure remains the end-to-end two-host traffic test.

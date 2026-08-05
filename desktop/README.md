@@ -77,6 +77,12 @@ the renderer to load a real backend snapshot, verifies the primary controls,
 and exits. On headless Linux, run it through
 `xvfb-run --auto-servernum npm run smoke:app`.
 
+CI installs the generated Linux Deb before the renderer smoke so Chromium uses
+the package's root-owned setuid sandbox helper. The Windows job additionally
+runs `tests/windows/privileged-lifecycle.ps1` against the bundled executables,
+covering a real LocalSystem service, Wintun, host network policy, status, and
+teardown.
+
 ## Privileges and platform boundary
 
 The desktop shell does not add a privileged desktop daemon. `up`, `down`, and

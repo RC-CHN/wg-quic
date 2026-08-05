@@ -15,8 +15,9 @@ The broadest exercised runtime is currently Linux. The FreeBSD data plane and
 `wg-quic-quick` host-policy layer are also QEMU-validated through the OPNsense
 plugin on FreeBSD 14 and 15, and an rc.d service script is included. Windows
 now has a CLI-only Wintun, host-network, Named Pipe, and per-tunnel SCM
-implementation; its privileged data plane still needs Windows VM integration
-testing. All platforms share the same userspace WireGuard, QUIC, FEC,
+implementation; hosted CI now validates its privileged Wintun, LocalSystem
+service, address, MTU, DNS, route, status, and cleanup lifecycle. All platforms
+share the same userspace WireGuard, QUIC, FEC,
 obfuscation, and configuration core.
 
 The command boundary mirrors WireGuard's daemon/`wg-quick` split:
@@ -160,8 +161,9 @@ Windows route manager for a lease on every resolved endpoint. The manager uses
 per-interface `GetBestRoute2`, excludes Wintun, compares prefix length and
 effective route cost, and owns pins through a persistent reference-counted
 ledger. It never approximates selection by taking the first default route or
-uses a magic metric as ownership. Windows Wintun, SCM, route, DNS, and cleanup
-behavior is not yet claimed privileged-VM validated.
+uses a magic metric as ownership. Hosted CI validates Wintun creation, SCM,
+address/MTU/DNS and split-route policy, endpoint pinning, status, and cleanup; a
+two-host Windows traffic test remains a separate integration boundary.
 
 `make build-windows` creates self-contained amd64 and arm64 test directories
 under `build/`. Each contains both executables, an unmodified official signed

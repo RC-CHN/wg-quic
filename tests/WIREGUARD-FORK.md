@@ -97,8 +97,12 @@ simultaneous-dial and abrupt-restart regressions, and the bidirectional
 WireGuard-over-QUIC/FEC/Salamander smoke test. It also executes the Windows
 ACL Named Pipe status transport, quick SCM state machine, and host-network plan
 tests repeatedly, then builds and smokes both amd64 CLIs and cross-builds both
-arm64 CLIs. Actual privileged Wintun and route mutation remains a Windows VM
-integration gate rather than a hosted-runner unit test.
+arm64 CLIs. A privileged hosted-runner gate additionally exercises a real
+LocalSystem service, Wintun adapter, interface address, MTU and DNS policy,
+AllowedIPs route, outer endpoint route lease, Named Pipe status, and full
+teardown.
+Windows remains behind the two-node targets only for end-to-end traffic across
+independent network stacks.
 
 The container suite repeats the production path with four separate Linux
 nodes and network namespaces, real TUN devices, and network impairment. Each
