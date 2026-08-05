@@ -55,6 +55,44 @@ function Wait-For {
     throw "timed out waiting for $Description$detail"
 }
 
+function Wait-ForAll {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]] $Checks,
+
+        [int] $TimeoutSeconds = 30
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $failures = [ordered] @{}
+    do {
+        $failures = [ordered] @{}
+        foreach ($check in $Checks) {
+            $description = [string] $check.Description
+            $condition = [scriptblock] $check.Condition
+            try {
+                if (-not (& $condition)) {
+                    $failures[$description] = "condition returned false"
+                }
+            }
+            catch {
+                $failures[$description] = $_.Exception.Message
+            }
+        }
+        if ($failures.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    $details = @(
+        $failures.GetEnumerator() | ForEach-Object {
+            " - $($_.Key): $($_.Value)"
+        }
+    ) -join "`n"
+    throw "timed out waiting for Windows state:`n$details"
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -154,52 +192,80 @@ PersistentKeepalive = 1
         throw "Windows service account is $($serviceInfo.StartName), expected LocalSystem"
     }
 
-    Wait-For -Description "the Wintun IPv4 address" -Condition {
-        $null -ne (Get-NetIPAddress -InterfaceIndex $adapter.ifIndex `
-            -AddressFamily IPv4 -IPAddress $localAddress -ErrorAction SilentlyContinue)
-    }
-    Wait-For -Description "the Wintun IPv4 MTU" -Condition {
-        (Get-NetIPInterface -InterfaceIndex $adapter.ifIndex `
-            -AddressFamily IPv4 -ErrorAction Stop).NlMtuBytes -eq 1380
-    }
-    Wait-For -Description "the Wintun DNS server" -Condition {
-        $configured = @(
-            (Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex `
-                -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses
-        )
-        $dnsServer -in $configured
-    }
-    Wait-For -Description "the Wintun DNS suffix" -Condition {
-        (Get-DnsClient -InterfaceIndex $adapter.ifIndex `
-            -ErrorAction Stop).ConnectionSpecificSuffix -eq $dnsSuffix
-    }
-    Wait-For -Description "the AllowedIPs route" -Condition {
-        $null -ne (Get-NetRoute -InterfaceIndex $adapter.ifIndex `
-            -AddressFamily IPv4 -DestinationPrefix $peerPrefix `
-            -ErrorAction SilentlyContinue)
-    }
-    Wait-For -Description "the endpoint route pin" -Condition {
-        $null -ne (
-            Get-NetRoute -AddressFamily IPv4 `
-                -DestinationPrefix $endpointPrefix -ErrorAction SilentlyContinue |
-                Where-Object { $_.InterfaceIndex -ne $adapter.ifIndex } |
-                Select-Object -First 1
-        )
-    }
-
     $ledgerPath = Join-Path $env:ProgramData "wg-quic\state\routes-v1.json"
-    Wait-For -Description "the endpoint route ledger lease" -Condition {
-        if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) {
-            return $false
+    Wait-ForAll -Checks @(
+        @{
+            Description = "Wintun IPv4 address"
+            Condition = {
+                $null -ne (Get-NetIPAddress -InterfaceIndex $adapter.ifIndex `
+                    -AddressFamily IPv4 -IPAddress $localAddress `
+                    -ErrorAction SilentlyContinue)
+            }
         }
-        $candidateLedger = Get-Content -LiteralPath $ledgerPath -Raw |
-            ConvertFrom-Json
-        $candidateOwnedRoutes = @($candidateLedger.routes | Where-Object {
-            $_.key.destination -eq $endpointPrefix -and
-            @($_.owners | Where-Object { $_.tunnel -eq $TunnelName }).Count -gt 0
-        })
-        $candidateOwnedRoutes.Count -eq 1
-    }
+        @{
+            Description = "Wintun IPv4 MTU"
+            Condition = {
+                (
+                    Get-NetIPInterface -InterfaceIndex $adapter.ifIndex `
+                        -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -First 1
+                ).NlMtu -eq 1380
+            }
+        }
+        @{
+            Description = "Wintun DNS server"
+            Condition = {
+                $configured = @(
+                    (Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex `
+                        -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses
+                )
+                $dnsServer -in $configured
+            }
+        }
+        @{
+            Description = "Wintun DNS suffix"
+            Condition = {
+                (Get-DnsClient -InterfaceIndex $adapter.ifIndex `
+                    -ErrorAction Stop).ConnectionSpecificSuffix -eq $dnsSuffix
+            }
+        }
+        @{
+            Description = "AllowedIPs route"
+            Condition = {
+                $null -ne (Get-NetRoute -InterfaceIndex $adapter.ifIndex `
+                    -AddressFamily IPv4 -DestinationPrefix $peerPrefix `
+                    -ErrorAction SilentlyContinue)
+            }
+        }
+        @{
+            Description = "endpoint route pin"
+            Condition = {
+                $null -ne (
+                    Get-NetRoute -AddressFamily IPv4 `
+                        -DestinationPrefix $endpointPrefix -ErrorAction SilentlyContinue |
+                        Where-Object { $_.InterfaceIndex -ne $adapter.ifIndex } |
+                        Select-Object -First 1
+                )
+            }
+        }
+        @{
+            Description = "endpoint route ledger lease"
+            Condition = {
+                if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) {
+                    return $false
+                }
+                $candidateLedger = Get-Content -LiteralPath $ledgerPath -Raw |
+                    ConvertFrom-Json
+                $candidateOwnedRoutes = @($candidateLedger.routes | Where-Object {
+                    $_.key.destination -eq $endpointPrefix -and
+                    @($_.owners | Where-Object {
+                        $_.tunnel -eq $TunnelName
+                    }).Count -gt 0
+                })
+                $candidateOwnedRoutes.Count -eq 1
+            }
+        }
+    )
 
     $status = (Invoke-Native -FilePath $core -Arguments @("show", $TunnelName, "--json")) |
         ConvertFrom-Json
@@ -217,9 +283,10 @@ PersistentKeepalive = 1
     }
 
     $ipInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex `
-        -AddressFamily IPv4 -ErrorAction Stop
-    if ($ipInterface.NlMtuBytes -ne 1380) {
-        throw "Wintun IPv4 MTU is $($ipInterface.NlMtuBytes), expected 1380"
+        -AddressFamily IPv4 -ErrorAction Stop |
+        Select-Object -First 1
+    if ($ipInterface.NlMtu -ne 1380) {
+        throw "Wintun IPv4 MTU is $($ipInterface.NlMtu), expected 1380"
     }
     $dnsAddresses = @(
         (Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex `
@@ -257,32 +324,61 @@ PersistentKeepalive = 1
     Write-Host (Invoke-Native -FilePath $quick -Arguments @("down", $TunnelName))
     $serviceStarted = $false
 
-    Wait-For -Description "Windows service deletion" -Condition {
-        $null -eq (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
-    }
-    Wait-For -Description "Wintun address cleanup" -Condition {
-        $null -eq (Get-NetIPAddress -AddressFamily IPv4 -IPAddress $localAddress -ErrorAction SilentlyContinue)
-    }
-    Wait-For -Description "AllowedIPs route cleanup" -Condition {
-        $null -eq (Get-NetRoute -AddressFamily IPv4 -DestinationPrefix $peerPrefix -ErrorAction SilentlyContinue)
-    }
-    Wait-For -Description "Wintun adapter cleanup" -Condition {
-        $null -eq (Get-NetAdapter -Name $TunnelName -ErrorAction SilentlyContinue)
-    }
-
+    $cleanupChecks = @(
+        @{
+            Description = "Windows service deletion"
+            Condition = {
+                $null -eq (Get-Service -Name $serviceName `
+                    -ErrorAction SilentlyContinue)
+            }
+        }
+        @{
+            Description = "Wintun address cleanup"
+            Condition = {
+                $null -eq (Get-NetIPAddress -AddressFamily IPv4 `
+                    -IPAddress $localAddress -ErrorAction SilentlyContinue)
+            }
+        }
+        @{
+            Description = "AllowedIPs route cleanup"
+            Condition = {
+                $null -eq (Get-NetRoute -AddressFamily IPv4 `
+                    -DestinationPrefix $peerPrefix -ErrorAction SilentlyContinue)
+            }
+        }
+        @{
+            Description = "Wintun adapter cleanup"
+            Condition = {
+                $null -eq (Get-NetAdapter -Name $TunnelName `
+                    -ErrorAction SilentlyContinue)
+            }
+        }
+        @{
+            Description = "route ledger owner cleanup"
+            Condition = {
+                if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) {
+                    return $true
+                }
+                $cleanupLedger = Get-Content -LiteralPath $ledgerPath -Raw |
+                    ConvertFrom-Json
+                @(
+                    $cleanupLedger.routes |
+                        ForEach-Object { $_.owners } |
+                        Where-Object { $_.tunnel -eq $TunnelName }
+                ).Count -eq 0
+            }
+        }
+    )
     if ($endpointRoutesBefore.Count -eq 0) {
-        Wait-For -Description "endpoint pin cleanup" -Condition {
-            $null -eq (Get-NetRoute -AddressFamily IPv4 -DestinationPrefix $endpointPrefix -ErrorAction SilentlyContinue)
+        $cleanupChecks += @{
+            Description = "endpoint pin cleanup"
+            Condition = {
+                $null -eq (Get-NetRoute -AddressFamily IPv4 `
+                    -DestinationPrefix $endpointPrefix -ErrorAction SilentlyContinue)
+            }
         }
     }
-
-    if (Test-Path -LiteralPath $ledgerPath) {
-        $ledger = Get-Content -LiteralPath $ledgerPath -Raw | ConvertFrom-Json
-        $remainingOwner = @($ledger.routes.owners | Where-Object { $_.tunnel -eq $TunnelName })
-        if ($remainingOwner.Count -ne 0) {
-            throw "route ledger retained an owner for $TunnelName after shutdown"
-        }
-    }
+    Wait-ForAll -Checks $cleanupChecks
 
     Write-Host "privileged Windows Wintun/service/network lifecycle cleanup passed"
 }
