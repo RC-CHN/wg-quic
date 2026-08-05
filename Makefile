@@ -1,7 +1,7 @@
 VERSION ?= $(shell test -f VERSION && sed -n '1p' VERSION || echo 0.1.0-dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
-.PHONY: benchmark-bandwidth benchmark-ceiling benchmark-loss benchmark-profiles benchmark-protocol benchmark-smoke benchmark-transports build build-windows check-no-reference-deps check-third-party release-artifacts test test-race test-wireguard test-quic test-transport test-container
+.PHONY: benchmark-bandwidth benchmark-ceiling benchmark-loss benchmark-profiles benchmark-protocol benchmark-smoke benchmark-transports build build-windows check-no-reference-deps check-third-party desktop-check desktop-package desktop-start desktop-test desktop-verify release-artifacts test test-race test-wireguard test-quic test-transport test-container
 
 build:
 	mkdir -p build
@@ -11,6 +11,21 @@ build:
 build-windows:
 	WG_QUIC_VERSION="$(VERSION)" ./scripts/package-windows.sh amd64
 	WG_QUIC_VERSION="$(VERSION)" ./scripts/package-windows.sh arm64
+
+desktop-check:
+	cd desktop && npm run check
+
+desktop-test:
+	cd desktop && npm test
+
+desktop-package:
+	cd desktop && npm run package
+
+desktop-start:
+	cd desktop && npm start
+
+desktop-verify:
+	cd desktop && npm run verify
 
 release-artifacts:
 	./scripts/package-release.sh linux amd64 "$(VERSION)"

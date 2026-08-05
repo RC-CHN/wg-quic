@@ -1,0 +1,84 @@
+name: desktop
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - ".github/workflows/desktop.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "desktop/**"
+  pull_request:
+    paths:
+      - ".github/workflows/desktop.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "desktop/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: linux
+          - runner: windows-latest
+            artifact: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Audit desktop dependencies
+        working-directory: desktop
+        run: npm audit
+      - name: Check TypeScript
+        working-directory: desktop
+        run: npm run check
+      - name: Test desktop state and platform behavior
+        working-directory: desktop
+        run: npm test
+      - name: Create desktop distributable
+        working-directory: desktop
+        run: npm run make
+      - name: Smoke bundled wg-quic commands
+        working-directory: desktop
+        run: npm run smoke:native
+      - name: Smoke packaged desktop app
+        if: runner.os != 'Linux'
+        working-directory: desktop
+        run: npm run smoke:app
+      - name: Smoke packaged desktop app
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: xvfb-run --auto-servernum npm run smoke:app
+      - name: Upload desktop distributable
+        uses: actions/upload-artifact@v7
+        with:
+          name: wg-quic-desktop-${{ matrix.artifact }}
+          path: desktop/out/make/**
+          if-no-files-found: error
+          retention-days: 14
