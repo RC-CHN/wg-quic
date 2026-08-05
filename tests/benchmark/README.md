@@ -307,7 +307,11 @@ estimates acknowledged outer delivery, maintains a dynamic path RTT and queue
 signal, and paces source and repair traffic under one QUIC wire budget. Use
 `CONGESTION=reno|cubic|model` for controlled comparisons. FEC reconstruction
 does not erase QUIC packet-loss accounting; it supplies an additional
-recoverable/residual classification to the model.
+recoverable/residual classification to the model. Application-limited rounds
+do not advance the model's Startup plateau detector, but a faster bounded
+delivery sample may still raise the capacity estimate. Adaptive FEC also uses
+the measured path RTT: long-recovery paths require a lower measured-loss
+threshold and a longer clean evidence window before parity is disabled.
 
 Clean ceiling numbers need their link condition. `LINK_PROFILE=lan` is a
 1 Gbit/s quality-link acceptance test. `unshaped` is a near-zero-RTT container

@@ -4,6 +4,15 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
+)
+
+const (
+	defaultBypassLossThreshold = 0.001
+	minBypassLossThreshold     = 0.0001
+	bypassReferenceRTT         = 100 * time.Millisecond
+	defaultDecreaseGroups      = 32
+	maxDecreaseGroups          = 256
 )
 
 type Feedback struct {
@@ -26,6 +35,7 @@ type Controller struct {
 	unrecoveredGroups int
 	lossEWMA          float64
 	lossInitialized   bool
+	pathRTT           time.Duration
 
 	transportInitialized bool
 	lastTransportSent    uint64
@@ -77,7 +87,7 @@ func (c *Controller) Observe(feedback Feedback) bool {
 		c.zeroLossGroups = 0
 	}
 
-	desired := parityForLoss(DefaultDataShards, c.lossEWMA)
+	desired := c.desiredParityLocked(DefaultDataShards)
 	if feedback.Missing > feedback.Recovered {
 		c.unrecoveredGroups++
 		if c.parity < desired ||
@@ -91,7 +101,8 @@ func (c *Controller) Observe(feedback Feedback) bool {
 		return c.parity != previous
 	}
 	c.unrecoveredGroups = 0
-	if c.zeroLossGroups >= 32 && c.parity > 0 {
+	decreaseWindow := c.decreaseWindowLocked(desired)
+	if c.zeroLossGroups >= decreaseWindow && c.parity > desired {
 		c.parity--
 		c.zeroLossGroups = 0
 		c.decreaseGroups = 0
@@ -105,7 +116,7 @@ func (c *Controller) Observe(feedback Feedback) bool {
 		c.decreaseGroups = 0
 	case desired < c.parity:
 		c.decreaseGroups++
-		if c.decreaseGroups >= 32 {
+		if c.decreaseGroups >= decreaseWindow {
 			c.parity--
 			c.decreaseGroups = 0
 		}
@@ -124,6 +135,18 @@ func (c *Controller) setParity(parity int) {
 	defer c.mu.Unlock()
 	c.parity = parity
 	c.paritySnapshot.Store(int32(parity))
+}
+
+// ObservePathRTT adjusts how much measured loss is acceptable before enabling
+// protection. A loss on a long-RTT path stalls the encapsulated transport for
+// much longer, so the healthy-path bypass threshold scales down with RTT.
+func (c *Controller) ObservePathRTT(rtt time.Duration) {
+	if rtt <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.pathRTT = rtt
+	c.mu.Unlock()
 }
 
 // ObserveTransport supplements sparse FEC probe feedback with QUIC's
@@ -150,7 +173,7 @@ func (c *Controller) ObserveTransport(packetsSent, packetsLost uint64) bool {
 	sample := float64(lost) / float64(sent)
 	c.updateLossLocked(sample, min(0.25, max(0.0625, float64(sent)/256)))
 	previous := c.parity
-	desired := parityForLoss(DefaultDataShards, c.lossEWMA)
+	desired := c.desiredParityLocked(DefaultDataShards)
 	switch {
 	case c.parity == 0 && lost >= 2 && sample >= 0.005:
 		c.parity = 1
@@ -180,11 +203,36 @@ func (c *Controller) storeSnapshotsLocked() {
 	c.lossSnapshotPPM.Store(uint64(min(1.0, max(0.0, c.lossEWMA))*1_000_000 + 0.5))
 }
 
+func (c *Controller) desiredParityLocked(dataShards int) int {
+	threshold := defaultBypassLossThreshold
+	if c.pathRTT > bypassReferenceRTT {
+		threshold *= float64(bypassReferenceRTT) / float64(c.pathRTT)
+		threshold = max(minBypassLossThreshold, threshold)
+	}
+	return parityForLossThreshold(dataShards, c.lossEWMA, threshold)
+}
+
+func (c *Controller) decreaseWindowLocked(desired int) int {
+	// Long-RTT confidence is needed for the expensive 1 -> 0 decision. It
+	// should not keep surplus protection after a transient burst.
+	if c.parity != 1 || desired != 0 || c.pathRTT <= bypassReferenceRTT {
+		return defaultDecreaseGroups
+	}
+	rttMultiple := int(
+		(c.pathRTT + bypassReferenceRTT - 1) / bypassReferenceRTT,
+	)
+	return min(maxDecreaseGroups, defaultDecreaseGroups*rttMultiple)
+}
+
 // parityForLoss selects the smallest repair count whose independent-loss
 // group failure probability is at most 0.5%. The runtime controller adds
 // hysteresis and reacts faster to observed unrecovered groups.
 func parityForLoss(dataShards int, loss float64) int {
-	if dataShards <= 0 || loss <= 0.001 {
+	return parityForLossThreshold(dataShards, loss, defaultBypassLossThreshold)
+}
+
+func parityForLossThreshold(dataShards int, loss, bypassThreshold float64) int {
+	if dataShards <= 0 || loss <= bypassThreshold {
 		return 0
 	}
 	maxParity := min(4, max(1, dataShards/2))

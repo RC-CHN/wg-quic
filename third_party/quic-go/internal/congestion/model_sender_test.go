@@ -53,6 +53,48 @@ func TestModelSenderLearnsDeliveryCapacity(t *testing.T) {
 	require.Greater(t, sender.Stats().PacingRate, sender.Stats().BandwidthEstimate)
 }
 
+func TestModelSenderUsesFasterApplicationLimitedSample(t *testing.T) {
+	sender, clock, _, _ := newTestModelSender()
+	sender.congestionWindow = 400_000
+	sender.bandwidthEstimate = Bandwidth(1_000_000)
+	priorInFlight := protocol.ByteCount(100_000)
+
+	sender.observeDelivery(50_000, priorInFlight, clock.Now())
+	clock.Advance(10 * time.Millisecond)
+	sender.observeDelivery(50_000, priorInFlight, clock.Now())
+
+	require.Less(t, priorInFlight, sender.congestionWindow/2)
+	require.Greater(t, sender.bandwidthEstimate, Bandwidth(1_000_000))
+}
+
+func TestModelSenderDoesNotExitStartupOnApplicationLimitedRounds(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	sender.roundEnd = 1
+
+	for packetNumber := protocol.PacketNumber(2); packetNumber <= 8; packetNumber++ {
+		sender.largestSent = packetNumber
+		sender.updateRound(packetNumber, false)
+	}
+
+	require.True(t, sender.InSlowStart())
+	require.Zero(t, sender.fullBandwidthRounds)
+	require.Zero(t, sender.fullBandwidth)
+}
+
+func TestModelSenderExitsStartupOnCapacityLimitedPlateau(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	sender.roundEnd = 1
+
+	for packetNumber := protocol.PacketNumber(2); packetNumber <= 5; packetNumber++ {
+		sender.largestSent = packetNumber
+		sender.updateRound(packetNumber, true)
+	}
+
+	require.False(t, sender.InSlowStart())
+	require.Equal(t, 3, sender.fullBandwidthRounds)
+	require.NotZero(t, sender.fullBandwidth)
+}
+
 func TestModelSenderIgnoresIsolatedRandomLossWithoutQueue(t *testing.T) {
 	sender, _, _, _ := newTestModelSender()
 	before := sender.Stats()

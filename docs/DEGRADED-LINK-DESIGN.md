@@ -62,6 +62,7 @@ be recalibrated after repeated 30–60 second measurements are available.
 | Clean path, adaptive FEC | At least 80% of the matching no-FEC wg-quic mode after convergence |
 | 0–0.5% random loss | No more than 10% regression from no-FEC wg-quic |
 | 2–5% random or correlated loss, 40–100 ms RTT | At least 1.5x direct `wireguard-go` median goodput, with lower P99 stall |
+| 0.1–0.5% random loss, 300–600 ms RTT | At least 1.5x direct `wireguard-go` median short-flow goodput and fewer zero-delivery intervals |
 | 5–10% loss or periodic short bursts | Maintain useful interactive delivery and cut residual loss by at least 50% |
 | 200–1000 ms path blackout | Resume useful delivery within `max(3 * RTT, 2s)` after the path returns |
 | Abrupt bandwidth reduction | Converge without sustained local queue drops or growing standing delay |
@@ -88,7 +89,14 @@ Current FEC defaults to eight data shards, starts with one parity shard, flushes
 a partial group after 2 ms, and adjusts between zero and four parity shards
 from receiver feedback and QUIC packet-loss counters. The target is the
 smallest parity count whose independent-loss group-failure probability is at
-most 0.5%, with fast increase and slow decrease. After a healthy interval it
+most 0.5%, with fast increase and slow decrease. The loss threshold for
+entering the raw fast path scales from 0.1% at 100 ms down to a floor of 0.01%
+on long-RTT paths, because one unrecovered shard is much more expensive there.
+The evidence window for disabling the last parity shard scales with RTT as
+well, up to eight times the normal 32-group window. Surplus parity above that
+minimum still drains on the normal window after a burst. This avoids claiming
+a high-cost path is healthy from too small a sample without retaining an
+overly expensive protection level. After a sufficiently healthy interval it
 uses a raw no-FEC fast path and sends one protected probe per 4096 frames.
 Reed-Solomon codecs are cached by `(k, r)`.
 
@@ -99,7 +107,13 @@ budget for every QUIC packet. Data, parity, feedback, and QUIC control traffic
 therefore share one congestion-controlled wire budget. Random loss without
 standing queue or ECN does not trigger Reno-style multiplicative collapse;
 loss with persistent queue growth does reduce the model. Reno and CUBIC remain
-available as benchmark/debug selections.
+available as benchmark/debug selections. Startup bandwidth-plateau rounds are
+counted only while at least half of the congestion window is in flight, so
+application-limited tunnel setup and keepalives cannot make a high-RTT
+connection exit Startup before the bulk workload begins. An application-limited
+delivery sample is still allowed to raise, but never lower, the bandwidth
+estimate when it exceeds the current model; a flight-over-path-RTT bound limits
+ACK-compression artifacts.
 
 The path RTT baseline is dynamic. A sustained latency increase is accepted once
 the sender has drained to a small window, while an implausibly large decrease
@@ -146,6 +160,17 @@ several whole one-second zero-delivery intervals. Direct retained the larger
 whole-run average because it entered the impaired section with a much larger
 existing window; tail stall, not that aggregate, is the reason for keeping
 both interval traces.
+
+A targeted high-RTT check used the fixture's 25/5 Mbit/s, approximately 600 ms
+RTT, 0.2% independent loss profile and five fresh 10-second TCP runs per mode.
+The final FEC-obfs median was 1.18 Mbit/s versus 1.09 Mbit/s for direct
+`wireguard-go`, only 1.09x. Its P10 goodput was 0.926 versus 0.553 Mbit/s, or
+1.67x, and it recovered all 18 observed missing shards. Both modes had a median
+of two whole-second zero-delivery intervals. The controller has improved the
+bad-run floor but this condition does **not** yet meet the proposed 1.5x median
+and lower-stall target. The short duration also makes this evidence about
+startup resilience, not capacity; the next gate remains 30–60 second runs with
+at least five repetitions.
 
 The IPv4 protocol-policy fixture also establishes three synthetic DPI/QoS
 controls:
@@ -499,7 +524,9 @@ Completed in the current experimental baseline:
 4. adaptive parity driven by FEC feedback plus transport-loss observations;
 5. selectable Reno, CUBIC, and model controllers with a shared QUIC wire
    budget;
-6. dynamic link schedules and synthetic protocol block/police policies.
+6. dynamic link schedules and synthetic protocol block/police policies;
+7. application-limited Startup filtering plus RTT-aware FEC bypass thresholds
+   and decrease evidence windows.
 
 Next gates:
 

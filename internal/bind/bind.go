@@ -742,6 +742,7 @@ func (s *session) sendLoop() {
 		s.fecPathSampleFrames++
 		if s.fecPathSampleFrames%32 == 0 {
 			stats := qconn.Stats()
+			s.fecEncoder.ObservePathRTT(stats.PropagationRTT)
 			s.fecEncoder.ObserveTransport(stats.PacketsSent, stats.PacketsLost)
 		}
 		packets, err := s.fecEncoder.Add(frame)

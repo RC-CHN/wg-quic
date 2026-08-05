@@ -131,6 +131,81 @@ func TestControllerUsesTransportLossWhileFECIsBypassed(t *testing.T) {
 	}
 }
 
+func TestControllerTightensBypassThresholdOnLongRTTPath(t *testing.T) {
+	controller := NewController()
+	controller.setParity(0)
+	controller.ObservePathRTT(600 * time.Millisecond)
+
+	if controller.ObserveTransport(100, 0) {
+		t.Fatal("initial transport snapshot changed parity")
+	}
+	if !controller.ObserveTransport(1100, 1) {
+		t.Fatal("long-RTT loss did not leave the zero-parity fast path")
+	}
+	if got := controller.CurrentParity(); got != 1 {
+		t.Fatalf("parity after long-RTT loss = %d, want 1", got)
+	}
+}
+
+func TestControllerKeepsLowRTTPathBypassedAtSameLossRate(t *testing.T) {
+	controller := NewController()
+	controller.setParity(0)
+	controller.ObservePathRTT(10 * time.Millisecond)
+
+	controller.ObserveTransport(100, 0)
+	if controller.ObserveTransport(1100, 1) {
+		t.Fatal("low-RTT path enabled parity below the default loss threshold")
+	}
+	if got := controller.CurrentParity(); got != 0 {
+		t.Fatalf("parity after low-RTT loss = %d, want 0", got)
+	}
+}
+
+func TestControllerDoesNotDropBelowLongRTTLossTarget(t *testing.T) {
+	controller := NewController()
+	controller.ObservePathRTT(600 * time.Millisecond)
+	controller.lossEWMA = 0.001
+
+	for range 32 {
+		controller.Observe(Feedback{Total: 8})
+	}
+
+	if got := controller.CurrentParity(); got != 1 {
+		t.Fatalf("parity after long-RTT zero-loss streak = %d, want 1", got)
+	}
+}
+
+func TestControllerUsesLongerDecreaseWindowOnLongRTTPath(t *testing.T) {
+	controller := NewController()
+	controller.ObservePathRTT(600 * time.Millisecond)
+	window := controller.decreaseWindowLocked(0)
+
+	for range window - 1 {
+		controller.Observe(Feedback{Total: 8})
+	}
+	if got := controller.CurrentParity(); got != 1 {
+		t.Fatalf("parity decreased before long-RTT window: %d", got)
+	}
+	controller.Observe(Feedback{Total: 8})
+	if got := controller.CurrentParity(); got != 0 {
+		t.Fatalf("parity after long-RTT window = %d, want 0", got)
+	}
+}
+
+func TestControllerRemovesSurplusParityNormallyOnLongRTTPath(t *testing.T) {
+	controller := NewController()
+	controller.setParity(2)
+	controller.ObservePathRTT(600 * time.Millisecond)
+
+	for range defaultDecreaseGroups {
+		controller.Observe(Feedback{Total: 8})
+	}
+
+	if got := controller.CurrentParity(); got != 1 {
+		t.Fatalf("surplus parity after normal decrease window = %d, want 1", got)
+	}
+}
+
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"github.com/klauspost/reedsolomon"
 )
@@ -148,6 +149,10 @@ func (e *Encoder) Observe(feedback Feedback) {
 
 func (e *Encoder) ObserveTransport(packetsSent, packetsLost uint64) {
 	e.controller.ObserveTransport(packetsSent, packetsLost)
+}
+
+func (e *Encoder) ObservePathRTT(rtt time.Duration) {
+	e.controller.ObservePathRTT(rtt)
 }
 
 func (e *Encoder) Stats() (parity int, lossEstimatePPM uint64) {

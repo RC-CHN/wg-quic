@@ -151,7 +151,7 @@ func (m *modelSender) OnPacketAcked(
 	m.seedFromFirstRTT()
 	m.updateFECSignal()
 	m.observeDelivery(ackedBytes, priorInFlight, eventTime)
-	m.updateRound(packetNumber)
+	m.updateRound(packetNumber, priorInFlight >= m.congestionWindow/2)
 	m.respondToPersistentQueue(eventTime)
 	m.updateCongestionWindow(ackedBytes, priorInFlight)
 }
@@ -396,7 +396,11 @@ func (m *modelSender) observeDelivery(
 		flightRate := BandwidthFromDelta(priorInFlight, m.modelRTT())
 		sample = min(sample, flightRate*3/2)
 	}
-	if priorInFlight >= m.congestionWindow/2 {
+	// Application-limited samples must not lower the delivery model, but a
+	// faster sample is still evidence that the path can deliver at least that
+	// rate. The flight/RTT bound above prevents a compressed ACK burst from
+	// manufacturing capacity.
+	if priorInFlight >= m.congestionWindow/2 || sample > m.bandwidthEstimate {
 		m.recordBandwidthSample(sample)
 	}
 	m.ackWindowStart = eventTime
@@ -417,11 +421,14 @@ func (m *modelSender) recordBandwidthSample(sample Bandwidth) {
 	m.bandwidthEstimate = estimate
 }
 
-func (m *modelSender) updateRound(acked protocol.PacketNumber) {
+func (m *modelSender) updateRound(acked protocol.PacketNumber, capacityLimited bool) {
 	if m.roundEnd == protocol.InvalidPacketNumber || acked <= m.roundEnd {
 		return
 	}
 	m.roundEnd = m.largestSent
+	if m.state != modelStateStartup || !capacityLimited {
+		return
+	}
 	if m.fullBandwidth == 0 || m.bandwidthEstimate >= m.fullBandwidth*5/4 {
 		m.fullBandwidth = m.bandwidthEstimate
 		m.fullBandwidthRounds = 0
