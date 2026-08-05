@@ -70,3 +70,10 @@ func (p *execCoreProcess) Err() error {
 	defer p.mu.Unlock()
 	return p.err
 }
+
+func (p *execCoreProcess) PID() int {
+	if p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}

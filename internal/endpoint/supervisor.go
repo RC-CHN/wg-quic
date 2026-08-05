@@ -536,7 +536,9 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.Stop()
+	if err := s.StopContext(ctx); err != nil {
+		return err
+	}
 	if err := s.releaseAll(ctx); err != nil {
 		// Keep the route manager open and every failed lease reachable. A
 		// subsequent Close call can retry the exact same ownership release.
@@ -548,6 +550,13 @@ func (s *Supervisor) Close(ctx context.Context) error {
 // Stop ends scheduled refresh work without releasing route leases. quick uses
 // this before removing tunnel routes, then calls Close after host cleanup.
 func (s *Supervisor) Stop() {
+	_ = s.StopContext(context.Background())
+}
+
+// StopContext ends scheduled refresh work without releasing route leases, but
+// lets shutdown callers impose a deadline. If the deadline expires, Close must
+// not release leases that a stuck refresh worker could still be using.
+func (s *Supervisor) StopContext(ctx context.Context) error {
 	s.mu.Lock()
 	cancel := s.cancel
 	s.cancel = nil
@@ -555,7 +564,17 @@ func (s *Supervisor) Stop() {
 	if cancel != nil {
 		cancel()
 	}
-	s.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for endpoint refresh workers: %w", ctx.Err())
+	}
 }
 
 func (s *Supervisor) releaseAll(ctx context.Context) error {

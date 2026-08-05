@@ -57,6 +57,7 @@ func RunWindowsDebug(ctx context.Context, input, requestedName string, output io
 	}
 	return runWithHostReadyLog(
 		ctx, input, requestedName, platform.Current(), factory, ready,
+		nil,
 		runLog{logger: logger, debug: true},
 	)
 }

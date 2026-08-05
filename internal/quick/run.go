@@ -22,9 +22,25 @@ type coreProcess interface {
 	Stop() error
 	Done() <-chan struct{}
 	Err() error
+	PID() int
 }
 
 type coreProcessFactory func(coreLaunch) (coreProcess, error)
+
+const (
+	quickShutdownTimeout = 20 * time.Second
+	coreStopTimeout      = 7 * time.Second
+)
+
+const (
+	shutdownStageStopRefresh = "stopping endpoint refresh"
+	shutdownStagePreDown     = "running PreDown hooks"
+	shutdownStageNetwork     = "rolling back host network"
+	shutdownStagePostDown    = "running PostDown hooks"
+	shutdownStageEndpoint    = "releasing endpoint route leases"
+	shutdownStageCore        = "stopping core process"
+	shutdownStageComplete    = "shutdown complete"
+)
 
 type runLog struct {
 	logger *log.Logger
@@ -55,6 +71,22 @@ func runWithHostReady(
 ) error {
 	return runWithHostReadyLog(
 		ctx, input, requestedName, host, newProcess, ready,
+		nil,
+		runLog{logger: log.Default()},
+	)
+}
+
+func runWithHostReadyProgress(
+	ctx context.Context,
+	input, requestedName string,
+	host platform.Host,
+	newProcess coreProcessFactory,
+	ready func(),
+	shutdownProgress func(string),
+) error {
+	return runWithHostReadyLog(
+		ctx, input, requestedName, host, newProcess, ready,
+		shutdownProgress,
 		runLog{logger: log.Default()},
 	)
 }
@@ -65,8 +97,9 @@ func runWithHostReadyLog(
 	host platform.Host,
 	newProcess coreProcessFactory,
 	ready func(),
+	shutdownProgress func(string),
 	runLogger runLog,
-) error {
+) (runErr error) {
 	if runLogger.logger == nil {
 		runLogger.logger = log.Default()
 	}
@@ -120,9 +153,17 @@ func runWithHostReadyLog(
 	if err := process.Start(); err != nil {
 		return fmt.Errorf("start wg-quic core: %w", err)
 	}
+	fallbackProcess := process
+	supervisorOwnsShutdown := false
 	defer func() {
-		if err := stopCoreProcess(process); err != nil {
-			runLogger.logger.Printf("stop wg-quic core: %v", err)
+		if supervisorOwnsShutdown {
+			return
+		}
+		if err := shutdownQuickRuntime(
+			host, name, cfg, fallbackProcess, nil, nil, false,
+			shutdownProgress, runLogger,
+		); err != nil {
+			runErr = errors.Join(runErr, err)
 		}
 	}()
 	runLogger.debugf("waiting for core readiness on %q", host.ControlPath(name))
@@ -151,20 +192,24 @@ func runWithHostReadyLog(
 		_ = routeLeaser.Close()
 		return err
 	}
+	var networkCleanup platform.Cleanup
+	hostCleanupArmed := false
+	runtimeProcess := process
+	supervisorOwnsShutdown = true
 	defer func() {
-		if err := supervisor.Close(context.Background()); err != nil {
-			runLogger.logger.Printf("close endpoint supervisor: %v", err)
+		if err := shutdownQuickRuntime(
+			host, name, cfg, runtimeProcess, supervisor, &networkCleanup,
+			hostCleanupArmed, shutdownProgress, runLogger,
+		); err != nil {
+			runErr = errors.Join(runErr, err)
 		}
 	}()
 	if _, err := supervisor.Initialize(ctx); err != nil {
 		return err
 	}
 	runLogger.debugf("applying platform address, route, MTU, and DNS policy")
-	networkCleanup, err := host.ConfigureNetwork(ctx, name, cfg)
-	defer func() {
-		supervisor.Stop()
-		cleanupHost(context.Background(), host, name, cfg, &networkCleanup, runLogger)
-	}()
+	hostCleanupArmed = true
+	networkCleanup, err = host.ConfigureNetwork(ctx, name, cfg)
 	if err != nil {
 		return err
 	}
@@ -192,6 +237,70 @@ func runWithHostReadyLog(
 		}
 		return errors.New("wg-quic core exited unexpectedly")
 	}
+}
+
+func shutdownQuickRuntime(
+	host platform.Host,
+	name string,
+	cfg *config.Config,
+	process coreProcess,
+	supervisor *endpoint.Supervisor,
+	networkCleanup *platform.Cleanup,
+	hostCleanupArmed bool,
+	progress func(string),
+	runLogger runLog,
+) error {
+	if process == nil {
+		return nil
+	}
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		quickShutdownTimeout,
+	)
+	defer cancel()
+	report := func(stage string) {
+		runLogger.debugf("shutdown: %s", stage)
+		if progress != nil {
+			progress(stage)
+		}
+	}
+	var errs []error
+	refreshStopped := true
+	if supervisor != nil {
+		report(shutdownStageStopRefresh)
+		if err := supervisor.StopContext(shutdownCtx); err != nil {
+			refreshStopped = false
+			runLogger.logger.Printf("stop endpoint supervisor: %v", err)
+			errs = append(errs, fmt.Errorf("stop endpoint refresh: %w", err))
+		}
+	}
+	if hostCleanupArmed {
+		if err := cleanupHost(
+			shutdownCtx, host, name, cfg, networkCleanup, report, runLogger,
+		); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if supervisor != nil && refreshStopped {
+		report(shutdownStageEndpoint)
+		if err := supervisor.Close(shutdownCtx); err != nil {
+			runLogger.logger.Printf("close endpoint supervisor: %v", err)
+			errs = append(errs, fmt.Errorf("release endpoint routes: %w", err))
+		}
+	} else if supervisor != nil {
+		runLogger.logger.Printf(
+			"endpoint refresh did not stop before the shutdown deadline; retaining route leases for startup reconciliation",
+		)
+	}
+	report(shutdownStageCore)
+	coreCtx, cancelCore := context.WithTimeout(shutdownCtx, coreStopTimeout)
+	if err := stopCoreProcess(coreCtx, process); err != nil {
+		runLogger.logger.Printf("stop wg-quic core: %v", err)
+		errs = append(errs, err)
+	}
+	cancelCore()
+	report(shutdownStageComplete)
+	return errors.Join(errs...)
 }
 
 func waitForCore(ctx context.Context, path, name, wantState string, process coreProcess) error {
@@ -226,7 +335,7 @@ func waitForCore(ctx context.Context, path, name, wantState string, process core
 	}
 }
 
-func stopCoreProcess(process coreProcess) error {
+func stopCoreProcess(ctx context.Context, process coreProcess) error {
 	select {
 	case <-process.Done():
 		return process.Err()
@@ -235,8 +344,15 @@ func stopCoreProcess(process coreProcess) error {
 	if err := process.Stop(); err != nil {
 		return err
 	}
-	<-process.Done()
-	return nil
+	select {
+	case <-process.Done():
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf(
+			"wait for wg-quic core process pid %d after termination during shutdown: %w",
+			process.PID(), ctx.Err(),
+		)
+	}
 }
 
 func cleanupHost(
@@ -245,24 +361,33 @@ func cleanupHost(
 	name string,
 	cfg *config.Config,
 	cleanup *platform.Cleanup,
+	progress func(string),
 	runLogger runLog,
-) {
+) error {
+	var errs []error
+	progress(shutdownStagePreDown)
 	for index, hook := range cfg.Interface.PreDown {
 		runLogger.debugf("running PreDown hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
 			runLogger.logger.Printf("PreDown: %v", err)
+			errs = append(errs, fmt.Errorf("PreDown hook %d: %w", index+1, err))
 		}
 	}
+	progress(shutdownStageNetwork)
 	if cleanup != nil && *cleanup != nil {
 		runLogger.debugf("rolling back platform network policy")
 		if err := (*cleanup)(ctx); err != nil {
 			runLogger.logger.Printf("platform network cleanup: %v", err)
+			errs = append(errs, fmt.Errorf("platform network cleanup: %w", err))
 		}
 	}
+	progress(shutdownStagePostDown)
 	for index, hook := range cfg.Interface.PostDown {
 		runLogger.debugf("running PostDown hook %d", index+1)
 		if err := host.RunHook(ctx, hook, name); err != nil {
 			runLogger.logger.Printf("PostDown: %v", err)
+			errs = append(errs, fmt.Errorf("PostDown hook %d: %w", index+1, err))
 		}
 	}
+	return errors.Join(errs...)
 }

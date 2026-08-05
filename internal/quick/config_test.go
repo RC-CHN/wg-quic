@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -170,6 +171,35 @@ func (p *testCoreProcess) Done() <-chan struct{} {
 
 func (p *testCoreProcess) Err() error {
 	return p.err
+}
+
+func (p *testCoreProcess) PID() int {
+	return 4242
+}
+
+type stuckCoreProcess struct {
+	done chan struct{}
+}
+
+func (*stuckCoreProcess) Start() error            { return nil }
+func (*stuckCoreProcess) Stop() error             { return nil }
+func (p *stuckCoreProcess) Done() <-chan struct{} { return p.done }
+func (*stuckCoreProcess) Err() error              { return nil }
+func (*stuckCoreProcess) PID() int                { return 31337 }
+
+func TestStopCoreProcessReportsPIDAtDeadline(t *testing.T) {
+	process := &stuckCoreProcess{done: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 20*time.Millisecond,
+	)
+	defer cancel()
+	err := stopCoreProcess(ctx, process)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stopCoreProcess error = %v, want deadline exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "pid 31337") {
+		t.Fatalf("stopCoreProcess error = %q, want PID", err)
+	}
 }
 
 func TestResolveConfigSupportsInterfaceAndExplicitPath(t *testing.T) {

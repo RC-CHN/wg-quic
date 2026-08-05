@@ -194,6 +194,34 @@ func TestSupervisorInitializesOneCanonicalEndpointOwner(t *testing.T) {
 	}
 }
 
+func TestSupervisorStopContextBoundsWorkerWait(t *testing.T) {
+	supervisor := &Supervisor{}
+	supervisor.wg.Add(1)
+	workerDone := make(chan struct{})
+	go func() {
+		<-workerDone
+		supervisor.wg.Done()
+	}()
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 20*time.Millisecond,
+	)
+	defer cancel()
+	err := supervisor.StopContext(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("StopContext error = %v, want deadline exceeded", err)
+	}
+
+	close(workerDone)
+	retryCtx, retryCancel := context.WithTimeout(
+		context.Background(), time.Second,
+	)
+	defer retryCancel()
+	if err := supervisor.StopContext(retryCtx); err != nil {
+		t.Fatalf("StopContext retry after worker exit: %v", err)
+	}
+}
+
 func TestSupervisorRefreshesAfterDNSAddressRemoval(t *testing.T) {
 	first := netip.MustParseAddr("192.0.2.10")
 	second := netip.MustParseAddr("192.0.2.20")

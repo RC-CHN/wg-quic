@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"golang.org/x/sys/windows"
@@ -48,7 +50,7 @@ func startWindowsService(ctx context.Context, name string) error {
 	serviceName := windowsServiceName(name)
 	service, err := manager.OpenService(serviceName)
 	if err == nil {
-		status, queryErr := service.Query()
+		status, queryErr := queryWindowsServiceStatus(service)
 		if queryErr != nil {
 			service.Close()
 			return queryErr
@@ -88,7 +90,9 @@ func startWindowsService(ctx context.Context, name string) error {
 		_ = service.Delete()
 		return fmt.Errorf("start Windows service %s: %w", serviceName, err)
 	}
-	if err := waitWindowsServiceState(ctx, service, svc.Running); err != nil {
+	if err := waitWindowsServiceState(
+		ctx, service, serviceName, svc.Running,
+	); err != nil {
 		_ = service.Delete()
 		return err
 	}
@@ -107,15 +111,24 @@ func stopWindowsService(ctx context.Context, name string) error {
 		return fmt.Errorf("open Windows service %s: %w", serviceName, err)
 	}
 	defer service.Close()
-	status, err := service.Query()
+	status, err := queryWindowsServiceStatus(service)
 	if err != nil {
 		return err
+	}
+	if status.State == svc.Stopped &&
+		(status.Win32ExitCode != 0 ||
+			status.ServiceSpecificExitCode != 0) {
+		return windowsServiceStoppedError(
+			serviceName, status, status, 0,
+		)
 	}
 	if status.State != svc.Stopped {
 		if _, err := service.Control(svc.Stop); err != nil {
 			return fmt.Errorf("stop Windows service %s: %w", serviceName, err)
 		}
-		if err := waitWindowsServiceState(ctx, service, svc.Stopped); err != nil {
+		if err := waitWindowsServiceState(
+			ctx, service, serviceName, svc.Stopped,
+		); err != nil {
 			return err
 		}
 	}
@@ -125,26 +138,69 @@ func stopWindowsService(ctx context.Context, name string) error {
 	return nil
 }
 
-func waitWindowsServiceState(ctx context.Context, service *mgr.Service, want svc.State) error {
+func waitWindowsServiceState(
+	ctx context.Context,
+	service *mgr.Service,
+	serviceName string,
+	want svc.State,
+) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	started := time.Now()
+	var last svc.Status
 	for {
-		status, err := service.Query()
+		status, err := queryWindowsServiceStatus(service)
 		if err != nil {
 			return err
 		}
+		previous := last
+		last = status
 		if status.State == want {
+			if want == svc.Stopped &&
+				(status.Win32ExitCode != 0 ||
+					status.ServiceSpecificExitCode != 0) {
+				if previous.State != svc.StopPending {
+					previous = status
+				}
+				return windowsServiceStoppedError(
+					serviceName, previous, status,
+					time.Since(started),
+				)
+			}
 			return nil
 		}
 		if status.State == svc.Stopped && want != svc.Stopped {
-			return fmt.Errorf("Windows service stopped before reaching state %d", want)
+			return fmt.Errorf(
+				"Windows service %s stopped before reaching state %s: win32_exit=%d service_exit=%d",
+				serviceName, windowsServiceStateName(want),
+				status.Win32ExitCode, status.ServiceSpecificExitCode,
+			)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return windowsServiceWaitError(
+				ctx.Err(), serviceName, want, last, time.Since(started),
+			)
 		case <-ticker.C:
 		}
 	}
+}
+
+func windowsServiceStoppedError(
+	serviceName string,
+	lastPending svc.Status,
+	stopped svc.Status,
+	elapsed time.Duration,
+) error {
+	elapsed = elapsed.Round(100 * time.Millisecond)
+	stage := windowsShutdownStageFromCheckpoint(lastPending.CheckPoint)
+	return fmt.Errorf(
+		"Windows service %s stopped with a shutdown failure after %s: win32_exit=%d service_exit=%d last checkpoint=%d wait hint=%dms current cleanup stage=%q; endpoint lease cleanup may still be pending; run `wg-quic-quick down %s --repair` for explicit recovery",
+		serviceName, elapsed, stopped.Win32ExitCode,
+		stopped.ServiceSpecificExitCode, lastPending.CheckPoint,
+		lastPending.WaitHint, stage,
+		strings.TrimPrefix(serviceName, windowsServicePrefix),
+	)
 }
 
 func waitWindowsServiceDeleted(ctx context.Context, manager *mgr.Mgr, name string) error {
@@ -162,9 +218,79 @@ func waitWindowsServiceDeleted(ctx context.Context, manager *mgr.Mgr, name strin
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf(
+				"Windows service %s remained marked for deletion: %w",
+				name, ctx.Err(),
+			)
 		case <-ticker.C:
 		}
+	}
+}
+
+func queryWindowsServiceStatus(service *mgr.Service) (svc.Status, error) {
+	var native windows.SERVICE_STATUS_PROCESS
+	var needed uint32
+	err := windows.QueryServiceStatusEx(
+		service.Handle,
+		windows.SC_STATUS_PROCESS_INFO,
+		(*byte)(unsafe.Pointer(&native)),
+		uint32(unsafe.Sizeof(native)),
+		&needed,
+	)
+	if err != nil {
+		return svc.Status{}, err
+	}
+	return svc.Status{
+		State:                   svc.State(native.CurrentState),
+		Accepts:                 svc.Accepted(native.ControlsAccepted),
+		CheckPoint:              native.CheckPoint,
+		WaitHint:                native.WaitHint,
+		ProcessId:               native.ProcessId,
+		Win32ExitCode:           native.Win32ExitCode,
+		ServiceSpecificExitCode: native.ServiceSpecificExitCode,
+	}, nil
+}
+
+func windowsServiceWaitError(
+	cause error,
+	serviceName string,
+	want svc.State,
+	status svc.Status,
+	elapsed time.Duration,
+) error {
+	elapsed = elapsed.Round(100 * time.Millisecond)
+	if status.State == svc.StopPending && want == svc.Stopped {
+		stage := windowsShutdownStageFromCheckpoint(status.CheckPoint)
+		return fmt.Errorf(
+			"Windows service %s remained StopPending for %s: last checkpoint=%d wait hint=%dms current cleanup stage=%q; endpoint lease cleanup may still be pending: %w",
+			serviceName, elapsed, status.CheckPoint, status.WaitHint, stage, cause,
+		)
+	}
+	return fmt.Errorf(
+		"Windows service %s remained %s for %s while waiting for %s: last checkpoint=%d wait hint=%dms: %w",
+		serviceName, windowsServiceStateName(status.State), elapsed,
+		windowsServiceStateName(want), status.CheckPoint, status.WaitHint, cause,
+	)
+}
+
+func windowsServiceStateName(state svc.State) string {
+	switch state {
+	case svc.Stopped:
+		return "Stopped"
+	case svc.StartPending:
+		return "StartPending"
+	case svc.StopPending:
+		return "StopPending"
+	case svc.Running:
+		return "Running"
+	case svc.ContinuePending:
+		return "ContinuePending"
+	case svc.PausePending:
+		return "PausePending"
+	case svc.Paused:
+		return "Paused"
+	default:
+		return fmt.Sprintf("state(%d)", state)
 	}
 }
 
