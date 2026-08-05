@@ -115,6 +115,7 @@ $fixtureRoot = Join-Path $env:ProgramData "wg-quic\ci\$TunnelName"
 $runtimeDirectory = Join-Path $fixtureRoot "bin"
 $configDirectory = Join-Path $env:ProgramData "wg-quic\interfaces"
 $configPath = Join-Path $configDirectory "$TunnelName.conf"
+$staleConfigPath = Join-Path $configDirectory "$TunnelName-stale.conf"
 $core = Join-Path $runtimeDirectory "wg-quic.exe"
 $quick = Join-Path $runtimeDirectory "wg-quic-quick.exe"
 $octet = 20 + ($PID % 200)
@@ -161,6 +162,7 @@ Endpoint = ${endpointAddress}:$endpointPort
 PersistentKeepalive = 1
 "@
     Set-Content -LiteralPath $configPath -Value $configuration -Encoding ascii
+    Set-Content -LiteralPath $staleConfigPath -Value $configuration -Encoding ascii
 
     Write-Host (Invoke-Native -FilePath $quick -Arguments @("check", $configPath))
     Write-Host (Invoke-Native -FilePath $quick -Arguments @("up", $TunnelName))
@@ -274,6 +276,31 @@ PersistentKeepalive = 1
     }
     if ([int] $status.listen_port -ne $listenPort) {
         throw "runtime listen port $($status.listen_port), expected $listenPort"
+    }
+
+    $discoveredStatuses = @(
+        (Invoke-Native -FilePath $core -Arguments @("show", "--json")) |
+            ConvertFrom-Json
+    )
+    $discoveredTunnel = @(
+        $discoveredStatuses | Where-Object {
+            $_.interface -eq $TunnelName -and
+            $_.state -eq "up" -and
+            [int] $_.listen_port -eq $listenPort
+        }
+    )
+    if ($discoveredTunnel.Count -ne 1) {
+        throw (
+            "parameterless wg-quic show did not discover exactly one active " +
+            "tunnel named ${TunnelName}: " +
+            ($discoveredStatuses | ConvertTo-Json -Depth 8)
+        )
+    }
+    if ($discoveredStatuses.Count -ne 1) {
+        throw (
+            "parameterless wg-quic show included a stopped configured tunnel: " +
+            ($discoveredStatuses | ConvertTo-Json -Depth 8)
+        )
     }
 
     $address = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 `
@@ -417,5 +444,6 @@ finally {
         Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
 
     Remove-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $staleConfigPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

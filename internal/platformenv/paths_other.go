@@ -13,3 +13,7 @@ func (Paths) ControlPath(string) string {
 func (Paths) ConfigPath(string) string {
 	return ""
 }
+
+func (Paths) ControlPaths() ([]string, error) {
+	return nil, ErrUnsupported
+}

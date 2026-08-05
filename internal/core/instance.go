@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	runtimemetrics "runtime/metrics"
 	"sync"
@@ -88,6 +89,12 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 	transportConfig, err := buildTransportConfiguration(cfg)
 	if err != nil {
 		return nil, err
+	}
+	transportConfig.Bind.Eventf = func(format string, args ...any) {
+		log.Printf(
+			"wg-quic transport %s: "+format,
+			append([]any{name}, args...)...,
+		)
 	}
 	if debug {
 		transportLogger := device.NewLogger(device.LogLevelVerbose, fmt.Sprintf("(%s/transport) ", name))
@@ -267,10 +274,19 @@ func (i *Instance) status() control.Status {
 		state = "up"
 	}
 	i.mu.Unlock()
+	runtimePeers, _ := wgdevice.PeerStatuses(i.device)
 	i.endpointMu.RLock()
 	peers := make([]control.PeerStatus, 0, len(i.peerOrder))
 	for _, publicKey := range i.peerOrder {
 		peer := i.peers[publicKey].status
+		if runtime, ok := runtimePeers[publicKey]; ok {
+			if runtime.Endpoint != "" {
+				peer.Endpoint = runtime.Endpoint
+			}
+			peer.LatestHandshake = runtime.LatestHandshake
+			peer.TransferRx = runtime.TransferRx
+			peer.TransferTx = runtime.TransferTx
+		}
 		peer.Session = string(armorbind.EndpointSessionIdle)
 		if endpoint, err := peerendpoint.ParseNumeric(peer.Endpoint); err == nil {
 			peer.Session = string(i.bind.EndpointSessionState(endpoint))

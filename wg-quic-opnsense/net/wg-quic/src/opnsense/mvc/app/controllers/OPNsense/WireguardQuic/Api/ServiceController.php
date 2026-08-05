@@ -68,9 +68,8 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $record['type'] === 'peer'
                 && in_array($record['peer-status'] ?? '', ['online', 'stale', 'offline'])
             ) {
-                // wg-quic exposes QUIC session state directly. Per-peer
-                // WireGuard handshake timestamps are not yet part of its
-                // control schema.
+                // wg-quic combines current QUIC session state with each
+                // peer's WireGuard handshake timestamp.
             } elseif ($record['type'] === 'peer' && !is_null($record['latest-handshake-age'])) {
                 $record['peer-status'] = $record['latest-handshake-age'] <= 300
                     ? 'online'

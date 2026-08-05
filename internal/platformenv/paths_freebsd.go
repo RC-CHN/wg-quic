@@ -4,7 +4,9 @@ package platformenv
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"sort"
 )
 
 var interfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_=+.-]{1,15}$`)
@@ -22,4 +24,10 @@ func (Paths) ControlPath(name string) string {
 
 func (Paths) ConfigPath(name string) string {
 	return "/usr/local/etc/wg-quic/" + name + ".conf"
+}
+
+func (Paths) ControlPaths() ([]string, error) {
+	paths, err := filepath.Glob("/var/run/wg-quic/*.sock")
+	sort.Strings(paths)
+	return paths, err
 }

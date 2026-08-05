@@ -58,6 +58,28 @@ pkg add -f "${package_file}"
 pkg info os-wg-quic
 pkg check -s os-wg-quic
 
+echo "== WebUI log routing =="
+test -f \
+    /usr/local/opnsense/service/templates/OPNsense/Syslog/local/wireguardquic.conf
+logger -t wg-quic "wg-quic QEMU WebUI log routing probe"
+attempt=0
+while [ "${attempt}" -lt 30 ]; do
+    if find /var/log/wireguardquic -name '*.log' -type f -size +0c \
+        2>/dev/null | grep -q .; then
+        break
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+/usr/local/opnsense/scripts/syslog/queryLog.py \
+    --limit 10 \
+    --offset 0 \
+    --module core \
+    --filename wireguardquic \
+    > /tmp/wg-quic-webui-log.json
+grep -q 'wg-quic QEMU WebUI log routing probe' \
+    /tmp/wg-quic-webui-log.json
+
 echo "== installed PHP syntax =="
 find /usr/local/opnsense/mvc/app/controllers/OPNsense/WireguardQuic \
      /usr/local/opnsense/mvc/app/models/OPNsense/WireguardQuic \

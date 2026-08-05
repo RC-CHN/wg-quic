@@ -4,6 +4,7 @@
 
 import json
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -158,14 +159,30 @@ for interface, records in sorted(configured.items()):
     for peer_record in records["peers"]:
         peer = runtime_peers.get(peer_record["public-key"], {})
         session = peer.get("session", "idle")
+        latest_handshake = peer.get("latest_handshake", 0)
         peer_record["session"] = session
-        peer_record["peer-status"] = {
-            "established": "online",
-            "dialing": "stale",
-        }.get(session, "offline")
+        peer_record["latest-handshake"] = latest_handshake
+        peer_record["transfer-tx"] = peer.get("transfer_tx", 0)
+        peer_record["transfer-rx"] = peer.get("transfer_rx", 0)
+        if session == "established":
+            peer_record["peer-status"] = "online"
+        elif session == "dialing":
+            peer_record["peer-status"] = "stale"
+        elif latest_handshake:
+            age = max(0, int(time.time()) - int(latest_handshake))
+            peer_record["peer-status"] = (
+                "online" if age <= 300 else "stale"
+            )
+        else:
+            peer_record["peer-status"] = "offline"
         if peer.get("endpoint"):
             peer_record["endpoint"] = peer["endpoint"]
-        if single_peer and status:
+        if (
+            single_peer
+            and status
+            and not peer_record["transfer-tx"]
+            and not peer_record["transfer-rx"]
+        ):
             stats = status.get("stats", {})
             peer_record["transfer-tx"] = stats.get("wg_tx_bytes", 0)
             peer_record["transfer-rx"] = stats.get("wg_rx_bytes", 0)

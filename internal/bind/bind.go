@@ -31,6 +31,7 @@ type Config struct {
 	FECFlushDeadline time.Duration
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
+	Eventf           func(format string, args ...any)
 	Debugf           func(format string, args ...any)
 }
 
@@ -153,6 +154,12 @@ func New(cfg Config) *Bind {
 func (b *Bind) debugf(format string, args ...any) {
 	if b.cfg.Debugf != nil {
 		b.cfg.Debugf(format, args...)
+	}
+}
+
+func (b *Bind) eventf(format string, args ...any) {
+	if b.cfg.Eventf != nil {
+		b.cfg.Eventf(format, args...)
 	}
 }
 
@@ -335,24 +342,29 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 		return EndpointSessionIdle
 	}
 	state.mu.Lock()
-	ep := state.endpoints[endpoint]
+	sessions := make([]*session, 0, 1)
+	for _, candidate := range state.sessions {
+		remote := candidate.endpoint.addr
+		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
+		if remote == endpoint {
+			sessions = append(sessions, candidate)
+		}
+	}
 	state.mu.Unlock()
-	if ep == nil {
-		return EndpointSessionIdle
+	result := EndpointSessionIdle
+	for _, session := range sessions {
+		if session.closed.Load() {
+			continue
+		}
+		session.mu.Lock()
+		established := session.conn != nil
+		session.mu.Unlock()
+		if established {
+			return EndpointSessionEstablished
+		}
+		result = EndpointSessionDialing
 	}
-	ep.mu.Lock()
-	session := ep.session
-	ep.mu.Unlock()
-	if session == nil || session.closed.Load() {
-		return EndpointSessionIdle
-	}
-	session.mu.Lock()
-	established := session.conn != nil
-	session.mu.Unlock()
-	if established {
-		return EndpointSessionEstablished
-	}
-	return EndpointSessionDialing
+	return result
 }
 
 func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
@@ -576,7 +588,7 @@ func (b *Bind) acceptLoop(state *runState) {
 		sess := b.newSession(state, ep)
 		ep.session = sess
 		sess.setConn(qconn)
-		b.debugf("accepted QUIC session: session=%d remote=%s", sess.id, remote)
+		b.eventf("accepted QUIC session: session=%d remote=%s", sess.id, remote)
 		state.wg.Add(1)
 		go func() { defer state.wg.Done(); b.runSession(sess) }()
 	}
@@ -626,12 +638,12 @@ func (b *Bind) dialSession(sess *session) {
 	defer cancel()
 	qconn, err := sess.state.carrier.Dial(ctx, sess.endpoint.addr)
 	if err != nil {
-		b.debugf("QUIC dial failed: session=%d remote=%s error=%v", sess.id, sess.endpoint.addr, err)
+		b.eventf("QUIC dial failed: session=%d remote=%s error=%v", sess.id, sess.endpoint.addr, err)
 		sess.close()
 		return
 	}
 	sess.setConn(qconn)
-	b.debugf("QUIC session established: session=%d remote=%s", sess.id, sess.endpoint.addr)
+	b.eventf("QUIC session established: session=%d remote=%s", sess.id, sess.endpoint.addr)
 	b.runSession(sess)
 }
 
@@ -689,7 +701,7 @@ func (s *session) close() {
 			s.endpoint.session = nil
 		}
 		s.endpoint.mu.Unlock()
-		s.endpoint.owner.debugf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
+		s.endpoint.owner.eventf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
 	})
 }
 

@@ -26,10 +26,13 @@ type Status struct {
 }
 
 type PeerStatus struct {
-	PublicKey  string `json:"public_key"`
-	Endpoint   string `json:"endpoint,omitempty"`
-	Generation uint64 `json:"generation"`
-	Session    string `json:"session"`
+	PublicKey       string `json:"public_key"`
+	Endpoint        string `json:"endpoint,omitempty"`
+	Generation      uint64 `json:"generation"`
+	Session         string `json:"session"`
+	LatestHandshake int64  `json:"latest_handshake,omitempty"`
+	TransferRx      uint64 `json:"transfer_rx,omitempty"`
+	TransferTx      uint64 `json:"transfer_tx,omitempty"`
 }
 
 type SetPeerEndpointRequest struct {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/platformenv"
@@ -21,9 +21,8 @@ func Show(name string, jsonOutput bool) error {
 		}
 		paths = []string{host.ControlPath(name)}
 	} else {
-		pattern := filepath.Join(filepath.Dir(host.ControlPath("placeholder")), "*.sock")
 		var err error
-		paths, err = filepath.Glob(pattern)
+		paths, err = host.ControlPaths()
 		if err != nil {
 			return err
 		}
@@ -33,12 +32,26 @@ func Show(name string, jsonOutput bool) error {
 		}
 	}
 	statuses := make([]control.Status, 0, len(paths))
+	readErrors := make([]error, 0)
 	for _, path := range paths {
 		status, err := control.Read(path)
 		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			if name != "" {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			readErrors = append(readErrors, fmt.Errorf("%s: %w", path, err))
+			continue
 		}
 		statuses = append(statuses, status)
+	}
+	if len(statuses) == 0 {
+		if len(readErrors) != 0 {
+			return fmt.Errorf(
+				"no running wg-quic interfaces: %w",
+				errors.Join(readErrors...),
+			)
+		}
+		return errors.New("no running wg-quic interfaces")
 	}
 	if jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
@@ -63,6 +76,24 @@ func Show(name string, jsonOutput bool) error {
 			status.Stats.WGTxPackets, status.Stats.WGTxBytes, status.Stats.WGRxPackets, status.Stats.WGRxBytes)
 		fmt.Printf("  FEC: parity %d, raw lost %d, recovered %d, unrecovered %d\n",
 			status.Stats.FECParityTx, status.Stats.FECRawLost, status.Stats.FECRecovered, status.Stats.FECUnrecovered)
+		for _, peer := range status.Peers {
+			fmt.Printf("  peer: %s\n", peer.PublicKey)
+			if peer.Endpoint != "" {
+				fmt.Printf("    endpoint: %s\n", peer.Endpoint)
+			}
+			fmt.Printf("    session: %s\n", peer.Session)
+			if peer.LatestHandshake != 0 {
+				fmt.Printf(
+					"    latest handshake: %s\n",
+					time.Unix(peer.LatestHandshake, 0).Format(time.RFC3339),
+				)
+			}
+			fmt.Printf(
+				"    transfer: tx %d bytes, rx %d bytes\n",
+				peer.TransferTx,
+				peer.TransferRx,
+			)
+		}
 	}
 	return nil
 }

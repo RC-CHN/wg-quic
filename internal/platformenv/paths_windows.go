@@ -30,3 +30,22 @@ func (Paths) ConfigPath(name string) string {
 	}
 	return filepath.Join(root, "wg-quic", "interfaces", name+".conf")
 }
+
+func (paths Paths) ControlPaths() ([]string, error) {
+	configPattern := filepath.Join(
+		filepath.Dir(paths.ConfigPath("placeholder")),
+		"*.conf",
+	)
+	configs, err := filepath.Glob(configPattern)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(configs))
+	for _, config := range configs {
+		name := strings.TrimSuffix(filepath.Base(config), filepath.Ext(config))
+		if paths.ValidateInterfaceName(name) == nil {
+			result = append(result, paths.ControlPath(name))
+		}
+	}
+	return result, nil
+}

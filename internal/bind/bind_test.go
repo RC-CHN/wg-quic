@@ -67,7 +67,9 @@ func TestBindRejectsZeroEndpointPort(t *testing.T) {
 func TestBindRoundTripAndClose(t *testing.T) {
 	var debug bytes.Buffer
 	configA := DefaultConfig()
-	configA.Debugf = log.New(&debug, "", 0).Printf
+	logger := log.New(&debug, "", 0).Printf
+	configA.Debugf = logger
+	configA.Eventf = logger
 	a, b := New(configA), New(DefaultConfig())
 	aReceive, _, err := a.Open(0)
 	if err != nil {
@@ -90,6 +92,9 @@ func TestBindRoundTripAndClose(t *testing.T) {
 	got, source := receiveOne(t, bReceive[0])
 	if !bytes.Equal(got, payload) {
 		t.Fatal("payload changed in transit")
+	}
+	if state := b.EndpointSessionState(source.(*Endpoint).addr); state != EndpointSessionEstablished {
+		t.Fatalf("accepted endpoint session state = %q, want established", state)
 	}
 	if state := a.EndpointSessionState(aToB.(*Endpoint).addr); state != EndpointSessionEstablished {
 		t.Fatalf("outbound endpoint session state = %q, want established", state)
