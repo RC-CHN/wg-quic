@@ -22,25 +22,30 @@ type queueEntry struct {
 }
 
 type sendQueue struct {
-	queue       chan queueEntry
-	closeCalled chan struct{} // runStopped when Close() is called
-	runStopped  chan struct{} // runStopped when the run loop returns
-	available   chan struct{}
-	conn        sendConn
+	queue             chan queueEntry
+	closeCalled       chan struct{} // runStopped when Close() is called
+	runStopped        chan struct{} // runStopped when the run loop returns
+	available         chan struct{}
+	conn              sendConn
+	onPathMTUTooLarge func(protocol.ByteCount)
 }
 
 var _ sender = &sendQueue{}
 
 const sendQueueCapacity = 8
 
-func newSendQueue(conn sendConn) sender {
-	return &sendQueue{
+func newSendQueue(conn sendConn, callbacks ...func(protocol.ByteCount)) sender {
+	q := &sendQueue{
 		conn:        conn,
 		runStopped:  make(chan struct{}),
 		closeCalled: make(chan struct{}),
 		available:   make(chan struct{}, 1),
 		queue:       make(chan queueEntry, sendQueueCapacity),
 	}
+	if len(callbacks) > 0 {
+		q.onPathMTUTooLarge = callbacks[0]
+	}
+	return q
 }
 
 // Send sends out a packet. It's guaranteed to not block.
@@ -94,6 +99,13 @@ func (h *sendQueue) Run() error {
 				// 3. Eventual detection of loss PingFrame.
 				if !isSendMsgSizeErr(err) {
 					return err
+				}
+				if h.onPathMTUTooLarge != nil {
+					size := protocol.ByteCount(len(e.buf.Data))
+					if e.gsoSize > 0 {
+						size = protocol.ByteCount(e.gsoSize)
+					}
+					h.onPathMTUTooLarge(size)
 				}
 			}
 			e.buf.Release()

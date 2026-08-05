@@ -23,6 +23,7 @@ import (
 )
 
 const alpn = "wg-quic/1"
+const initialPacketSize = 1200
 
 type Config struct {
 	HandshakeTimeout time.Duration
@@ -216,6 +217,7 @@ func quicConfig(cfg Config) *quicgo.Config {
 		MaxIdleTimeout: cfg.MaxIdleTimeout, KeepAlivePeriod: cfg.KeepAlivePeriod,
 		MaxIncomingStreams: -1, MaxIncomingUniStreams: -1,
 		CongestionControl: cfg.CongestionMode,
+		InitialPacketSize: initialPacketSize,
 	}
 }
 

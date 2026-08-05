@@ -173,6 +173,7 @@ type Conn struct {
 
 	notifyReceivedPacket chan struct{}
 	sendingScheduled     chan struct{}
+	pathMTUTooLarge      chan protocol.ByteCount
 	receivedPacketMx     sync.Mutex
 	receivedPackets      ringbuffer.RingBuffer[receivedPacket]
 
@@ -514,7 +515,8 @@ func (c *Conn) preSetup() {
 	c.largestRcvdAppData = protocol.InvalidPacketNumber
 	c.initialStream = newInitialCryptoStream(c.perspective == protocol.PerspectiveClient)
 	c.handshakeStream = newCryptoStream()
-	c.sendQueue = newSendQueue(c.conn)
+	c.pathMTUTooLarge = make(chan protocol.ByteCount, 1)
+	c.sendQueue = newSendQueue(c.conn, c.notifyPathMTUTooLarge)
 	c.retransmissionQueue = newRetransmissionQueue()
 	c.frameParser = *wire.NewFrameParser(
 		c.config.EnableDatagrams,
@@ -607,6 +609,8 @@ runLoop:
 		select {
 		case <-c.closeChan:
 			break runLoop
+		case failedSize := <-c.pathMTUTooLarge:
+			c.handlePathMTUTooLarge(failedSize, monotime.Now())
 		default:
 		}
 
@@ -661,6 +665,8 @@ runLoop:
 			case <-c.timer.C:
 			case <-c.sendingScheduled:
 			case <-sendQueueAvailable:
+			case failedSize := <-c.pathMTUTooLarge:
+				c.handlePathMTUTooLarge(failedSize, monotime.Now())
 			case <-c.notifyReceivedPacket:
 				wasProcessed, err := c.handlePackets()
 				if err != nil {
@@ -980,12 +986,32 @@ func (c *Conn) switchToNewPath(tr *Transport, now monotime.Time) {
 	c.mtuDiscoverer.Reset(now, initialPacketSize, maxPacketSize)
 	c.conn = newSendConn(tr.conn, c.conn.RemoteAddr(), packetInfo{}, utils.DefaultLogger) // TODO: find a better way
 	c.sendQueue.Close()
-	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue = newSendQueue(c.conn, c.notifyPathMTUTooLarge)
 	go func() {
 		if err := c.sendQueue.Run(); err != nil {
 			c.destroyImpl(err)
 		}
 	}()
+}
+
+func (c *Conn) notifyPathMTUTooLarge(size protocol.ByteCount) {
+	select {
+	case c.pathMTUTooLarge <- size:
+	default:
+	}
+}
+
+func (c *Conn) handlePathMTUTooLarge(failedSize protocol.ByteCount, now monotime.Time) {
+	minPacketSize := protocol.ByteCount(protocol.MinInitialPacketSize)
+	c.maxPayloadSizeEstimate.Store(uint32(estimateMaxPayloadSize(minPacketSize)))
+	c.sentPacketHandler.SetMaxDatagramSize(minPacketSize)
+	if c.mtuDiscoverer == nil || failedSize <= minPacketSize {
+		return
+	}
+	c.mtuDiscoverer.Reset(now, minPacketSize, failedSize-1)
+	if c.qlogger != nil {
+		c.qlogger.RecordEvent(qlog.MTUUpdated{Value: int(minPacketSize), Done: false})
+	}
 }
 
 func (c *Conn) handleHandshakeComplete(now monotime.Time) error {

@@ -116,8 +116,10 @@ $compose exec -T a ip link set dev wg0 mtu 1380
 $compose exec -T b ip link set dev wg0 mtu 1380
 
 # Exercise the real carrier under loss. Unit tests deterministically prove
-# single-shard recovery; this verifies that the FEC path remains usable through
-# QUIC, Linux TUN devices, and netem together.
+# single-shard recovery; this verifies that the FEC path emits protected data
+# and remains usable through QUIC, Linux TUN devices, and random netem loss.
+# Don't require a recovery counter here: a finite random sample can drop only
+# parity shards or multiple shards from a block.
 $compose exec -T b tc qdisc replace dev eth0 root netem loss 10%
 $compose exec -T a ping -c 50 -i 0.02 -W 2 10.77.0.2
 $compose exec -T b tc qdisc del dev eth0 root
@@ -167,9 +169,11 @@ if [ -z "$wg_tx" ] || [ "$wg_tx" -eq 0 ] || [ -z "$wg_rx" ] || [ "$wg_rx" -eq 0 
 	echo "WireGuard status counters did not account for bidirectional traffic" >&2
 	exit 1
 fi
-recovered=$(echo "$status" | sed -n 's/.*"fec_recovered": \([0-9][0-9]*\).*/\1/p')
-if [ -z "$recovered" ] || [ "$recovered" -eq 0 ]; then
-	echo "FEC status did not report a recovered shard" >&2
+fec_data_tx=$(echo "$status" | sed -n 's/.*"fec_data_tx": \([0-9][0-9]*\).*/\1/p')
+fec_parity_tx=$(echo "$status" | sed -n 's/.*"fec_parity_tx": \([0-9][0-9]*\).*/\1/p')
+if [ -z "$fec_data_tx" ] || [ "$fec_data_tx" -eq 0 ] ||
+	[ -z "$fec_parity_tx" ] || [ "$fec_parity_tx" -eq 0 ]; then
+	echo "FEC status did not report protected data and parity traffic" >&2
 	exit 1
 fi
 

@@ -1,7 +1,6 @@
 package congestion
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/quic-go/quic-go/internal/monotime"
@@ -191,9 +190,6 @@ func (m *modelSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 }
 
 func (m *modelSender) SetMaxDatagramSize(size protocol.ByteCount) {
-	if size < m.maxDatagramSize {
-		panic(fmt.Sprintf("congestion BUG: decreased max datagram size from %d to %d", m.maxDatagramSize, size))
-	}
 	wasMinimum := m.congestionWindow == m.minCongestionWindow()
 	m.maxDatagramSize = size
 	if wasMinimum {

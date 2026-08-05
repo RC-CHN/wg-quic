@@ -16,10 +16,12 @@ plugin_dir="${project_dir}/net/wg-quic"
 plugin_version=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' \
     "${plugin_dir}/Makefile")
 manifest_file=$(mktemp /tmp/wg-quic-manifest.XXXXXX)
-trap 'rm -f -- "${manifest_file}"' EXIT HUP INT TERM
+payload_dir=$(mktemp -d /tmp/wg-quic-payload.XXXXXX)
+trap 'rm -f -- "${manifest_file}"; rm -rf -- "${payload_dir}"' EXIT HUP INT TERM
 
 test -f "${package}"
 tar -xOf "${package}" +MANIFEST > "${manifest_file}"
+tar -xf "${package}" -C "${payload_dir}"
 
 test "$(jq -r '.name' "${manifest_file}")" = "os-wg-quic"
 test "$(jq -r '.version' "${manifest_file}")" = "${plugin_version}"
@@ -38,8 +40,15 @@ find "${plugin_dir}/src" -type f | sort |
         source_hash=$(sha256sum "${source_file}" | cut -d' ' -f1)
         package_hash=$(jq -r --arg path "${package_path}" \
             '.files[$path] // empty' "${manifest_file}")
-        if [ "${package_hash}" != "1\$${source_hash}" ]; then
+        payload_file="${payload_dir}${package_path}"
+        if [ -z "${package_hash}" ] || [ "${package_hash}" = "-" ] ||
+            [ ! -f "${payload_file}" ]; then
             echo "${package}: stale or missing ${package_path}" >&2
+            exit 1
+        fi
+        payload_hash=$(sha256sum "${payload_file}" | cut -d' ' -f1)
+        if [ "${payload_hash}" != "${source_hash}" ]; then
+            echo "${package}: stale content in ${package_path}" >&2
             exit 1
         fi
     done
