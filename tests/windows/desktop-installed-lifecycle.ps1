@@ -69,24 +69,29 @@ $installedConfig = Join-Path (
 $serviceName = "wg-quic-quick@$tunnelName"
 $stdoutPath = Join-Path $fixtureRoot "desktop.stdout.log"
 $stderrPath = Join-Path $fixtureRoot "desktop.stderr.log"
+$msiLogPath = Join-Path $fixtureRoot "msiexec.log"
 $desktop = $null
 $quick = $null
 $installed = $false
 
 try {
     New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
+    Write-Host "installing $installerPath"
     $install = Start-Process -FilePath "msiexec.exe" `
         -ArgumentList @(
             "/i",
             "`"$installerPath`"",
             "/qn",
-            "/norestart"
+            "/norestart",
+            "/l*v",
+            "`"$msiLogPath`""
         ) `
         -Wait -PassThru
     if ($install.ExitCode -notin @(0, 3010)) {
         throw "MSI installer exited with code $($install.ExitCode)"
     }
     $installed = $true
+    Write-Host "MSI installation completed"
 
     Wait-For -Description "the installed MSI application" -Condition {
         $quickItem = Get-ChildItem -LiteralPath $installRoot `
@@ -110,18 +115,21 @@ try {
             (Test-Path -LiteralPath $script:quick -PathType Leaf)
         )
     }
+    Write-Host "desktop=$desktop"
+    Write-Host "quick=$quick"
 
     $unsafeSids = @("S-1-5-32-545", "S-1-5-11", "S-1-1-0")
     foreach ($protectedExecutable in @($desktop, $quick)) {
         $executableAcl = Get-Acl -LiteralPath $protectedExecutable
         $unsafeRule = @(
-            $executableAcl.Access |
+            $executableAcl.GetAccessRules(
+                $true,
+                $true,
+                [Security.Principal.SecurityIdentifier]
+            ) |
             Where-Object {
-                $sid = $_.IdentityReference.Translate(
-                    [Security.Principal.SecurityIdentifier]
-                ).Value
                 $_.AccessControlType -eq "Allow" -and
-                $sid -in $unsafeSids -and
+                $_.IdentityReference.Value -in $unsafeSids -and
                 (
                     $_.FileSystemRights.ToString() -match (
                         "Write|Modify|FullControl|Delete|TakeOwnership|" +
@@ -134,6 +142,7 @@ try {
             throw "$protectedExecutable is writable by unelevated users"
         }
     }
+    Write-Host "installed executable ACLs are protected"
 
     $core = Join-Path (Split-Path -Parent $quick) "wg-quic.exe"
     $privateKey = Invoke-Native -FilePath $core -Arguments @("genkey")
@@ -231,6 +240,18 @@ PersistentKeepalive = 1
         }
     $installed = $false
     Write-Host "installed Windows desktop lifecycle passed"
+}
+catch {
+    $failure = $_
+    Write-Warning "installed Windows desktop lifecycle failed: $failure"
+    foreach ($diagnosticPath in @($stdoutPath, $stderrPath, $msiLogPath)) {
+        if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+            Write-Host "last lines from $diagnosticPath"
+            Get-Content -LiteralPath $diagnosticPath -Tail 120 |
+                Write-Host
+        }
+    }
+    throw $failure
 }
 finally {
     Remove-Item Env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE `
