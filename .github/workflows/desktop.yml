@@ -61,6 +61,16 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
+      - name: Install pinned WiX Toolset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version=3.14.0 --yes --no-progress
+          $wixBin = Join-Path ${env:ProgramFiles(x86)} "WiX Toolset v3.14\bin"
+          if (-not (Test-Path -LiteralPath $wixBin -PathType Container)) {
+            throw "missing pinned WiX Toolset directory $wixBin"
+          }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Audit desktop dependencies
         working-directory: desktop
         run: npm audit
@@ -84,6 +94,18 @@ jobs:
         if: runner.os != 'Linux'
         working-directory: desktop
         run: npm run smoke:app
+      - name: Install and exercise Windows desktop lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem `
+            ./desktop/out/make/wix/x64/*.msi |
+            Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "missing WiX MSI"
+          }
+          ./tests/windows/desktop-installed-lifecycle.ps1 `
+            -Installer $installer.FullName
       - name: Install Linux desktop package
         if: runner.os == 'Linux'
         working-directory: desktop

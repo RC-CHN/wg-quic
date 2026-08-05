@@ -28,9 +28,6 @@
     "name": "RC-CHN"
   },
   "license": "GPL-3.0-only",
-  "dependencies": {
-    "electron-squirrel-startup": "^1.0.1"
-  },
   "overrides": {
     "tar": "7.5.22",
     "tmp": "0.2.7",
@@ -40,14 +37,13 @@
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/maker-deb": "7.11.2",
-    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-wix": "7.11.2",
     "@electron-forge/maker-zip": "7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
     "@electron-forge/plugin-fuses": "7.11.2",
     "@electron-forge/plugin-webpack": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
     "@electron/fuses": "^1.8.0",
-    "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "^22.0.0",
     "css-loader": "^7.1.2",
     "electron": "43.2.0",

@@ -14,10 +14,11 @@ module-cache or `references/` copy.
 The broadest exercised runtime is currently Linux. The FreeBSD data plane and
 `wg-quic-quick` host-policy layer are also QEMU-validated through the OPNsense
 plugin on FreeBSD 14 and 15, and an rc.d service script is included. Windows
-now has a CLI-only Wintun, host-network, Named Pipe, and per-tunnel SCM
-implementation; hosted CI now validates its privileged Wintun, LocalSystem
-service, address, MTU, DNS, route, status, and cleanup lifecycle. All platforms
-share the same userspace WireGuard, QUIC, FEC,
+has a Wintun, host-network, Named Pipe, and per-tunnel SCM implementation with
+an Electron desktop shell; hosted CI validates the installed UI's UAC
+boundary plus its privileged Wintun, LocalSystem service, address, MTU, DNS,
+route, status, and cleanup lifecycle. All platforms share the same userspace
+WireGuard, QUIC, FEC,
 obfuscation, and configuration core.
 
 The command boundary mirrors WireGuard's daemon/`wg-quick` split:
@@ -141,10 +142,11 @@ sudo wg-quic-quick up wg0
 sudo wg-quic-quick down wg0
 ```
 
-Windows remains CLI-only and preserves the same two-program boundary:
+Windows preserves the same two-program boundary:
 `wg-quic.exe` owns the Wintun data plane, while `wg-quic-quick.exe` owns host
-policy and a per-tunnel Windows service. Put profiles under
-`%ProgramData%\wg-quic\interfaces\` and run from an elevated terminal:
+`%ProgramData%\wg-quic\interfaces\`. The desktop prompts through a narrow UAC
+helper for imports and lifecycle changes; the equivalent elevated-terminal
+commands are:
 
 ```powershell
 wg-quic-quick.exe check wg0
@@ -156,11 +158,16 @@ wg-quic-quick.exe down wg0 --repair
 ```
 
 The quick service runs as LocalSystem, supervises a separate sibling
-`wg-quic.exe`, and reports readiness through an Administrators/System-only
-Named Pipe using the same JSON request/response control protocol as Unix
-sockets. Shutdown uses bounded cleanup contexts, reports SCM checkpoints and
-wait hints for the current cleanup stage, and contains the core in a Windows
-Job Object. Normal `down` never force-terminates the service. The explicit
+`wg-quic.exe`, and exposes an Administrators/System-only control Named Pipe
+plus a separate local status-only pipe using the same JSON request/response
+protocol as Unix sockets. Desktop-started services use an ACL-restricted,
+content-addressed native runtime under `%ProgramData%\wg-quic\runtime`, rather
+than the installer's replaceable application directory. The desktop itself is
+installed per-machine under ACL-protected Program Files by a WiX MSI. Shutdown
+uses bounded
+cleanup contexts, reports SCM checkpoints and wait hints for the current
+cleanup stage, and contains the core in a Windows Job Object. Normal `down`
+never force-terminates the service. The explicit
 `down --repair` path gives it a final graceful-stop window, may terminate only
 that tunnel's stuck service process, then removes the exact named residual
 Wintun adapter and reconciles only dead, provably managed route leases. Routes

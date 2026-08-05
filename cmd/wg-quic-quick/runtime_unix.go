@@ -23,3 +23,7 @@ func runQuick(ctx context.Context, input, name string) error {
 func runQuickDebug(context.Context, string, string) error {
 	return errors.New("wg-quic-quick debug is currently supported on Windows")
 }
+
+func runDesktopHelper(context.Context) error {
+	return errors.New("wg-quic-quick desktop helper is only supported on Windows")
+}

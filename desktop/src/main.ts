@@ -10,7 +10,6 @@ import {
   shell,
   Tray,
 } from 'electron';
-import started from 'electron-squirrel-startup';
 import {
   checkTunnel,
   configDirectory,
@@ -21,16 +20,18 @@ import {
 } from './cli';
 import type { TunnelAction } from './types';
 
-if (started) {
-  app.quit();
-}
-
 app.enableSandbox();
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.rc-chn.wg-quic.desktop');
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
-const smokeMode = process.env.WG_QUIC_DESKTOP_SMOKE === '1';
+const rendererSmokeMode = process.env.WG_QUIC_DESKTOP_SMOKE === '1';
+const integrationSmokeMode =
+  process.env.WG_QUIC_DESKTOP_INTEGRATION_SMOKE === '1';
+const smokeMode = rendererSmokeMode || integrationSmokeMode;
 
 const trayIconSVG = `
   <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
@@ -171,7 +172,7 @@ function createTray(): void {
   tray.on('double-click', showMainWindow);
 }
 
-async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
+async function waitForSmokeWindow(window: BrowserWindow): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const state = (await window.webContents.executeJavaScript(`
       ({
@@ -195,13 +196,63 @@ async function verifySmokeWindow(window: BrowserWindow): Promise<void> {
       state.hasImportButton &&
       state.hasToggleButton
     ) {
-      console.log('wg-quic desktop renderer smoke test passed');
-      app.exit(0);
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('desktop renderer did not become ready within 10 seconds');
+}
+
+async function verifyIntegrationSmoke(): Promise<void> {
+  const source = process.env.WG_QUIC_DESKTOP_SMOKE_CONFIG;
+  const expectedName = process.env.WG_QUIC_DESKTOP_SMOKE_NAME;
+  if (!source || !expectedName) {
+    throw new Error(
+      'desktop integration smoke requires a configuration path and tunnel name',
+    );
+  }
+  const importedName = await importConfig(source, false);
+  if (importedName !== expectedName) {
+    throw new Error(
+      `desktop imported ${JSON.stringify(importedName)} instead of ${JSON.stringify(expectedName)}`,
+    );
+  }
+
+  let active = false;
+  try {
+    await manageTunnel(importedName, 'up');
+    active = true;
+    const running = await snapshot();
+    const tunnel = running.tunnels.find(
+      (candidate) => candidate.name === importedName,
+    );
+    if (
+      !tunnel?.running ||
+      tunnel.status?.interface !== importedName ||
+      tunnel.status.state !== 'up'
+    ) {
+      throw new Error(
+        `desktop did not observe the active tunnel: ${JSON.stringify(tunnel)}`,
+      );
+    }
+  } finally {
+    if (active) {
+      await manageTunnel(importedName, 'down');
+    }
+  }
+
+  const stopped = await snapshot();
+  const tunnel = stopped.tunnels.find(
+    (candidate) => candidate.name === importedName,
+  );
+  if (!tunnel || tunnel.running) {
+    throw new Error(
+      `desktop did not observe the stopped tunnel: ${JSON.stringify(tunnel)}`,
+    );
+  }
+  console.log(
+    'wg-quic installed desktop import/UAC/service/status lifecycle passed',
+  );
 }
 
 async function createWindow(): Promise<void> {
@@ -248,7 +299,13 @@ async function createWindow(): Promise<void> {
   });
   await mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
   if (smokeMode) {
-    await verifySmokeWindow(mainWindow);
+    await waitForSmokeWindow(mainWindow);
+    if (integrationSmokeMode) {
+      await verifyIntegrationSmoke();
+    } else {
+      console.log('wg-quic desktop renderer smoke test passed');
+    }
+    app.exit(0);
   }
 }
 

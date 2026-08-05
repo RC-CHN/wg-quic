@@ -96,6 +96,41 @@ func StartHandler(ctx context.Context, path string, handler Handler) (*Server, e
 	if err != nil {
 		return nil, err
 	}
+	return startHandler(ctx, listener, cleanup, handler), nil
+}
+
+// StartReadOnlyStatus exposes a second, status-only endpoint on platforms
+// where the primary control endpoint is restricted to privileged callers.
+// The transport decides whether a separate endpoint is required.
+func StartReadOnlyStatus(
+	ctx context.Context,
+	path string,
+	status func() Status,
+) (*Server, error) {
+	if status == nil {
+		return nil, errors.New("status provider is required")
+	}
+	listener, cleanup, err := listenReadOnlyStatus(path)
+	if err != nil {
+		return nil, err
+	}
+	if listener == nil {
+		return nil, nil
+	}
+	return startHandler(
+		ctx,
+		listener,
+		cleanup,
+		Handler{Status: status},
+	), nil
+}
+
+func startHandler(
+	ctx context.Context,
+	listener net.Listener,
+	cleanup func() error,
+	handler Handler,
+) *Server {
 	server := &Server{
 		listener: listener,
 		done:     make(chan struct{}),
@@ -110,7 +145,7 @@ func StartHandler(ctx context.Context, path string, handler Handler) (*Server, e
 		case <-server.done:
 		}
 	}()
-	return server, nil
+	return server
 }
 
 func (s *Server) accept(handler Handler) {
@@ -195,8 +230,20 @@ func Read(path string) (Status, error) {
 
 func (c *LocalClient) Status() (Status, error) {
 	var resp response
-	if err := c.call(request{Operation: "status"}, &resp); err != nil {
-		return Status{}, err
+	err := c.callAt(c.path, request{Operation: "status"}, &resp)
+	if err != nil {
+		fallback := readOnlyStatusPath(c.path)
+		if fallback == "" {
+			return Status{}, err
+		}
+		resp = response{}
+		if fallbackErr := c.callAt(
+			fallback,
+			request{Operation: "status"},
+			&resp,
+		); fallbackErr != nil {
+			return Status{}, errors.Join(err, fallbackErr)
+		}
 	}
 	if resp.Status == nil {
 		return Status{}, errors.New("control response did not include status")
@@ -228,7 +275,15 @@ func (c *LocalClient) Activate() error {
 }
 
 func (c *LocalClient) call(req request, resp *response) error {
-	connection, err := dial(c.path, 2*time.Second)
+	return c.callAt(c.path, req, resp)
+}
+
+func (c *LocalClient) callAt(
+	path string,
+	req request,
+	resp *response,
+) error {
+	connection, err := dial(path, 2*time.Second)
 	if err != nil {
 		return err
 	}

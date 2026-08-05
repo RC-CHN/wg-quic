@@ -70,9 +70,13 @@ func startWindowsService(ctx context.Context, name string) error {
 	} else if !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return err
 	}
-	executable, err := os.Executable()
+	sourceExecutable, err := os.Executable()
 	if err != nil {
 		return err
+	}
+	executable, err := prepareWindowsServiceRuntime(sourceExecutable)
+	if err != nil {
+		return fmt.Errorf("prepare Windows service runtime: %w", err)
 	}
 	service, err = manager.CreateService(serviceName, executable, mgr.Config{
 		ServiceType:  windows.SERVICE_WIN32_OWN_PROCESS,

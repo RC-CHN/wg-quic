@@ -29,6 +29,7 @@ try {
     run([
       '--test',
       path.join(outputDir, 'src', 'paths.test.js'),
+      path.join(outputDir, 'src', 'windows-elevation.test.js'),
       path.join(outputDir, 'src', 'view-model.test.js'),
       path.join(scriptDir, 'release-artifacts.test.mjs'),
     ])

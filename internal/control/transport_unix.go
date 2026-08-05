@@ -47,3 +47,13 @@ func dial(path string, timeout time.Duration) (net.Conn, error) {
 	dialer := net.Dialer{Timeout: timeout}
 	return dialer.Dial("unix", path)
 }
+
+func listenReadOnlyStatus(
+	string,
+) (net.Listener, func() error, error) {
+	return nil, nil, nil
+}
+
+func readOnlyStatusPath(string) string {
+	return ""
+}

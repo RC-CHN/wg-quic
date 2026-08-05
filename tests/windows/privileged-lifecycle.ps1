@@ -193,6 +193,37 @@ PersistentKeepalive = 1
     if ($serviceInfo.StartName -ne "LocalSystem") {
         throw "Windows service account is $($serviceInfo.StartName), expected LocalSystem"
     }
+    $serviceExecutable = if ($serviceInfo.PathName -match '^"([^"]+)"') {
+        $Matches[1]
+    }
+    elseif ($serviceInfo.PathName -match '^(\S+)') {
+        $Matches[1]
+    }
+    else {
+        throw "cannot parse Windows service path $($serviceInfo.PathName)"
+    }
+    $runtimeRoot = Join-Path $env:ProgramData "wg-quic\runtime"
+    if (-not $serviceExecutable.StartsWith(
+        "$runtimeRoot\",
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw (
+            "Windows service executable $serviceExecutable is not staged " +
+            "under $runtimeRoot"
+        )
+    }
+    foreach ($runtimeFile in @(
+        "wg-quic.exe",
+        "wg-quic-quick.exe",
+        "wintun.dll"
+    )) {
+        $runtimePath = Join-Path (
+            Split-Path -Parent $serviceExecutable
+        ) $runtimeFile
+        if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+            throw "stable Windows service runtime is missing $runtimePath"
+        }
+    }
 
     $ledgerPath = Join-Path $env:ProgramData "wg-quic\state\routes-v1.json"
     Wait-ForAll -Checks @(

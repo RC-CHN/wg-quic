@@ -18,13 +18,11 @@ test('collects and renames the Windows installer', () => {
     const output = path.join(root, 'release');
     fixture(
       source,
-      'squirrel.windows/x64/wg_quic-0.1.2 Setup.exe',
-      Buffer.from('MZinstaller'),
-    );
-    fixture(
-      source,
-      'squirrel.windows/x64/wg_quic-0.1.2-full.nupkg',
-      Buffer.from('PKpackage'),
+      'wix/x64/wg-quic.msi',
+      Buffer.concat([
+        Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+        Buffer.from('installer'),
+      ]),
     );
 
     const artifacts = collectReleaseArtifacts({
@@ -35,7 +33,7 @@ test('collects and renames the Windows installer', () => {
     });
 
     assert.deepEqual(artifacts, [
-      path.join(output, 'wg-quic-desktop-v0.1.2-windows-x64-setup.exe'),
+      path.join(output, 'wg-quic-desktop-v0.1.2-windows-x64.msi'),
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -78,8 +76,8 @@ test('rejects ambiguous installer output', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'wg-quic-release-'));
   try {
     const source = path.join(root, 'make');
-    fixture(source, 'one Setup.exe', Buffer.from('MZone'));
-    fixture(source, 'two Setup.exe', Buffer.from('MZtwo'));
+    fixture(source, 'one.msi', Buffer.from('one'));
+    fixture(source, 'two.msi', Buffer.from('two'));
 
     assert.throws(
       () =>
@@ -89,7 +87,7 @@ test('rejects ambiguous installer output', () => {
           outputDirectory: path.join(root, 'release'),
           version: '0.1.2',
         }),
-      /expected exactly one Squirrel Setup\.exe, found 2/,
+      /expected exactly one WiX MSI, found 2/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

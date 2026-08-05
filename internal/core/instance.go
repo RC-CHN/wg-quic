@@ -43,6 +43,7 @@ type Instance struct {
 	prepared      bool
 	up            bool
 	controlServer *control.Server
+	statusServer  *control.Server
 	closeOnce     sync.Once
 	closeErr      error
 }
@@ -159,10 +160,15 @@ func (i *Instance) Up(ctx context.Context) error {
 	}
 	if err := i.activateLocked(); err != nil {
 		server := i.controlServer
+		statusServer := i.statusServer
 		i.controlServer = nil
+		i.statusServer = nil
 		i.prepared = false
 		if server != nil {
 			_ = server.Close()
+		}
+		if statusServer != nil {
+			_ = statusServer.Close()
 		}
 		return err
 	}
@@ -191,7 +197,17 @@ func (i *Instance) prepareLocked(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("start local control socket: %w", err)
 	}
+	statusServer, err := control.StartReadOnlyStatus(
+		ctx,
+		i.controlPath,
+		i.status,
+	)
+	if err != nil {
+		_ = server.Close()
+		return fmt.Errorf("start read-only status socket: %w", err)
+	}
 	i.controlServer = server
+	i.statusServer = statusServer
 	i.prepared = true
 	return nil
 }
@@ -234,12 +250,20 @@ func (i *Instance) Close() error {
 	i.closeOnce.Do(func() {
 		i.mu.Lock()
 		server := i.controlServer
+		statusServer := i.statusServer
 		i.controlServer = nil
+		i.statusServer = nil
 		i.prepared = false
 		i.up = false
 		i.mu.Unlock()
 		if server != nil {
 			i.closeErr = server.Close()
+		}
+		if statusServer != nil {
+			i.closeErr = errors.Join(
+				i.closeErr,
+				statusServer.Close(),
+			)
 		}
 		i.endpointMu.Lock()
 		for _, peer := range i.peers {

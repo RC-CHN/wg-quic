@@ -58,17 +58,17 @@ export function collectReleaseArtifacts({
   if (platform === 'windows') {
     const installer = findExactlyOne(
       files,
-      (file) => file.toLowerCase().endsWith(' setup.exe'),
-      'Squirrel Setup.exe',
+      (file) => file.toLowerCase().endsWith('.msi'),
+      'WiX MSI',
     );
     return [
       copyArtifact(
         installer,
         path.join(
           outputDirectory,
-          `wg-quic-desktop-v${version}-windows-x64-setup.exe`,
+          `wg-quic-desktop-v${version}-windows-x64.msi`,
         ),
-        Buffer.from('MZ'),
+        Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
         'Windows installer',
       ),
     ];

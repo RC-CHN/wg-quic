@@ -24,6 +24,8 @@ if (!executable) {
 const configDirectory = mkdtempSync(
   path.join(tmpdir(), 'wg-quic-desktop-smoke-'),
 );
+const integrationSmoke =
+  process.env.WG_QUIC_DESKTOP_INTEGRATION_SMOKE === '1';
 let output = '';
 
 try {
@@ -32,8 +34,12 @@ try {
     env: {
       ...process.env,
       ELECTRON_ENABLE_LOGGING: '1',
-      WG_QUIC_CONFIG_DIR: configDirectory,
-      WG_QUIC_DESKTOP_SMOKE: '1',
+      ...(integrationSmoke
+        ? {}
+        : {
+            WG_QUIC_CONFIG_DIR: configDirectory,
+            WG_QUIC_DESKTOP_SMOKE: '1',
+          }),
     },
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -51,8 +57,12 @@ try {
   const exitCode = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error('packaged desktop app did not exit within 20 seconds'));
-    }, 20_000);
+      reject(
+        new Error(
+          `packaged desktop app did not exit within ${integrationSmoke ? 180 : 20} seconds`,
+        ),
+      );
+    }, integrationSmoke ? 180_000 : 20_000);
     child.once('error', (error) => {
       clearTimeout(timeout);
       reject(error);
@@ -73,7 +83,11 @@ try {
 
   if (
     exitCode !== 0 ||
-    !output.includes('wg-quic desktop renderer smoke test passed')
+    !output.includes(
+      integrationSmoke
+        ? 'wg-quic installed desktop import/UAC/service/status lifecycle passed'
+        : 'wg-quic desktop renderer smoke test passed',
+    )
   ) {
     throw new Error(
       `packaged desktop app smoke test failed (exit ${exitCode})\n${output}`,

@@ -52,6 +52,10 @@ func runQuickDebug(ctx context.Context, input, name string) error {
 	return err
 }
 
+func runDesktopHelper(ctx context.Context) error {
+	return quick.RunWindowsDesktopHelper(ctx)
+}
+
 type lockedWriter struct {
 	mu     sync.Mutex
 	writer io.Writer

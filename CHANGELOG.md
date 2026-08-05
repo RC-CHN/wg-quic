@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Windows desktop imports and tunnel controls by delegating only the
+  privileged operation to a narrow UAC helper while leaving Electron
+  unelevated.
+- Replaced the per-user Squirrel package with a per-machine WiX MSI so the
+  elevation helper is installed under ACL-protected Program Files.
+- Added a local status-only Named Pipe so the desktop can display live tunnel
+  state without opening mutating control operations to unelevated callers.
+- Staged Windows service binaries in an ACL-restricted, content-addressed
+  ProgramData runtime so desktop upgrades and UI removal cannot invalidate an
+  installed tunnel service.
+- Added a Windows CI lifecycle that installs the generated MSI,
+  drives import/start/status/stop through the desktop, and uninstalls it.
+
 ## v0.1.2 - 2026-08-05
 
 Degraded-link control, applications, and Windows lifecycle hardening release.

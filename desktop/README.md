@@ -18,9 +18,13 @@ command API.
 
 ## Development
 
-Node.js 22 LTS (22.12 or newer) and Go are used by the current build:
+Node.js 22 LTS (22.12 or newer) and Go are used by the current build. Creating
+the Windows MSI also requires WiX Toolset 3.14:
 
 ```sh
+# Windows, from an Administrator shell:
+choco install wixtoolset --version=3.14.0
+
 cd desktop
 npm ci
 npm run check
@@ -78,17 +82,33 @@ and exits. On headless Linux, run it through
 `xvfb-run --auto-servernum npm run smoke:app`.
 
 CI installs the generated Linux Deb before the renderer smoke so Chromium uses
-the package's root-owned setuid sandbox helper. The Windows job additionally
-runs `tests/windows/privileged-lifecycle.ps1` against the bundled executables,
-covering a real LocalSystem service, Wintun, host network policy, status, and
-teardown.
+the package's root-owned setuid sandbox helper. The Windows job runs both
+`tests/windows/privileged-lifecycle.ps1` against the bundled executables and
+`tests/windows/desktop-installed-lifecycle.ps1` against the generated
+per-machine WiX MSI. Together they cover installation, UI-driven import and
+UAC consent, a real LocalSystem service, Wintun, host network policy,
+unprivileged status, teardown, and uninstall.
 
 ## Privileges and platform boundary
 
-The desktop shell does not add a privileged desktop daemon. `up`, `down`, and
-system-directory imports consequently have exactly the same permissions as
-running `wg-quic-quick` in a terminal. A denied operation is reported by the
-UI with the original CLI error.
+The desktop shell does not run Electron itself as Administrator and does not
+add a second tunnel implementation. On Windows, validation, system-directory
+imports, and tunnel start/stop are delegated to the narrow
+`wg-quic-quick desktop-helper` command after a UAC consent prompt. Request
+values are inherited as data rather than interpolated into PowerShell, and the
+helper reports through a one-use local Named Pipe. Runtime status uses a
+separate local status-only pipe; mutating core control remains restricted to
+LocalSystem and Administrators.
+
+Before a Windows tunnel service is created, the native core, quick helper, and
+Wintun DLL are copied into an ACL-restricted, content-addressed runtime under
+`%ProgramData%\wg-quic\runtime`. The MSI installs the UI and elevation helper
+under ACL-protected Program Files, so an unelevated process cannot replace the
+helper before a UAC operation. A running service never points into the
+installer's versioned application directory and remains restartable across
+desktop upgrades. Configuration and staged runtime data are preserved on
+desktop uninstall so uninstalling the UI cannot silently destroy an active
+tunnel.
 
 The desktop package intentionally targets only Windows and Linux, matching the
 platforms with native `wg-quic-quick` host integration.

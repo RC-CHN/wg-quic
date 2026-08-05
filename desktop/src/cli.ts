@@ -14,6 +14,7 @@ import {
   isSupportedPlatform,
   isValidInterfaceName,
 } from './paths';
+import { runWindowsElevated } from './windows-elevation';
 import type {
   BackendInfo,
   CoreStatus,
@@ -197,6 +198,12 @@ async function requireProfile(name: string): Promise<string> {
 
 export async function checkTunnel(name: string): Promise<string> {
   const configPath = await requireProfile(name);
+  if (process.platform === 'win32') {
+    return runWindowsElevated(
+      bundledBinary('wg-quic-quick'),
+      { action: 'check', name },
+    );
+  }
   return run(bundledBinary('wg-quic-quick'), ['check', configPath]);
 }
 
@@ -207,6 +214,13 @@ export async function manageTunnel(
   await requireProfile(name);
   if (action !== 'up' && action !== 'down') {
     throw new Error(`unsupported tunnel action ${JSON.stringify(action)}`);
+  }
+  if (process.platform === 'win32') {
+    await runWindowsElevated(
+      bundledBinary('wg-quic-quick'),
+      { action, name },
+    );
+    return;
   }
   await run(bundledBinary('wg-quic-quick'), [action, name], 40_000);
 }
@@ -222,6 +236,19 @@ export async function importConfig(
   validateName(name);
   await run(bundledBinary('wg-quic-quick'), ['check', sourcePath]);
 
+  if (process.platform === 'win32') {
+    await runWindowsElevated(
+      bundledBinary('wg-quic-quick'),
+      {
+        action: 'import',
+        name,
+        source: sourcePath,
+        overwrite,
+      },
+    );
+    return name;
+  }
+
   const directory = configDirectory();
   const destination = path.join(directory, `${name}.conf`);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -230,9 +257,7 @@ export async function importConfig(
     destination,
     overwrite ? 0 : constants.COPYFILE_EXCL,
   );
-  if (process.platform !== 'win32') {
-    await chmod(destination, 0o600);
-  }
+  await chmod(destination, 0o600);
   return name;
 }
 

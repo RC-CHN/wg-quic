@@ -23,6 +23,13 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "desktop-helper":
+		if len(args) != 1 {
+			return usage()
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		return runDesktopHelper(ctx)
 	case "run", "debug":
 		input, name, err := parseQuickRunArgs(args[1:])
 		if err != nil {
