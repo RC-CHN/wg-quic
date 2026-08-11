@@ -115,7 +115,17 @@ func (s pipeAddress) String() string {
 }
 
 // tryDialPipe attempts to dial the specified pipe until cancellation or timeout.
-func tryDialPipe(ctx context.Context, path *string) (windows.Handle, error) {
+func tryDialPipe(
+	ctx context.Context,
+	path *string,
+	impersonationLevel uint32,
+	desiredAccess uint32,
+) (windows.Handle, error) {
+	securityQoS, err := dialSecurityQualityOfService(impersonationLevel)
+	if err != nil {
+		return 0, err
+	}
+	desiredAccess = dialDesiredAccess(desiredAccess)
 	for {
 		select {
 		case <-ctx.Done():
@@ -125,7 +135,7 @@ func tryDialPipe(ctx context.Context, path *string) (windows.Handle, error) {
 			if err != nil {
 				return 0, err
 			}
-			h, err := windows.CreateFile(path16, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.SECURITY_SQOS_PRESENT|windows.SECURITY_ANONYMOUS, 0)
+			h, err := windows.CreateFile(path16, desiredAccess, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|securityQoS, 0)
 			if err == nil {
 				return h, nil
 			}
@@ -139,9 +149,40 @@ func tryDialPipe(ctx context.Context, path *string) (windows.Handle, error) {
 	}
 }
 
+func dialDesiredAccess(desiredAccess uint32) uint32 {
+	if desiredAccess == 0 {
+		return windows.GENERIC_READ | windows.GENERIC_WRITE
+	}
+	return desiredAccess
+}
+
+func dialSecurityQualityOfService(impersonationLevel uint32) (uint32, error) {
+	switch impersonationLevel {
+	case windows.SECURITY_ANONYMOUS,
+		windows.SECURITY_IDENTIFICATION,
+		windows.SECURITY_IMPERSONATION,
+		windows.SECURITY_DELEGATION:
+		return windows.SECURITY_SQOS_PRESENT | impersonationLevel, nil
+	default:
+		return 0, windows.ERROR_INVALID_PARAMETER
+	}
+}
+
 // DialConfig exposes various options for use in Dial and DialContext.
 type DialConfig struct {
 	ExpectedOwner *windows.SID // If non-nil, the pipe is verified to be owned by this SID.
+
+	// DesiredAccess is the exact access mask requested when opening the client
+	// end. Zero preserves the historical GENERIC_READ|GENERIC_WRITE behavior.
+	// Privilege-boundary protocols should use a specific mask: named-pipe
+	// GENERIC_WRITE includes FILE_CREATE_PIPE_INSTANCE.
+	DesiredAccess uint32
+
+	// ImpersonationLevel controls the security quality of service advertised to
+	// the pipe server. It must be one of the windows.SECURITY_* impersonation
+	// constants. The zero value is windows.SECURITY_ANONYMOUS, preserving the
+	// historical behavior of DialTimeout and DialContext.
+	ImpersonationLevel uint32
 }
 
 // DialTimeout connects to the specified named pipe by path, timing out if the
@@ -152,7 +193,8 @@ func (config *DialConfig) DialTimeout(path string, timeout time.Duration) (net.C
 		timeout = time.Second * 2
 	}
 	absTimeout := time.Now().Add(timeout)
-	ctx, _ := context.WithDeadline(context.Background(), absTimeout)
+	ctx, cancel := context.WithDeadline(context.Background(), absTimeout)
+	defer cancel()
 	conn, err := config.DialContext(ctx, path)
 	if err == context.DeadlineExceeded {
 		return nil, os.ErrDeadlineExceeded
@@ -164,7 +206,9 @@ func (config *DialConfig) DialTimeout(path string, timeout time.Duration) (net.C
 func (config *DialConfig) DialContext(ctx context.Context, path string) (net.Conn, error) {
 	var err error
 	var h windows.Handle
-	h, err = tryDialPipe(ctx, &path)
+	h, err = tryDialPipe(
+		ctx, &path, config.ImpersonationLevel, config.DesiredAccess,
+	)
 	if err != nil {
 		return nil, err
 	}

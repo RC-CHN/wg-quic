@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,13 +21,21 @@ func commandContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-func runQuick(ctx context.Context, input, name string) error {
+func runQuick(
+	ctx context.Context,
+	input,
+	name string,
+	brokerSafe bool,
+) error {
 	isService, err := svc.IsWindowsService()
 	if err != nil {
 		return err
 	}
 	if isService {
-		return quick.RunWindowsService(input, name)
+		return quick.RunWindowsService(input, name, brokerSafe)
+	}
+	if brokerSafe {
+		return fmt.Errorf("--broker-safe is only valid for an installed Windows service")
 	}
 	return quick.Run(ctx, input, name)
 }
@@ -67,6 +76,19 @@ func runDesktopClient(
 		request.source,
 		request.overwrite,
 	)
+}
+
+func runManagementService() error {
+	return quick.RunWindowsManagementService()
+}
+
+func runDesktopBrokerStatus(ctx context.Context) (string, error) {
+	status := quick.QueryWindowsDesktopBrokerStatus(ctx)
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		return "", fmt.Errorf("encode desktop broker status: %w", err)
+	}
+	return string(encoded), nil
 }
 
 type lockedWriter struct {

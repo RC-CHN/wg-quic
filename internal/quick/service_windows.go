@@ -18,7 +18,11 @@ const (
 	windowsServiceWaitHint               = 5 * time.Second
 )
 
-func RunWindowsService(input, requestedName string) error {
+func RunWindowsService(
+	input,
+	requestedName string,
+	brokerSafe bool,
+) error {
 	_, name, err := ResolveConfig(input, requestedName, platform.Current())
 	if err != nil {
 		return err
@@ -29,9 +33,13 @@ func RunWindowsService(input, requestedName string) error {
 			ready func(),
 			shutdownProgress func(string),
 		) error {
-			return runWithHostReadyProgress(
+			var policy quickConfigPolicy
+			if brokerSafe {
+				policy = validateWindowsManagementHookFreeConfig
+			}
+			return runWithHostReadyProgressPolicy(
 				ctx, input, name, platform.Current(), newCoreProcess,
-				ready, shutdownProgress,
+				ready, shutdownProgress, policy,
 			)
 		},
 	})

@@ -3,10 +3,12 @@
 package quick
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +67,7 @@ func TestWindowsDesktopRequestAndResultShareDuplexPipe(t *testing.T) {
 
 	wantRequest := windowsDesktopRequest{
 		Action: "import", Name: "office",
-		Source: `C:\\Users\\me\\office.conf`, Overwrite: true,
+		Config: []byte("[Interface]\nPrivateKey = key\n"), Overwrite: true,
 	}
 	resultChannel := make(chan windowsDesktopResult, 1)
 	errorChannel := make(chan error, 1)
@@ -82,7 +84,7 @@ func TestWindowsDesktopRequestAndResultShareDuplexPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotRequest != wantRequest {
+	if !reflect.DeepEqual(gotRequest, wantRequest) {
 		t.Fatalf("desktop request = %#v, want %#v", gotRequest, wantRequest)
 	}
 	wantResult := windowsDesktopResult{Success: true, Message: "completed"}
@@ -109,13 +111,13 @@ func TestWindowsDesktopRequestAndResultShareDuplexConnection(t *testing.T) {
 
 	wantRequest := windowsDesktopRequest{
 		Action: "import", Name: "office",
-		Source: `C:\\Users\\me\\office.conf`, Overwrite: true,
+		Config: []byte("[Interface]\nPrivateKey = key\n"), Overwrite: true,
 	}
 	wantResult := windowsDesktopResult{Success: true, Message: "completed"}
 	helperResult := make(chan error, 1)
 	go func() {
 		gotRequest, err := readWindowsDesktopRequest(helper)
-		if err == nil && gotRequest != wantRequest {
+		if err == nil && !reflect.DeepEqual(gotRequest, wantRequest) {
 			err = fmt.Errorf(
 				"desktop request = %#v, want %#v", gotRequest, wantRequest,
 			)
@@ -135,6 +137,44 @@ func TestWindowsDesktopRequestAndResultShareDuplexConnection(t *testing.T) {
 	}
 	if err := <-helperResult; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWindowsElevatedImportRequestCarriesBytesNotSourcePath(t *testing.T) {
+	request := windowsDesktopRequest{
+		Action: "import",
+		Name:   "office",
+		Config: []byte("secret configuration bytes"),
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"source"`) ||
+		strings.Contains(string(encoded), `C:\\`) {
+		t.Fatalf("elevated import request contains a source path: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"config"`) {
+		t.Fatalf("elevated import request omitted configuration bytes: %s", encoded)
+	}
+}
+
+func TestWindowsDesktopRequestAcceptsMaximumConfigurationEnvelope(t *testing.T) {
+	request := windowsDesktopRequest{
+		Action: "import",
+		Name:   "large",
+		Config: bytes.Repeat([]byte{'x'}, maxWindowsDesktopConfigSize),
+	}
+	var encoded bytes.Buffer
+	if err := json.NewEncoder(&encoded).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := readWindowsDesktopRequest(&encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, request) {
+		t.Fatal("maximum desktop configuration request changed in transit")
 	}
 }
 

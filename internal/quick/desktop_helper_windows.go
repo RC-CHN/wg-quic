@@ -3,6 +3,7 @@
 package quick
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,12 +15,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/ipc/namedpipe"
 	"golang.org/x/sys/windows"
 )
 
-const maxWindowsDesktopConfigSize = 1024 * 1024
+const (
+	maxWindowsDesktopConfigSize   = 1024 * 1024
+	maxWindowsDesktopEnvelopeSize = 2*maxWindowsDesktopConfigSize + 64*1024
+)
 
 // RunWindowsDesktopHelper is the deliberately narrow elevated boundary used
 // by the desktop UI. Only a random local pipe name crosses the UAC command-line
@@ -72,7 +77,7 @@ func readWindowsDesktopRequest(
 ) (windowsDesktopRequest, error) {
 	limited := &io.LimitedReader{
 		R: connection,
-		N: maxWindowsDesktopConfigSize + 1,
+		N: maxWindowsDesktopEnvelopeSize + 1,
 	}
 	var request windowsDesktopRequest
 	if err := json.NewDecoder(limited).Decode(&request); err != nil {
@@ -82,7 +87,7 @@ func readWindowsDesktopRequest(
 	}
 	if limited.N == 0 {
 		return windowsDesktopRequest{}, errors.New(
-			"desktop helper request exceeded 1 MiB",
+			"desktop helper request exceeded its size limit",
 		)
 	}
 	return request, nil
@@ -155,8 +160,12 @@ func runWindowsDesktopHelper(
 	ctx context.Context,
 	request windowsDesktopRequest,
 ) error {
+	source := ""
+	if request.Action == "import" && len(request.Config) != 0 {
+		source = "config-bytes"
+	}
 	if err := validateWindowsDesktopRequest(
-		request.Action, request.Name, request.Source,
+		request.Action, request.Name, source,
 	); err != nil {
 		return err
 	}
@@ -165,19 +174,31 @@ func runWindowsDesktopHelper(
 			"desktop %s does not accept overwrite", request.Action,
 		)
 	}
+	if request.Action == "import" {
+		if err := validateWindowsDesktopConfigBytes(request.Config); err != nil {
+			return err
+		}
+	} else if len(request.Config) != 0 {
+		return fmt.Errorf(
+			"desktop %s does not accept configuration contents",
+			request.Action,
+		)
+	}
 
 	switch request.Action {
 	case "up", "down":
 		return Manage(ctx, request.Action, request.Name)
 	case "check":
-		return Check(request.Name)
-	case "import":
-		if err := Check(request.Source); err != nil {
-			return err
+		lease, _, err := openAndValidateWindowsStoredConfig(request.Name)
+		if lease != nil {
+			defer lease.Close()
 		}
-		return ImportDesktopConfig(
-			request.Source,
-			request.Name,
+		return err
+	case "import":
+		host := platform.Current()
+		return importWindowsDesktopConfigBytes(
+			request.Config,
+			host.ConfigPath(request.Name),
 			request.Overwrite,
 		)
 	default:
@@ -198,10 +219,33 @@ func ImportDesktopConfig(
 	if err := host.ValidateInterfaceName(name); err != nil {
 		return err
 	}
-	return importWindowsDesktopConfig(
-		source,
-		host.ConfigPath(name),
-		overwrite,
+	programData, err := windowsProgramDataPath()
+	if err != nil {
+		return err
+	}
+	destination := filepath.Join(
+		programData,
+		windowsWGQUICRootDirectory,
+		"interfaces",
+		name+".conf",
+	)
+	sourcePath, err := filepath.Abs(source)
+	if err != nil {
+		return fmt.Errorf("resolve desktop import source: %w", err)
+	}
+	destinationPath, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("resolve desktop import destination: %w", err)
+	}
+	if strings.EqualFold(sourcePath, destinationPath) {
+		return errors.New("desktop import source and destination are identical")
+	}
+	contents, err := readWindowsDesktopConfig(sourcePath)
+	if err != nil {
+		return err
+	}
+	return importWindowsDesktopConfigBytes(
+		contents, destinationPath, overwrite,
 	)
 }
 
@@ -220,53 +264,148 @@ func openWindowsDesktopPipe(path string) (net.Conn, error) {
 	return connection, nil
 }
 
-func importWindowsDesktopConfig(
-	source string,
-	destination string,
-	overwrite bool,
-) error {
-	sourcePath, err := filepath.Abs(source)
+func readWindowsDesktopConfig(sourcePath string) ([]byte, error) {
+	input, err := openWindowsReadOnlyNoFollowFile(sourcePath)
 	if err != nil {
-		return fmt.Errorf("resolve desktop import source: %w", err)
+		return nil, fmt.Errorf("open desktop import source: %w", err)
 	}
-	destinationPath, err := filepath.Abs(destination)
+	defer input.Close()
+	info, err := input.Stat()
 	if err != nil {
-		return fmt.Errorf("resolve desktop import destination: %w", err)
-	}
-	if strings.EqualFold(sourcePath, destinationPath) {
-		return errors.New("desktop import source and destination are identical")
-	}
-	info, err := os.Stat(sourcePath)
-	if err != nil {
-		return fmt.Errorf("inspect desktop import source: %w", err)
+		return nil, fmt.Errorf("inspect desktop import source: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("desktop import source must be a regular file")
+		return nil, errors.New("desktop import source must be a regular file")
 	}
 	if info.Size() > maxWindowsDesktopConfigSize {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"desktop import source is %d bytes; maximum is %d",
 			info.Size(),
 			maxWindowsDesktopConfigSize,
 		)
 	}
-
-	directory := filepath.Dir(destinationPath)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create desktop configuration directory: %w", err)
+	contents, err := io.ReadAll(io.LimitReader(
+		input, maxWindowsDesktopConfigSize+1,
+	))
+	if err != nil {
+		return nil, fmt.Errorf("read desktop import source: %w", err)
 	}
-	if err := protectWindowsDesktopConfigDirectory(directory); err != nil {
+	if len(contents) > maxWindowsDesktopConfigSize {
+		return nil, fmt.Errorf(
+			"desktop import source exceeded %d bytes while reading",
+			maxWindowsDesktopConfigSize,
+		)
+	}
+	return contents, nil
+}
+
+func validateWindowsDesktopConfigBytes(contents []byte) error {
+	if len(contents) == 0 {
+		return errors.New("desktop import configuration is empty")
+	}
+	if len(contents) > maxWindowsDesktopConfigSize {
+		return fmt.Errorf(
+			"desktop import configuration is %d bytes; maximum is %d",
+			len(contents), maxWindowsDesktopConfigSize,
+		)
+	}
+	cfg, err := config.Parse(bytes.NewReader(contents))
+	if err != nil {
 		return err
 	}
-	input, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("open desktop import source: %w", err)
-	}
-	defer input.Close()
+	return validateConfig(cfg)
+}
 
-	output, err := os.CreateTemp(
+// windowsStoredConfigLease pins the secure ProgramData directory chain and the
+// configuration itself without share-write or share-delete access. Callers can
+// retain it through service startup so the validated file cannot be swapped
+// between validation and the service reaching Running.
+type windowsStoredConfigLease struct {
+	directories *windowsSecurePathLease
+	file        *os.File
+	path        string
+}
+
+func (l *windowsStoredConfigLease) Close() error {
+	if l == nil {
+		return nil
+	}
+	var errs []error
+	if l.file != nil {
+		errs = append(errs, l.file.Close())
+		l.file = nil
+	}
+	if l.directories != nil {
+		errs = append(errs, l.directories.Close())
+		l.directories = nil
+	}
+	return errors.Join(errs...)
+}
+
+func openAndValidateWindowsStoredConfig(
+	name string,
+) (*windowsStoredConfigLease, *config.Config, error) {
+	if err := platform.Current().ValidateInterfaceName(name); err != nil {
+		return nil, nil, err
+	}
+	directory, directories, err := openWindowsSecureInterfacesDirectory()
+	if err != nil {
+		return nil, nil, err
+	}
+	lease := &windowsStoredConfigLease{
+		directories: directories,
+		path:        filepath.Join(directory, name+".conf"),
+	}
+	file, err := openWindowsSecureExistingFile(
+		lease.path,
+		"stored tunnel configuration",
+	)
+	if err != nil {
+		_ = lease.Close()
+		return nil, nil, fmt.Errorf("open stored tunnel configuration: %w", err)
+	}
+	lease.file = file
+	cfg, err := config.Parse(file)
+	if err != nil {
+		_ = lease.Close()
+		return nil, nil, err
+	}
+	if err := validateConfig(cfg); err != nil {
+		_ = lease.Close()
+		return nil, nil, err
+	}
+	return lease, cfg, nil
+}
+
+func importWindowsDesktopConfigBytes(
+	contents []byte,
+	destination string,
+	overwrite bool,
+) error {
+	if err := validateWindowsDesktopConfigBytes(contents); err != nil {
+		return err
+	}
+	destinationPath, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("resolve desktop import destination: %w", err)
+	}
+
+	directory, directoryLease, err := openWindowsSecureInterfacesDirectory()
+	if err != nil {
+		return err
+	}
+	defer directoryLease.Close()
+	if !strings.EqualFold(filepath.Clean(filepath.Dir(destinationPath)), directory) {
+		return fmt.Errorf(
+			"desktop import destination %q is outside the secured interfaces directory",
+			destinationPath,
+		)
+	}
+
+	output, err := createWindowsSecureTemporaryFile(
 		directory,
 		"."+filepath.Base(destinationPath)+".tmp-",
+		"temporary desktop configuration",
 	)
 	if err != nil {
 		return fmt.Errorf("create temporary desktop configuration: %w", err)
@@ -278,23 +417,16 @@ func importWindowsDesktopConfig(
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-	if err := output.Chmod(0o600); err != nil {
-		output.Close()
-		return fmt.Errorf("restrict temporary desktop configuration: %w", err)
-	}
-	copied, err := io.Copy(output, io.LimitReader(
-		input,
-		maxWindowsDesktopConfigSize+1,
-	))
+	copied, err := io.Copy(output, bytes.NewReader(contents))
 	if err != nil {
 		output.Close()
 		return fmt.Errorf("copy desktop configuration: %w", err)
 	}
-	if copied > maxWindowsDesktopConfigSize {
+	if copied != int64(len(contents)) {
 		output.Close()
 		return fmt.Errorf(
-			"desktop import source exceeded %d bytes while copying",
-			maxWindowsDesktopConfigSize,
+			"desktop import copied %d bytes; expected %d",
+			copied, len(contents),
 		)
 	}
 	if err := output.Sync(); err != nil {
@@ -304,8 +436,17 @@ func importWindowsDesktopConfig(
 	if err := output.Close(); err != nil {
 		return fmt.Errorf("close desktop configuration: %w", err)
 	}
-	if err := protectWindowsDesktopConfigFile(temporaryPath); err != nil {
-		return err
+	existing, err := openWindowsSecureExistingFile(
+		destinationPath,
+		"stored desktop configuration",
+	)
+	if err == nil {
+		if closeErr := existing.Close(); closeErr != nil {
+			return fmt.Errorf("close existing desktop configuration: %w", closeErr)
+		}
+	} else if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) &&
+		!errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return fmt.Errorf("inspect existing desktop configuration: %w", err)
 	}
 	if err := moveWindowsDesktopConfig(
 		temporaryPath,
@@ -315,6 +456,16 @@ func importWindowsDesktopConfig(
 		return err
 	}
 	keepTemporary = false
+	installed, err := openWindowsSecureExistingFile(
+		destinationPath,
+		"installed desktop configuration",
+	)
+	if err != nil {
+		return fmt.Errorf("verify installed desktop configuration: %w", err)
+	}
+	if err := installed.Close(); err != nil {
+		return fmt.Errorf("close installed desktop configuration: %w", err)
+	}
 	return nil
 }
 
@@ -342,55 +493,6 @@ func moveWindowsDesktopConfig(
 			return os.ErrExist
 		}
 		return fmt.Errorf("install desktop configuration: %w", err)
-	}
-	return nil
-}
-
-func protectWindowsDesktopConfigDirectory(path string) error {
-	return protectWindowsDesktopPath(
-		path,
-		"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;GRGX;;;BU)",
-		"configuration directory",
-	)
-}
-
-func protectWindowsDesktopConfigFile(path string) error {
-	return protectWindowsDesktopPath(
-		path,
-		"D:P(A;;FA;;;SY)(A;;FA;;;BA)",
-		"configuration file",
-	)
-}
-
-func protectWindowsDesktopPath(
-	path string,
-	sddl string,
-	description string,
-) error {
-	descriptor, err := windows.SecurityDescriptorFromString(sddl)
-	if err != nil {
-		return fmt.Errorf("create Windows desktop %s ACL: %w", description, err)
-	}
-	dacl, _, err := descriptor.DACL()
-	if err != nil {
-		return fmt.Errorf("read Windows desktop %s ACL: %w", description, err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		path,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|
-			windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		return fmt.Errorf(
-			"protect Windows desktop %s %q: %w",
-			description,
-			path,
-			err,
-		)
 	}
 	return nil
 }

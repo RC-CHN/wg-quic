@@ -23,6 +23,23 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "broker-service":
+		if len(args) != 1 {
+			return usage()
+		}
+		return runManagementService()
+	case "desktop-broker-status":
+		if len(args) != 1 {
+			return usage()
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		status, err := runDesktopBrokerStatus(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Println(status)
+		return nil
 	case "desktop-import":
 		name, source, overwrite, err := parseDesktopImportArgs(args[1:])
 		if err != nil {
@@ -53,16 +70,19 @@ func run(args []string) error {
 		defer stop()
 		return runDesktopHelper(ctx, pipePath)
 	case "run", "debug":
-		input, name, err := parseQuickRunArgs(args[1:])
+		input, name, brokerSafe, err := parseQuickRunArgs(args[1:])
 		if err != nil {
 			return usage()
 		}
 		ctx, stop := commandContext()
 		defer stop()
 		if args[0] == "debug" {
+			if brokerSafe {
+				return usage()
+			}
 			return runQuickDebug(ctx, input, name)
 		}
-		return runQuick(ctx, input, name)
+		return runQuick(ctx, input, name, brokerSafe)
 	case "check":
 		if len(args) != 2 {
 			return usage()
@@ -168,17 +188,31 @@ func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
 	return request, nil
 }
 
-func parseQuickRunArgs(args []string) (input, name string, err error) {
-	if len(args) != 1 && len(args) != 3 {
-		return "", "", errors.New("interface or configuration is required")
+func parseQuickRunArgs(
+	args []string,
+) (input, name string, brokerSafe bool, err error) {
+	if len(args) == 0 || args[0] == "" {
+		return "", "", false, errors.New(
+			"interface or configuration is required",
+		)
 	}
-	if len(args) == 3 {
-		if args[1] != "--name" || args[2] == "" {
-			return "", "", errors.New("invalid --name option")
+	input = args[0]
+	remaining := args[1:]
+	if len(remaining) >= 2 && remaining[0] == "--name" {
+		if remaining[1] == "" {
+			return "", "", false, errors.New("invalid --name option")
 		}
-		name = args[2]
+		name = remaining[1]
+		remaining = remaining[2:]
 	}
-	return args[0], name, nil
+	if len(remaining) == 1 && remaining[0] == "--broker-safe" {
+		brokerSafe = true
+		remaining = nil
+	}
+	if len(remaining) != 0 {
+		return "", "", false, errors.New("invalid run options")
+	}
+	return input, name, brokerSafe, nil
 }
 
 func parseQuickDownArgs(args []string) (name string, repair bool, err error) {

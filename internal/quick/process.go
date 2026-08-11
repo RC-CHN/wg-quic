@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 )
 
 type coreLaunch struct {
@@ -39,14 +38,17 @@ func coreCommand(executable string, launch coreLaunch) (*exec.Cmd, error) {
 func coreExecutable() (string, error) {
 	current, err := os.Executable()
 	if err == nil {
-		sibling := filepath.Join(filepath.Dir(current), coreExecutableName())
-		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
-			return sibling, nil
+		for _, candidate := range platformCoreExecutableCandidates(current) {
+			if platformValidateCoreExecutable(current, candidate) == nil {
+				return candidate, nil
+			}
 		}
 	}
-	path, err := exec.LookPath(coreExecutableName())
+	path, err := platformCoreExecutableFallback()
 	if err != nil {
-		return "", errors.New("cannot find the wg-quic core executable next to wg-quic-quick or in PATH")
+		return "", errors.New(
+			"cannot find a trusted wg-quic core executable next to wg-quic-quick",
+		)
 	}
 	return path, nil
 }

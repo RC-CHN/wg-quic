@@ -4,12 +4,12 @@ package quick
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/windows"
 )
 
 const windowsServiceRuntimeDirectory = "runtime"
@@ -19,16 +19,19 @@ type windowsRuntimeSource struct {
 	path string
 }
 
-// prepareWindowsServiceRuntime moves the service boundary out of an
-// updater-owned per-user application directory. Each distinct native bundle
-// gets an immutable content-addressed directory under ProgramData, so an
-// active tunnel remains restartable after a desktop update.
+// prepareWindowsServiceRuntime moves the tunnel service boundary out of an
+// updater-owned application directory. A fresh, unpredictable SYSTEM-owned
+// directory is created for every start. We intentionally do not reuse the old
+// predictable content-digest directory: an attacker could have pre-positioned
+// that pathname before an upgrade and retain a write handle after an ACL fix.
+// Old runtime directories remain in place so already-running tunnel services
+// survive desktop upgrades and uninstall operations.
 func prepareWindowsServiceRuntime(
 	quickExecutable string,
-) (string, error) {
+) (runtimeExecutable string, runtimeLease *windowsSecurePathLease, returnErr error) {
 	core, err := coreExecutable()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	sources := []windowsRuntimeSource{
 		{name: "wg-quic-quick.exe", path: quickExecutable},
@@ -38,187 +41,105 @@ func prepareWindowsServiceRuntime(
 			path: filepath.Join(filepath.Dir(core), "wintun.dll"),
 		},
 	}
-	digest, err := windowsRuntimeDigest(sources)
+
+	root, lease, err := openWindowsSecureRuntimeRoot()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	programData := os.Getenv("ProgramData")
-	if programData == "" {
-		programData = `C:\ProgramData`
-	}
-	root := filepath.Join(
-		programData,
-		"wg-quic",
-		windowsServiceRuntimeDirectory,
-	)
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", fmt.Errorf("create Windows service runtime root: %w", err)
-	}
-	if err := protectWindowsDesktopPath(
-		root,
-		"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"service runtime root",
-	); err != nil {
-		return "", err
-	}
-	target := filepath.Join(root, hex.EncodeToString(digest[:]))
-	if err := ensureWindowsRuntimeDirectory(target, sources); err != nil {
-		return "", err
-	}
-	return filepath.Join(target, "wg-quic-quick.exe"), nil
-}
-
-func windowsRuntimeDigest(
-	sources []windowsRuntimeSource,
-) ([sha256.Size]byte, error) {
-	hash := sha256.New()
-	for _, source := range sources {
-		if _, err := io.WriteString(hash, source.name+"\x00"); err != nil {
-			return [sha256.Size]byte{}, err
-		}
-		fileDigest, err := digestWindowsRuntimeFile(source.path)
-		if err != nil {
-			return [sha256.Size]byte{}, fmt.Errorf(
-				"hash Windows runtime source %s: %w",
-				source.name,
-				err,
-			)
-		}
-		if _, err := hash.Write(fileDigest[:]); err != nil {
-			return [sha256.Size]byte{}, err
-		}
-	}
-	var result [sha256.Size]byte
-	copy(result[:], hash.Sum(nil))
-	return result, nil
-}
-
-func ensureWindowsRuntimeDirectory(
-	target string,
-	sources []windowsRuntimeSource,
-) error {
-	if info, err := os.Stat(target); err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf(
-				"Windows service runtime target %q is not a directory",
-				target,
-			)
-		}
-		return verifyWindowsRuntimeDirectory(target, sources)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	temporary, err := os.MkdirTemp(
-		filepath.Dir(target),
-		"."+filepath.Base(target)+".tmp-",
-	)
-	if err != nil {
-		return fmt.Errorf("create temporary Windows service runtime: %w", err)
-	}
-	keepTemporary := true
+	target := ""
+	installed := false
 	defer func() {
-		if keepTemporary {
-			_ = os.RemoveAll(temporary)
+		if !installed {
+			_ = lease.Close()
+			if target != "" {
+				_ = removeWindowsTrustedRuntimeDirectory(target)
+			}
 		}
 	}()
-	for _, source := range sources {
-		destination := filepath.Join(temporary, source.name)
-		if err := copyWindowsRuntimeFile(source.path, destination); err != nil {
-			return err
-		}
-		if err := protectWindowsDesktopPath(
-			destination,
-			"D:P(A;;FA;;;SY)(A;;FA;;;BA)",
-			"service runtime file",
-		); err != nil {
-			return err
-		}
-	}
-	if err := protectWindowsDesktopPath(
-		temporary,
-		"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"service runtime directory",
-	); err != nil {
-		return err
-	}
-	if err := os.Rename(temporary, target); err != nil {
-		if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
-			return verifyWindowsRuntimeDirectory(target, sources)
-		}
-		return fmt.Errorf("install Windows service runtime: %w", err)
-	}
-	keepTemporary = false
-	return verifyWindowsRuntimeDirectory(target, sources)
-}
 
-func copyWindowsRuntimeFile(source string, destination string) error {
-	input, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := os.OpenFile(
-		destination,
-		os.O_CREATE|os.O_EXCL|os.O_WRONLY,
-		0o700,
+	target, targetHandle, err := createWindowsSecureChildDirectory(
+		root,
+		"run-",
 	)
 	if err != nil {
-		return err
+		return "", nil, fmt.Errorf("create secure Windows service runtime: %w", err)
 	}
-	_, copyErr := io.Copy(output, input)
-	syncErr := output.Sync()
-	closeErr := output.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
-}
+	lease.append(targetHandle)
 
-func verifyWindowsRuntimeDirectory(
-	target string,
-	sources []windowsRuntimeSource,
-) error {
 	for _, source := range sources {
-		sourceDigest, err := digestWindowsRuntimeFile(source.path)
-		if err != nil {
-			return err
-		}
-		targetPath := filepath.Join(target, source.name)
-		targetDigest, err := digestWindowsRuntimeFile(targetPath)
-		if err != nil {
-			return fmt.Errorf(
-				"verify Windows service runtime %s: %w",
+		destination := filepath.Join(target, source.name)
+		if err := copyWindowsRuntimeFileSecure(
+			source.path,
+			destination,
+		); err != nil {
+			return "", nil, fmt.Errorf(
+				"stage Windows service runtime %s: %w",
 				source.name,
 				err,
 			)
 		}
-		if sourceDigest != targetDigest {
-			return fmt.Errorf(
-				"Windows service runtime %s failed content verification",
-				source.name,
-			)
-		}
 	}
+	installed = true
+	return filepath.Join(target, "wg-quic-quick.exe"), lease, nil
+}
+
+func copyWindowsRuntimeFileSecure(
+	source string,
+	destination string,
+) (returnErr error) {
+	input, err := openWindowsReadOnlyNoFollowFile(source)
+	if err != nil {
+		return fmt.Errorf("open runtime source without following reparses: %w", err)
+	}
+	defer input.Close()
+
+	output, err := createWindowsSecureFile(
+		destination,
+		"service runtime file",
+	)
+	if err != nil {
+		return fmt.Errorf("create secure runtime destination: %w", err)
+	}
+	keepDestination := false
+	defer func() {
+		closeErr := output.Close()
+		if !keepDestination {
+			_ = os.Remove(destination)
+		}
+		if returnErr == nil && closeErr != nil {
+			returnErr = fmt.Errorf("close runtime destination: %w", closeErr)
+		}
+	}()
+
+	sourceHash := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(output, sourceHash), input); err != nil {
+		return fmt.Errorf("copy runtime file: %w", err)
+	}
+	if err := output.Sync(); err != nil {
+		return fmt.Errorf("flush runtime file: %w", err)
+	}
+	if _, err := output.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind runtime file for verification: %w", err)
+	}
+	targetHash := sha256.New()
+	if _, err := io.Copy(targetHash, output); err != nil {
+		return fmt.Errorf("verify runtime file: %w", err)
+	}
+	if string(sourceHash.Sum(nil)) != string(targetHash.Sum(nil)) {
+		return fmt.Errorf("runtime file failed content verification")
+	}
+	if err := inspectWindowsPathHandle(
+		windowsHandleFromFile(output),
+		destination,
+		false,
+		true,
+	); err != nil {
+		return err
+	}
+	keepDestination = true
 	return nil
 }
 
-func digestWindowsRuntimeFile(
-	path string,
-) ([sha256.Size]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return [sha256.Size]byte{}, err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return [sha256.Size]byte{}, err
-	}
-	var result [sha256.Size]byte
-	copy(result[:], hash.Sum(nil))
-	return result, nil
+func windowsHandleFromFile(file *os.File) windows.Handle {
+	return windows.Handle(file.Fd())
 }

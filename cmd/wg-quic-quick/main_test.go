@@ -3,17 +3,24 @@ package main
 import "testing"
 
 func TestParseQuickRunArgs(t *testing.T) {
-	input, name, err := parseQuickRunArgs([]string{"custom.conf", "--name", "wg0"})
+	input, name, brokerSafe, err := parseQuickRunArgs([]string{
+		"custom.conf", "--name", "wg0", "--broker-safe",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input != "custom.conf" || name != "wg0" {
-		t.Fatalf("parsed input=%q name=%q", input, name)
+	if input != "custom.conf" || name != "wg0" || !brokerSafe {
+		t.Fatalf(
+			"parsed input=%q name=%q brokerSafe=%v",
+			input, name, brokerSafe,
+		)
 	}
 }
 
 func TestParseQuickRunArgsRejectsUnknownOption(t *testing.T) {
-	if _, _, err := parseQuickRunArgs([]string{"wg0", "--verbose", "yes"}); err == nil {
+	if _, _, _, err := parseQuickRunArgs([]string{
+		"wg0", "--verbose", "yes",
+	}); err == nil {
 		t.Fatal("accepted unknown option")
 	}
 }

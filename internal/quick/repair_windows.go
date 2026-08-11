@@ -88,6 +88,10 @@ func repairWindowsService(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return forced, fmt.Errorf("open Windows service %s for repair: %w", serviceName, err)
 	}
+	lifecycleManager := windowsNativeServiceLifecycleManager{manager: manager}
+	runtimeExecutable := windowsTrustedRuntimeExecutableFromService(
+		windowsNativeServiceLifecycleService{service: service},
+	)
 
 	status, err := queryWindowsServiceStatus(service)
 	if err != nil {
@@ -162,6 +166,11 @@ func repairWindowsService(ctx context.Context, name string) (bool, error) {
 	if err := waitWindowsServiceDeleted(ctx, manager, serviceName); err != nil {
 		return forced, err
 	}
+	cleanupWindowsRuntimeBestEffort(
+		lifecycleManager,
+		runtimeExecutable,
+		defaultWindowsRuntimeLifecycleOperations(),
+	)
 	return forced, nil
 }
 

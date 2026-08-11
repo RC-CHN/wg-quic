@@ -71,7 +71,7 @@ func runWithHostReady(
 ) error {
 	return runWithHostReadyLog(
 		ctx, input, requestedName, host, newProcess, ready,
-		nil,
+		nil, nil,
 		runLog{logger: log.Default()},
 	)
 }
@@ -84,9 +84,26 @@ func runWithHostReadyProgress(
 	ready func(),
 	shutdownProgress func(string),
 ) error {
+	return runWithHostReadyProgressPolicy(
+		ctx, input, requestedName, host, newProcess, ready,
+		shutdownProgress, nil,
+	)
+}
+
+type quickConfigPolicy func(*config.Config) error
+
+func runWithHostReadyProgressPolicy(
+	ctx context.Context,
+	input, requestedName string,
+	host platform.Host,
+	newProcess coreProcessFactory,
+	ready func(),
+	shutdownProgress func(string),
+	policy quickConfigPolicy,
+) error {
 	return runWithHostReadyLog(
 		ctx, input, requestedName, host, newProcess, ready,
-		shutdownProgress,
+		shutdownProgress, policy,
 		runLog{logger: log.Default()},
 	)
 }
@@ -98,6 +115,7 @@ func runWithHostReadyLog(
 	newProcess coreProcessFactory,
 	ready func(),
 	shutdownProgress func(string),
+	policy quickConfigPolicy,
 	runLogger runLog,
 ) (runErr error) {
 	if runLogger.logger == nil {
@@ -113,6 +131,11 @@ func runWithHostReadyLog(
 	}
 	if err := validateConfig(cfg); err != nil {
 		return err
+	}
+	if policy != nil {
+		if err := policy(cfg); err != nil {
+			return err
+		}
 	}
 	// Resolve the automatic value once before creating the immutable core
 	// snapshot and applying host policy.

@@ -39,7 +39,7 @@ const (
 type windowsDesktopRequest struct {
 	Action             string `json:"action"`
 	Name               string `json:"name"`
-	Source             string `json:"source,omitempty"`
+	Config             []byte `json:"config,omitempty"`
 	Overwrite          bool   `json:"overwrite,omitempty"`
 	DeadlineUnixMillis int64  `json:"deadline_unix_millis"`
 }
@@ -67,9 +67,41 @@ func RunWindowsDesktopClient(
 		ctx, windowsDesktopOperationTimeout,
 	)
 	defer cancel()
+	message, err := runWindowsManagementClient(
+		operationContext, action, name, source, overwrite,
+	)
+	if err == nil {
+		return message, nil
+	}
+	if !shouldUseWindowsDesktopElevationFallback(err) {
+		return "", err
+	}
+	return runWindowsElevatedDesktopClient(
+		operationContext, action, name, source, overwrite,
+	)
+}
+
+func runWindowsElevatedDesktopClient(
+	operationContext context.Context,
+	action string,
+	name string,
+	source string,
+	overwrite bool,
+) (string, error) {
 	deadline, ok := operationContext.Deadline()
 	if !ok {
 		return "", errors.New("desktop operation context has no deadline")
+	}
+	var contents []byte
+	if action == "import" {
+		var err error
+		contents, err = readWindowsDesktopConfig(source)
+		if err != nil {
+			return "", err
+		}
+		if err := validateWindowsDesktopConfigBytes(contents); err != nil {
+			return "", err
+		}
 	}
 	pipePath, err := randomWindowsDesktopPipePath()
 	if err != nil {
@@ -85,7 +117,7 @@ func RunWindowsDesktopClient(
 	defer listener.Close()
 
 	request := windowsDesktopRequest{
-		Action: action, Name: name, Source: source, Overwrite: overwrite,
+		Action: action, Name: name, Config: contents, Overwrite: overwrite,
 		DeadlineUnixMillis: deadline.UnixMilli(),
 	}
 	resultChannel := make(chan windowsDesktopResult, 1)
