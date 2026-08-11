@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.2.2 - 2026-08-11
+
+Windows install-once privilege and service-recovery release.
+
+- Explicitly marked the desktop executable `asInvoker`, keeping the WebView
+  unelevated while the MSI-installed LocalSystem manager handles fixed,
+  authenticated tunnel operations after the one install-time UAC consent.
+- Bounded Windows tunnel-service startup; on rollback, retained cleanup state
+  until SCM confirmed teardown, and completed failed-start recovery without
+  deleting live or ambiguous service resources.
+- Captured staged-service startup diagnostics before rollback, normalized
+  synchronous Named Pipe cancellation, and hardened secure ProgramData DACL
+  validation and migration leases against conflicting delete access.
+- Expanded installed-MSI coverage to combine a real desktop
+  import/check/up/down lifecycle with a separate genuine UAC-filtered local
+  Administrator broker lifecycle, while preserving broker rejection of
+  standard users and the explicit UAC path for hook-bearing profiles.
+- Updated the privileged Wintun fixture to install configurations through the
+  same protected, atomic import path used by the desktop and verified the full
+  service, adapter, address, route, DNS, failure, repair, and cleanup cycle.
+
 ## v0.2.1 - 2026-08-11
 
 Windows desktop privilege and inactive-state repair release.
@@ -26,8 +47,8 @@ Windows desktop privilege and inactive-state repair release.
   remain visible.
 - Polished inactive, pending-action, and management-service status in the
   desktop UI and expanded native Windows package coverage around the installed
-  privilege boundary, including a live v0.2.0 upgrade and a real WebView smoke
-  beneath a Windows LUA-limited Administrator token.
+  privilege boundary, including a live v0.2.0 upgrade plus installed WebView
+  and limited-Administrator broker coverage.
 
 ## v0.2.0 - 2026-08-11
 
