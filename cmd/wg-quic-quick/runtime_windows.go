@@ -52,8 +52,8 @@ func runQuickDebug(ctx context.Context, input, name string) error {
 	return err
 }
 
-func runDesktopHelper(ctx context.Context) error {
-	return quick.RunWindowsDesktopHelper(ctx)
+func runDesktopHelper(ctx context.Context, pipePath string) error {
+	return quick.RunWindowsDesktopHelper(ctx, pipePath)
 }
 
 func runDesktopClient(

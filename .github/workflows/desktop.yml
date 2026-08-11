@@ -62,6 +62,9 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+      - name: Test Windows desktop IPC probe
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./tests/windows/desktop-ipc-probe
       - name: Install Tauri Linux build dependencies
         if: runner.os == 'Linux'
         shell: bash

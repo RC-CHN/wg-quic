@@ -22,11 +22,27 @@ import (
 )
 
 const windowsDesktopElevationScript = `$ErrorActionPreference = 'Stop'; ` +
+	`$pipePath = $env:WG_QUIC_DESKTOP_PIPE; ` +
 	`$process = Start-Process ` +
 	`-FilePath $env:WG_QUIC_ELEVATED_EXE ` +
-	`-ArgumentList @('desktop-helper') ` +
+	`-ArgumentList @('desktop-helper', $pipePath) ` +
 	`-Verb RunAs -Wait -PassThru -WindowStyle Hidden; ` +
 	`exit $process.ExitCode`
+
+const windowsDesktopPipeEnv = "WG_QUIC_DESKTOP_PIPE"
+
+const (
+	windowsDesktopOperationTimeout = 90 * time.Second
+	windowsDesktopResultGrace      = 5 * time.Second
+)
+
+type windowsDesktopRequest struct {
+	Action             string `json:"action"`
+	Name               string `json:"name"`
+	Source             string `json:"source,omitempty"`
+	Overwrite          bool   `json:"overwrite,omitempty"`
+	DeadlineUnixMillis int64  `json:"deadline_unix_millis"`
+}
 
 type windowsDesktopResult struct {
 	Success bool   `json:"success"`
@@ -47,6 +63,14 @@ func RunWindowsDesktopClient(
 	if err := validateWindowsDesktopRequest(action, name, source); err != nil {
 		return "", err
 	}
+	operationContext, cancel := context.WithTimeout(
+		ctx, windowsDesktopOperationTimeout,
+	)
+	defer cancel()
+	deadline, ok := operationContext.Deadline()
+	if !ok {
+		return "", errors.New("desktop operation context has no deadline")
+	}
 	pipePath, err := randomWindowsDesktopPipePath()
 	if err != nil {
 		return "", err
@@ -56,16 +80,20 @@ func RunWindowsDesktopClient(
 		OutputBufferSize: 64 * 1024,
 	}).Listen(pipePath)
 	if err != nil {
-		return "", fmt.Errorf("listen for desktop helper result: %w", err)
+		return "", fmt.Errorf("listen for desktop helper connection: %w", err)
 	}
 	defer listener.Close()
 
+	request := windowsDesktopRequest{
+		Action: action, Name: name, Source: source, Overwrite: overwrite,
+		DeadlineUnixMillis: deadline.UnixMilli(),
+	}
 	resultChannel := make(chan windowsDesktopResult, 1)
 	resultError := make(chan error, 1)
-	go readWindowsDesktopResult(listener, resultChannel, resultError)
+	go exchangeWindowsDesktopRequest(
+		listener, request, resultChannel, resultError,
+	)
 
-	operationContext, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
 	systemRoot := os.Getenv("SystemRoot")
 	if systemRoot == "" {
 		systemRoot = `C:\Windows`
@@ -90,17 +118,13 @@ func RunWindowsDesktopClient(
 	)
 	command.Env = append(
 		os.Environ(),
-		windowsDesktopActionEnv+"="+action,
-		windowsDesktopNameEnv+"="+name,
-		windowsDesktopSourceEnv+"="+source,
-		windowsDesktopOverwriteEnv+"="+boolEnvironmentValue(overwrite),
-		windowsDesktopResultPipeEnv+"="+pipePath,
+		windowsDesktopPipeEnv+"="+pipePath,
 		"WG_QUIC_ELEVATED_EXE="+currentExecutablePath(),
 	)
 	launchOutput, launchErr := command.CombinedOutput()
 	if operationContext.Err() != nil {
 		return "", fmt.Errorf(
-			"elevated desktop operation timed out after 90 seconds: %w",
+			"elevated desktop operation ended before completion: %w",
 			operationContext.Err(),
 		)
 	}
@@ -115,7 +139,7 @@ func RunWindowsDesktopClient(
 		case result = <-resultChannel:
 		case err := <-resultError:
 			return "", windowsDesktopLauncherError(launcherMessage, err)
-		case <-time.After(time.Second):
+		case <-time.After(windowsDesktopResultGrace):
 			return "", windowsDesktopLauncherError(launcherMessage, nil)
 		}
 	} else {
@@ -128,7 +152,11 @@ func RunWindowsDesktopClient(
 		}
 	}
 	if !result.Success {
-		return "", errors.New(strings.TrimSpace(result.Message))
+		message := strings.TrimSpace(result.Message)
+		if message == "" {
+			message = "the elevated wg-quic operation failed without an error message"
+		}
+		return "", errors.New(message)
 	}
 	if launchErr != nil {
 		return "", windowsDesktopLauncherError(launcherMessage, launchErr)
@@ -162,7 +190,7 @@ func validateWindowsDesktopRequest(
 func randomWindowsDesktopPipePath() (string, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return "", fmt.Errorf("create desktop result pipe name: %w", err)
+		return "", fmt.Errorf("create desktop pipe name: %w", err)
 	}
 	return fmt.Sprintf(
 		`\\.\pipe\wg-quic-desktop-%d-%s`,
@@ -171,32 +199,52 @@ func randomWindowsDesktopPipePath() (string, error) {
 	), nil
 }
 
-func readWindowsDesktopResult(
+func exchangeWindowsDesktopRequest(
 	listener net.Listener,
+	request windowsDesktopRequest,
 	resultChannel chan<- windowsDesktopResult,
 	errorChannel chan<- error,
 ) {
 	connection, err := listener.Accept()
 	if err != nil {
-		errorChannel <- fmt.Errorf("accept desktop helper result: %w", err)
+		errorChannel <- fmt.Errorf("accept desktop helper connection: %w", err)
 		return
 	}
 	defer connection.Close()
+	result, err := exchangeWindowsDesktopConnection(connection, request)
+	if err != nil {
+		errorChannel <- err
+		return
+	}
+	resultChannel <- result
+}
+
+func exchangeWindowsDesktopConnection(
+	connection net.Conn,
+	request windowsDesktopRequest,
+) (windowsDesktopResult, error) {
 	_ = connection.SetDeadline(time.Now().Add(90 * time.Second))
+	if err := json.NewEncoder(connection).Encode(request); err != nil {
+		return windowsDesktopResult{}, fmt.Errorf(
+			"send desktop helper request: %w", err,
+		)
+	}
 	limited := &io.LimitedReader{
 		R: connection,
 		N: maxWindowsDesktopConfigSize + 1,
 	}
 	var result windowsDesktopResult
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
-		errorChannel <- fmt.Errorf("decode desktop helper result: %w", err)
-		return
+		return windowsDesktopResult{}, fmt.Errorf(
+			"decode desktop helper result: %w", err,
+		)
 	}
 	if limited.N == 0 {
-		errorChannel <- errors.New("desktop helper result exceeded 1 MiB")
-		return
+		return windowsDesktopResult{}, errors.New(
+			"desktop helper result exceeded 1 MiB",
+		)
 	}
-	resultChannel <- result
+	return result, nil
 }
 
 func windowsDesktopLauncherError(message string, resultErr error) error {
@@ -206,19 +254,14 @@ func windowsDesktopLauncherError(message string, resultErr error) error {
 		return errors.New("administrator approval was canceled")
 	}
 	if message == "" {
-		message = "the elevated wg-quic operation failed"
+		message = "the elevated wg-quic helper exited before completing the IPC handshake"
+	} else {
+		message = "the elevated wg-quic helper exited before completing the IPC handshake: " + message
 	}
 	if resultErr != nil {
 		return errors.Join(errors.New(message), resultErr)
 	}
 	return errors.New(message)
-}
-
-func boolEnvironmentValue(value bool) string {
-	if value {
-		return "1"
-	}
-	return "0"
 }
 
 func currentExecutablePath() string {

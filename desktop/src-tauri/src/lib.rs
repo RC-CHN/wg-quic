@@ -67,6 +67,8 @@ struct ImportResult {
     snapshot: DesktopSnapshot,
 }
 
+const INACTIVE_STATUS_MARKER: &str = "interface is inactive:";
+
 #[derive(Serialize)]
 struct DesktopSmokeSettings {
     mode: &'static str,
@@ -434,13 +436,16 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
                     status: Some(status),
                     status_detail: None,
                 },
-                Err(error) => TunnelView {
-                    name,
-                    config_path: config_path.to_string_lossy().into_owned(),
-                    running: false,
-                    status: None,
-                    status_detail: Some(error),
-                },
+                Err(error) => {
+                    let status_detail = (!is_inactive_status_error(&error)).then_some(error);
+                    TunnelView {
+                        name,
+                        config_path: config_path.to_string_lossy().into_owned(),
+                        running: false,
+                        status: None,
+                        status_detail,
+                    }
+                }
             }
         })
         .collect();
@@ -470,6 +475,10 @@ fn parse_status(output: &str, expected_interface: &str) -> Result<Value, String>
         ));
     }
     Ok(status)
+}
+
+fn is_inactive_status_error(error: &str) -> bool {
+    error.contains(INACTIVE_STATUS_MARKER)
 }
 
 fn run_privileged(
@@ -776,6 +785,16 @@ mod tests {
         assert_eq!(status["interface"], "office");
         assert!(parse_status(r#"{"interface":"other","state":"up"}"#, "office").is_err());
         assert!(parse_status(r#"{"interface":"office","state":"down"}"#, "office").is_err());
+    }
+
+    #[test]
+    fn recognizes_only_the_stable_inactive_status_marker() {
+        assert!(is_inactive_status_error(
+            r#"wg-quic show office failed: wg-quic: interface is inactive: \"office\""#
+        ));
+        assert!(!is_inactive_status_error(
+            "wg-quic show office failed: access is denied"
+        ));
     }
 
     #[test]

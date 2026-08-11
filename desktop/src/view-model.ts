@@ -83,3 +83,17 @@ export function formatFECRecovery(recovered = 0, rawLost = 0): string {
   }
   return `${((recovered / rawLost) * 100).toFixed(1)}% recovered`;
 }
+
+export function managementErrorMessage(message: string): string {
+  if (/administrator privileges|administrator approval/i.test(message)) {
+    return message;
+  }
+  if (
+    /access is denied|permission denied|requested operation requires elevation|privilege is not held/i.test(
+      message,
+    )
+  ) {
+    return `${message} Administrator privileges may be required.`;
+  }
+  return message;
+}

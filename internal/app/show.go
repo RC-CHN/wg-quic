@@ -37,7 +37,7 @@ func Show(name string, jsonOutput bool) error {
 		status, err := control.Read(path)
 		if err != nil {
 			if name != "" {
-				return fmt.Errorf("%s: %w", path, err)
+				return namedStatusReadError(name, path, err)
 			}
 			readErrors = append(readErrors, fmt.Errorf("%s: %w", path, err))
 			continue
@@ -96,4 +96,13 @@ func Show(name string, jsonOutput bool) error {
 		}
 	}
 	return nil
+}
+
+func namedStatusReadError(name, path string, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf(
+			"interface is inactive: %q: %s: %w", name, path, err,
+		)
+	}
+	return fmt.Errorf("%s: %w", path, err)
 }

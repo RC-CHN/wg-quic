@@ -19,35 +19,42 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const (
-	windowsDesktopActionEnv     = "WG_QUIC_DESKTOP_ACTION"
-	windowsDesktopNameEnv       = "WG_QUIC_DESKTOP_NAME"
-	windowsDesktopSourceEnv     = "WG_QUIC_DESKTOP_SOURCE"
-	windowsDesktopOverwriteEnv  = "WG_QUIC_DESKTOP_OVERWRITE"
-	windowsDesktopResultPipeEnv = "WG_QUIC_DESKTOP_RESULT_PIPE"
-
-	maxWindowsDesktopConfigSize = 1024 * 1024
-)
+const maxWindowsDesktopConfigSize = 1024 * 1024
 
 // RunWindowsDesktopHelper is the deliberately narrow elevated boundary used
-// by the desktop UI. The caller supplies requests through inherited
-// environment variables so the UAC launcher never has to construct a command
-// line from profile names or file paths.
-func RunWindowsDesktopHelper(ctx context.Context) error {
-	result, err := openWindowsDesktopResultPipe()
+// by the desktop UI. Only a random local pipe name crosses the UAC command-line
+// boundary. The validated operation request and its result travel over that
+// same duplex pipe, so elevation never depends on inheriting caller-specific
+// environment variables.
+func RunWindowsDesktopHelper(ctx context.Context, pipePath string) error {
+	connection, err := openWindowsDesktopPipe(pipePath)
 	if err != nil {
 		return err
 	}
-	defer result.Close()
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(
+		windowsDesktopOperationTimeout + windowsDesktopResultGrace,
+	))
 
-	operationErr := runWindowsDesktopHelper(ctx)
+	request, operationErr := readWindowsDesktopRequest(connection)
+	if operationErr == nil {
+		var deadline time.Time
+		deadline, operationErr = windowsDesktopRequestDeadline(
+			request, time.Now(),
+		)
+		if operationErr == nil {
+			operationErr = runWindowsDesktopHelperUntilDeadline(
+				ctx, request, deadline, runWindowsDesktopHelper,
+			)
+		}
+	}
 	message := ""
 	if operationErr != nil {
 		message = operationErr.Error()
-	} else if os.Getenv(windowsDesktopActionEnv) == "check" {
+	} else if request.Action == "check" {
 		message = "configuration is valid for wg-quic-quick"
 	}
-	resultErr := json.NewEncoder(result).Encode(struct {
+	resultErr := json.NewEncoder(connection).Encode(struct {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 	}{
@@ -60,34 +67,123 @@ func RunWindowsDesktopHelper(ctx context.Context) error {
 	return errors.Join(operationErr, resultErr)
 }
 
-func runWindowsDesktopHelper(ctx context.Context) error {
-	action := os.Getenv(windowsDesktopActionEnv)
-	name := os.Getenv(windowsDesktopNameEnv)
-	host := platform.Current()
-	if err := host.ValidateInterfaceName(name); err != nil {
+func readWindowsDesktopRequest(
+	connection io.Reader,
+) (windowsDesktopRequest, error) {
+	limited := &io.LimitedReader{
+		R: connection,
+		N: maxWindowsDesktopConfigSize + 1,
+	}
+	var request windowsDesktopRequest
+	if err := json.NewDecoder(limited).Decode(&request); err != nil {
+		return windowsDesktopRequest{}, fmt.Errorf(
+			"decode desktop helper request: %w", err,
+		)
+	}
+	if limited.N == 0 {
+		return windowsDesktopRequest{}, errors.New(
+			"desktop helper request exceeded 1 MiB",
+		)
+	}
+	return request, nil
+}
+
+func windowsDesktopRequestDeadline(
+	request windowsDesktopRequest,
+	now time.Time,
+) (time.Time, error) {
+	if request.DeadlineUnixMillis <= 0 {
+		return time.Time{}, errors.New(
+			"desktop helper request deadline is required",
+		)
+	}
+	deadline := time.UnixMilli(request.DeadlineUnixMillis)
+	maximum := now.Add(windowsDesktopOperationTimeout)
+	if deadline.After(maximum) {
+		deadline = maximum
+	}
+	if !deadline.After(now) {
+		return time.Time{}, errors.New(
+			"elevated desktop operation deadline expired before the helper received its request",
+		)
+	}
+	return deadline, nil
+}
+
+type windowsDesktopOperation func(
+	context.Context,
+	windowsDesktopRequest,
+) error
+
+func runWindowsDesktopHelperUntilDeadline(
+	ctx context.Context,
+	request windowsDesktopRequest,
+	deadline time.Time,
+	operation windowsDesktopOperation,
+) error {
+	operationContext, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		result <- operation(operationContext, request)
+	}()
+	select {
+	case err := <-result:
+		if contextErr := operationContext.Err(); contextErr != nil {
+			return windowsDesktopOperationEndError(contextErr)
+		}
+		return windowsDesktopOperationEndError(err)
+	case <-operationContext.Done():
+		return windowsDesktopOperationEndError(operationContext.Err())
+	}
+}
+
+func windowsDesktopOperationEndError(err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf(
+			"elevated desktop operation deadline expired: %w", err,
+		)
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("elevated desktop operation canceled: %w", err)
+	default:
 		return err
 	}
+}
 
-	switch action {
+func runWindowsDesktopHelper(
+	ctx context.Context,
+	request windowsDesktopRequest,
+) error {
+	if err := validateWindowsDesktopRequest(
+		request.Action, request.Name, request.Source,
+	); err != nil {
+		return err
+	}
+	if request.Overwrite && request.Action != "import" {
+		return fmt.Errorf(
+			"desktop %s does not accept overwrite", request.Action,
+		)
+	}
+
+	switch request.Action {
 	case "up", "down":
-		return Manage(ctx, action, name)
+		return Manage(ctx, request.Action, request.Name)
 	case "check":
-		return Check(name)
+		return Check(request.Name)
 	case "import":
-		source := os.Getenv(windowsDesktopSourceEnv)
-		if source == "" {
-			return errors.New("desktop import source is required")
-		}
-		if err := Check(source); err != nil {
+		if err := Check(request.Source); err != nil {
 			return err
 		}
 		return ImportDesktopConfig(
-			source,
-			name,
-			os.Getenv(windowsDesktopOverwriteEnv) == "1",
+			request.Source,
+			request.Name,
+			request.Overwrite,
 		)
 	default:
-		return fmt.Errorf("unsupported desktop helper action %q", action)
+		return fmt.Errorf(
+			"unsupported desktop helper action %q", request.Action,
+		)
 	}
 }
 
@@ -109,18 +205,17 @@ func ImportDesktopConfig(
 	)
 }
 
-func openWindowsDesktopResultPipe() (net.Conn, error) {
-	path := os.Getenv(windowsDesktopResultPipeEnv)
+func openWindowsDesktopPipe(path string) (net.Conn, error) {
 	const prefix = `\\.\pipe\wg-quic-desktop-`
 	if !strings.HasPrefix(path, prefix) ||
 		len(path) <= len(prefix) ||
 		len(path) > 256 ||
 		strings.ContainsAny(strings.TrimPrefix(path, prefix), `\/`) {
-		return nil, errors.New("invalid desktop result pipe")
+		return nil, errors.New("invalid desktop pipe")
 	}
 	connection, err := namedpipe.DialTimeout(path, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("connect to desktop result pipe: %w", err)
+		return nil, fmt.Errorf("connect to desktop pipe: %w", err)
 	}
 	return connection, nil
 }

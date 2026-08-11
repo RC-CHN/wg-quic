@@ -7,6 +7,7 @@ import {
   formatBytes,
   formatFECRecovery,
   formatRTT,
+  managementErrorMessage,
   tunnelDisplayState,
   tunnelStateLabel,
 } from './view-model';
@@ -37,4 +38,19 @@ test('telemetry formatters preserve byte and bit-rate units', () => {
   assert.equal(formatRTT(12_400), '12 ms');
   assert.equal(formatFECRecovery(8, 10), '80.0% recovered');
   assert.equal(formatFECRecovery(0, 0), 'No observed loss');
+});
+
+test('management errors add privilege guidance only when relevant', () => {
+  assert.equal(
+    managementErrorMessage('endpoint resolution failed'),
+    'endpoint resolution failed',
+  );
+  assert.equal(
+    managementErrorMessage('Access is denied.'),
+    'Access is denied. Administrator privileges may be required.',
+  );
+  assert.equal(
+    managementErrorMessage('administrator approval was canceled'),
+    'administrator approval was canceled',
+  );
 });

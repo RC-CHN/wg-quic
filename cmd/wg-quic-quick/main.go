@@ -45,12 +45,13 @@ func run(args []string) error {
 		}
 		return nil
 	case "desktop-helper":
-		if len(args) != 1 {
+		pipePath, err := parseDesktopHelperArgs(args[1:])
+		if err != nil {
 			return usage()
 		}
 		ctx, stop := commandContext()
 		defer stop()
-		return runDesktopHelper(ctx)
+		return runDesktopHelper(ctx, pipePath)
 	case "run", "debug":
 		input, name, err := parseQuickRunArgs(args[1:])
 		if err != nil {
@@ -106,6 +107,13 @@ func run(args []string) error {
 	default:
 		return usage()
 	}
+}
+
+func parseDesktopHelperArgs(args []string) (string, error) {
+	if len(args) != 1 || args[0] == "" {
+		return "", errors.New("desktop helper pipe is required")
+	}
+	return args[0], nil
 }
 
 func parseDesktopImportArgs(

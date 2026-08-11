@@ -87,10 +87,11 @@ and uninstall.
 The webview process never runs as Administrator or root. On Windows,
 validation, imports, and tunnel start/stop are delegated to the narrow
 `wg-quic-quick desktop-helper` operation after UAC consent. Request values are
-inherited as data rather than interpolated into PowerShell, and the result is
-returned through a one-use local named pipe. Runtime status uses a separate
-status-only pipe; mutating core control remains restricted to LocalSystem and
-Administrators.
+sent over a one-use duplex local named pipe rather than inherited through the
+UAC environment or interpolated into PowerShell; only the random pipe name is
+placed on the helper command line. The result returns over the same pipe.
+Runtime status uses a separate status-only pipe; mutating core control remains
+restricted to LocalSystem and Administrators.
 
 On Linux, privileged fixed operations are launched through `pkexec`. Imported
 configuration files are copied atomically with mode `0600`; the configuration

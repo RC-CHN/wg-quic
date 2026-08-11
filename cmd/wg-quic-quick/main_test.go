@@ -86,6 +86,21 @@ func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestParseDesktopHelperArgs(t *testing.T) {
+	pipePath, err := parseDesktopHelperArgs([]string{`\\.\pipe\wg-quic-desktop-test`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pipePath != `\\.\pipe\wg-quic-desktop-test` {
+		t.Fatalf("parseDesktopHelperArgs() = %q", pipePath)
+	}
+	for _, args := range [][]string{nil, {""}, {"one", "two"}} {
+		if _, err := parseDesktopHelperArgs(args); err == nil {
+			t.Fatalf("parseDesktopHelperArgs(%q) accepted invalid input", args)
+		}
+	}
+}
+
 func TestParseDesktopImportArgs(t *testing.T) {
 	name, source, overwrite, err := parseDesktopImportArgs([]string{
 		"office",

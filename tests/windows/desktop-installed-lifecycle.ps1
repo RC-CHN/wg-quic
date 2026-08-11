@@ -116,6 +116,7 @@ $desktop = $null
 $desktopProcess = $null
 $trayProcess = $null
 $secondDesktopProcess = $null
+$desktopIpcProbeProcess = $null
 $quick = $null
 $core = $null
 $installedWintun = $null
@@ -125,6 +126,11 @@ $installed = $false
 $standardUserName = "wgqdesk$PID"
 $standardUserCreated = $false
 $standardUserRoot = Join-Path $env:PUBLIC "wg-quic-ci-$PID"
+$desktopIpcProbe = Join-Path $standardUserRoot "desktop-ipc-probe.exe"
+$desktopIpcReady = Join-Path $standardUserRoot "desktop-ipc.ready.json"
+$desktopIpcResult = Join-Path $standardUserRoot "desktop-ipc.result.txt"
+$desktopIpcStdout = Join-Path $standardUserRoot "desktop-ipc.stdout.txt"
+$desktopIpcStderr = Join-Path $standardUserRoot "desktop-ipc.stderr.txt"
 
 try {
     New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
@@ -231,6 +237,14 @@ PersistentKeepalive = 1
     $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $sourceConfig
     $env:WG_QUIC_DESKTOP_SMOKE_NAME = $tunnelName
     $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $resultPath
+    # A real UAC transition does not reliably carry caller-specific
+    # environment variables. Poison the legacy request variables so this
+    # lifecycle proves the elevated helper takes its request from the duplex
+    # IPC channel instead.
+    $env:WG_QUIC_DESKTOP_ACTION = "invalid-inherited-action"
+    $env:WG_QUIC_DESKTOP_NAME = "invalid-inherited-name"
+    $env:WG_QUIC_DESKTOP_SOURCE = "invalid-inherited-source"
+    $env:WG_QUIC_DESKTOP_OVERWRITE = "invalid-inherited-overwrite"
     $desktopProcess = Start-Process -FilePath $desktop `
         -PassThru `
         -RedirectStandardOutput $stdoutPath `
@@ -378,6 +392,14 @@ PersistentKeepalive = 1
         -Description "the tray smoke process exit" -TimeoutSeconds 30
     Remove-Item Env:WG_QUIC_DESKTOP_TRAY_SMOKE `
         -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_ACTION `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_NAME `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_SOURCE `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_OVERWRITE `
+        -ErrorAction SilentlyContinue
     Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_RESULT `
         -ErrorAction SilentlyContinue
     Write-Host "installed Windows tray and single-instance lifecycle passed"
@@ -445,6 +467,131 @@ PersistentKeepalive = 1
     if ($LASTEXITCODE -ne 0) {
         throw "grant standard-user fixture access failed"
     }
+    $repositoryRoot = (Resolve-Path -LiteralPath (
+        Join-Path $PSScriptRoot "..\.."
+    )).Path
+    $goExecutable = (Get-Command "go.exe" -ErrorAction Stop).Source
+    Push-Location $repositoryRoot
+    try {
+        Invoke-Native -FilePath $goExecutable -Arguments @(
+            "build",
+            "-trimpath",
+            "-o", $desktopIpcProbe,
+            "./tests/windows/desktop-ipc-probe"
+        ) | Out-Null
+    }
+    finally {
+        Pop-Location
+    }
+    if (-not (Test-Path -LiteralPath $desktopIpcProbe -PathType Leaf)) {
+        throw "desktop IPC probe build did not produce $desktopIpcProbe"
+    }
+    $standardCredential = [Management.Automation.PSCredential]::new(
+        "$env:COMPUTERNAME\$standardUserName",
+        $securePassword
+    )
+    $desktopIpcProbeProcess = Start-Process -FilePath $desktopIpcProbe `
+        -ArgumentList @(
+            "-name", $tunnelName,
+            "-ready", "`"$desktopIpcReady`"",
+            "-result", "`"$desktopIpcResult`""
+        ) -Credential $standardCredential -LoadUserProfile -PassThru `
+        -WorkingDirectory $standardUserRoot `
+        -RedirectStandardOutput $desktopIpcStdout `
+        -RedirectStandardError $desktopIpcStderr
+    $desktopIpcPipe = $null
+    Wait-For -Description "the standard-user desktop IPC listener" `
+        -TimeoutSeconds 30 -Condition {
+            if (-not (Test-Path -LiteralPath $desktopIpcReady -PathType Leaf)) {
+                return $false
+            }
+            $ready = Get-Content -LiteralPath $desktopIpcReady -Raw |
+                ConvertFrom-Json
+            if ($ready.pid -ne $desktopIpcProbeProcess.Id) {
+                throw (
+                    "desktop IPC ready PID $($ready.pid) does not match " +
+                    "probe PID $($desktopIpcProbeProcess.Id)"
+                )
+            }
+            if ($ready.elevated -ne $false) {
+                throw "desktop IPC probe unexpectedly reported an elevated token"
+            }
+            if ($ready.pipe -notmatch (
+                '^\\\\\.\\pipe\\wg-quic-desktop-\d+-[0-9a-f]{32}$'
+            )) {
+                throw "desktop IPC probe returned invalid pipe $($ready.pipe)"
+            }
+            $script:desktopIpcPipe = [string] $ready.pipe
+            return $true
+        }
+
+    # Directly run the installed production helper with the runner's existing
+    # Administrator token. The listener belongs to a different standard-user
+    # token, so this covers the actual low-token -> high-token pipe boundary
+    # without trying to automate the secure UAC desktop.
+    $desktopEnvironmentNames = @(
+        "WG_QUIC_DESKTOP_PIPE",
+        "WG_QUIC_DESKTOP_ACTION",
+        "WG_QUIC_DESKTOP_NAME",
+        "WG_QUIC_DESKTOP_SOURCE",
+        "WG_QUIC_DESKTOP_OVERWRITE",
+        "WG_QUIC_DESKTOP_INTEGRATION_SMOKE",
+        "WG_QUIC_DESKTOP_SMOKE_CONFIG",
+        "WG_QUIC_DESKTOP_SMOKE_NAME",
+        "WG_QUIC_DESKTOP_SMOKE_RESULT",
+        "WG_QUIC_DESKTOP_TRAY_SMOKE",
+        "WG_QUIC_ELEVATED_EXE"
+    )
+    foreach ($environmentName in $desktopEnvironmentNames) {
+        Remove-Item -LiteralPath "Env:$environmentName" `
+            -ErrorAction SilentlyContinue
+    }
+    $env:WG_QUIC_DESKTOP_PIPE = "invalid-inherited-pipe"
+    $env:WG_QUIC_DESKTOP_ACTION = "invalid-inherited-action"
+    $env:WG_QUIC_DESKTOP_NAME = "invalid-inherited-name"
+    $env:WG_QUIC_DESKTOP_SOURCE = "invalid-inherited-source"
+    $env:WG_QUIC_DESKTOP_OVERWRITE = "invalid-inherited-overwrite"
+    $env:WG_QUIC_ELEVATED_EXE = "invalid-inherited-executable"
+    try {
+        Invoke-Native -FilePath $quick -Arguments @(
+            "desktop-helper", $desktopIpcPipe
+        ) | Out-Null
+    }
+    finally {
+        foreach ($environmentName in $desktopEnvironmentNames) {
+            Remove-Item -LiteralPath "Env:$environmentName" `
+                -ErrorAction SilentlyContinue
+        }
+    }
+    $desktopIpcExitCode = Wait-ProcessExit `
+        -Process $desktopIpcProbeProcess `
+        -Description "the standard-user desktop IPC probe" `
+        -TimeoutSeconds 30
+    $desktopIpcResultText = if (
+        Test-Path -LiteralPath $desktopIpcResult -PathType Leaf
+    ) {
+        (Get-Content -LiteralPath $desktopIpcResult -Raw).Trim()
+    }
+    else {
+        "missing result"
+    }
+    if ($desktopIpcExitCode -ne 0 -or $desktopIpcResultText -ne "passed") {
+        $desktopIpcOutput = @(
+            $desktopIpcResultText
+            if (Test-Path -LiteralPath $desktopIpcStdout) {
+                Get-Content -LiteralPath $desktopIpcStdout -Raw
+            }
+            if (Test-Path -LiteralPath $desktopIpcStderr) {
+                Get-Content -LiteralPath $desktopIpcStderr -Raw
+            }
+        ) -join "`n"
+        throw "standard-user desktop IPC probe failed`n$desktopIpcOutput"
+    }
+    Write-Host (
+        "installed Windows cross-token desktop helper IPC passed " +
+        "(standard-user listener -> Administrator helper)"
+    )
+
     $standardScript = Join-Path $standardUserRoot "status-check.ps1"
     $standardResult = Join-Path $standardUserRoot "result.txt"
     $standardStdout = Join-Path $standardUserRoot "stdout.txt"
@@ -521,10 +668,6 @@ catch {
     throw
 }
 '@ | Set-Content -LiteralPath $standardScript -Encoding utf8
-    $standardCredential = [Management.Automation.PSCredential]::new(
-        "$env:COMPUTERNAME\$standardUserName",
-        $securePassword
-    )
     $standardProcess = Start-Process -FilePath (
         Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     ) -ArgumentList @(
@@ -648,6 +791,9 @@ catch {
         $stderrPath,
         $trayStdoutPath,
         $trayStderrPath,
+        $desktopIpcResult,
+        $desktopIpcStdout,
+        $desktopIpcStderr,
         $msiLogPath
     )) {
         if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
@@ -669,11 +815,24 @@ finally {
         -ErrorAction SilentlyContinue
     Remove-Item Env:WG_QUIC_DESKTOP_TRAY_SMOKE `
         -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_ACTION `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_NAME `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_SOURCE `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_OVERWRITE `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_DESKTOP_PIPE `
+        -ErrorAction SilentlyContinue
+    Remove-Item Env:WG_QUIC_ELEVATED_EXE `
+        -ErrorAction SilentlyContinue
 
     foreach ($candidateProcess in @(
         $desktopProcess,
         $trayProcess,
-        $secondDesktopProcess
+        $secondDesktopProcess,
+        $desktopIpcProbeProcess
     )) {
         if ($null -eq $candidateProcess) {
             continue

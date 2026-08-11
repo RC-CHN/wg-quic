@@ -17,6 +17,7 @@ import {
   formatBytes,
   formatFECRecovery,
   formatRTT,
+  managementErrorMessage,
   tunnelDisplayState,
   tunnelStateLabel,
 } from './view-model';
@@ -63,7 +64,10 @@ function showToast(message: string, kind: 'ok' | 'error' = 'ok'): void {
 }
 
 function statusEndpoint(tunnel: TunnelView): string {
-  return tunnel.status?.peers?.[0]?.endpoint || 'No endpoint available';
+  if (!tunnel.running) {
+    return 'Endpoint shown when active';
+  }
+  return tunnel.status?.peers?.[0]?.endpoint || 'No peer endpoint';
 }
 
 function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
@@ -331,7 +335,7 @@ async function manageTunnel(
     showToast(`${name} ${action === 'up' ? 'activated' : 'deactivated'}`);
   } catch (error) {
     showToast(
-      `${name}: ${errorMessage(error)} Administrator privileges may be required.`,
+      `${name}: ${managementErrorMessage(errorMessage(error))}`,
       'error',
     );
   } finally {
