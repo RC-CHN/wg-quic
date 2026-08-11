@@ -7,6 +7,7 @@ package ipc
 
 import (
 	"net"
+	"sync"
 
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/ipc/namedpipe"
 	"golang.org/x/sys/windows"
@@ -50,16 +51,22 @@ func (l *UAPIListener) Addr() net.Addr {
 }
 
 var UAPISecurityDescriptor *windows.SECURITY_DESCRIPTOR
+var uapiSecurityDescriptorOnce sync.Once
+var uapiSecurityDescriptorError error
 
-func init() {
-	var err error
-	UAPISecurityDescriptor, err = windows.SecurityDescriptorFromString("O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)")
-	if err != nil {
-		panic(err)
-	}
+func initializeUAPISecurityDescriptor() error {
+	uapiSecurityDescriptorOnce.Do(func() {
+		UAPISecurityDescriptor, uapiSecurityDescriptorError = windows.SecurityDescriptorFromString(
+			"O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)",
+		)
+	})
+	return uapiSecurityDescriptorError
 }
 
 func UAPIListen(name string) (net.Listener, error) {
+	if err := initializeUAPISecurityDescriptor(); err != nil {
+		return nil, err
+	}
 	listener, err := (&namedpipe.ListenConfig{
 		SecurityDescriptor: UAPISecurityDescriptor,
 	}).Listen(`\\.\pipe\ProtectedPrefix\Administrators\WireGuard\` + name)

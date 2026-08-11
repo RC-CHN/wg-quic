@@ -25,11 +25,11 @@ var (
 	windowsRouteNotificationMu             sync.Mutex
 	windowsRouteNotificationSubscribers    = make(map[*windowsNativeRouteNotifier]struct{})
 	windowsRouteNotificationHandle         windows.Handle
-	windowsRouteNotificationCallback       = windows.NewCallback(windowsNativeRouteChanged)
+	windowsRouteNotificationCallback       uintptr
 	windowsInterfaceNotificationHandle     windows.Handle
-	windowsInterfaceNotificationCallback   = windows.NewCallback(windowsNativeInterfaceChanged)
+	windowsInterfaceNotificationCallback   uintptr
 	windowsAddressNotificationHandle       windows.Handle
-	windowsAddressNotificationCallback     = windows.NewCallback(windowsNativeAddressChanged)
+	windowsAddressNotificationCallback     uintptr
 )
 
 func newWindowsRouteNotifier() (*windowsNativeRouteNotifier, error) {
@@ -125,6 +125,14 @@ func (n *windowsNativeRouteNotifier) Close() error {
 }
 
 func ensureWindowsNetworkNotifications() error {
+	// Creating syscall callbacks during package initialization makes even
+	// non-network commands such as `wg-quic-quick version` depend on the full
+	// Windows networking API. Defer them until the route supervisor starts.
+	if windowsRouteNotificationCallback == 0 {
+		windowsRouteNotificationCallback = windows.NewCallback(windowsNativeRouteChanged)
+		windowsInterfaceNotificationCallback = windows.NewCallback(windowsNativeInterfaceChanged)
+		windowsAddressNotificationCallback = windows.NewCallback(windowsNativeAddressChanged)
+	}
 	if windowsRouteNotificationHandle == 0 {
 		if err := windows.NotifyRouteChange2(
 			windows.AF_UNSPEC,
