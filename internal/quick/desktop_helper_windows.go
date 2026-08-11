@@ -81,14 +81,32 @@ func runWindowsDesktopHelper(ctx context.Context) error {
 		if err := Check(source); err != nil {
 			return err
 		}
-		return importWindowsDesktopConfig(
+		return ImportDesktopConfig(
 			source,
-			host.ConfigPath(name),
+			name,
 			os.Getenv(windowsDesktopOverwriteEnv) == "1",
 		)
 	default:
 		return fmt.Errorf("unsupported desktop helper action %q", action)
 	}
+}
+
+// ImportDesktopConfig validates the destination name before entering the
+// Windows-specific atomic copy and ACL implementation.
+func ImportDesktopConfig(
+	source string,
+	name string,
+	overwrite bool,
+) error {
+	host := platform.Current()
+	if err := host.ValidateInterfaceName(name); err != nil {
+		return err
+	}
+	return importWindowsDesktopConfig(
+		source,
+		host.ConfigPath(name),
+		overwrite,
+	)
 }
 
 func openWindowsDesktopResultPipe() (net.Conn, error) {

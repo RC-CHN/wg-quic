@@ -27,3 +27,10 @@ func runQuickDebug(context.Context, string, string) error {
 func runDesktopHelper(context.Context) error {
 	return errors.New("wg-quic-quick desktop helper is only supported on Windows")
 }
+
+func runDesktopClient(
+	context.Context,
+	desktopClientRequest,
+) (string, error) {
+	return "", errors.New("wg-quic-quick desktop client is only supported on Windows")
+}

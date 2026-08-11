@@ -56,6 +56,19 @@ func runDesktopHelper(ctx context.Context) error {
 	return quick.RunWindowsDesktopHelper(ctx)
 }
 
+func runDesktopClient(
+	ctx context.Context,
+	request desktopClientRequest,
+) (string, error) {
+	return quick.RunWindowsDesktopClient(
+		ctx,
+		request.action,
+		request.name,
+		request.source,
+		request.overwrite,
+	)
+}
+
 type lockedWriter struct {
 	mu     sync.Mutex
 	writer io.Writer

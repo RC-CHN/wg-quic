@@ -23,6 +23,27 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "desktop-import":
+		name, source, overwrite, err := parseDesktopImportArgs(args[1:])
+		if err != nil {
+			return usage()
+		}
+		return quick.ImportDesktopConfig(source, name, overwrite)
+	case "desktop-client":
+		request, err := parseDesktopClientArgs(args[1:])
+		if err != nil {
+			return usage()
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		message, err := runDesktopClient(ctx, request)
+		if err != nil {
+			return err
+		}
+		if message != "" {
+			fmt.Println(message)
+		}
+		return nil
 	case "desktop-helper":
 		if len(args) != 1 {
 			return usage()
@@ -85,6 +106,58 @@ func run(args []string) error {
 	default:
 		return usage()
 	}
+}
+
+func parseDesktopImportArgs(
+	args []string,
+) (name string, source string, overwrite bool, err error) {
+	switch {
+	case len(args) == 2 && args[0] != "" && args[1] != "":
+		return args[0], args[1], false, nil
+	case len(args) == 3 &&
+		args[0] != "" &&
+		args[1] != "" &&
+		args[2] == "--overwrite":
+		return args[0], args[1], true, nil
+	default:
+		return "", "", false, errors.New("invalid desktop import arguments")
+	}
+}
+
+type desktopClientRequest struct {
+	action    string
+	name      string
+	source    string
+	overwrite bool
+}
+
+func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
+	if len(args) < 2 {
+		return desktopClientRequest{}, errors.New("desktop action and interface are required")
+	}
+	request := desktopClientRequest{action: args[0], name: args[1]}
+	switch request.action {
+	case "up", "down", "check":
+		if len(args) != 2 {
+			return desktopClientRequest{}, errors.New("desktop action received unexpected arguments")
+		}
+	case "import":
+		switch {
+		case len(args) == 3:
+			request.source = args[2]
+		case len(args) == 4 && args[3] == "--overwrite":
+			request.source = args[2]
+			request.overwrite = true
+		default:
+			return desktopClientRequest{}, errors.New("invalid desktop import arguments")
+		}
+	default:
+		return desktopClientRequest{}, fmt.Errorf("unsupported desktop action %q", request.action)
+	}
+	if request.name == "" {
+		return desktopClientRequest{}, errors.New("desktop interface is required")
+	}
+	return request, nil
 }
 
 func parseQuickRunArgs(args []string) (input, name string, err error) {

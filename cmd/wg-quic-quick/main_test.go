@@ -52,3 +52,68 @@ func TestParseQuickDownArgsRejectsUnknownOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDesktopClientArgs(t *testing.T) {
+	request, err := parseDesktopClientArgs([]string{
+		"import",
+		"office",
+		`C:\\Users\\me\\office.conf`,
+		"--overwrite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.action != "import" ||
+		request.name != "office" ||
+		request.source != `C:\\Users\\me\\office.conf` ||
+		!request.overwrite {
+		t.Fatalf("unexpected desktop request: %#v", request)
+	}
+}
+
+func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"up"},
+		{"up", "wg0", "extra"},
+		{"import", "wg0"},
+		{"import", "wg0", "source.conf", "--replace"},
+		{"delete", "wg0"},
+	} {
+		if _, err := parseDesktopClientArgs(args); err == nil {
+			t.Fatalf("parseDesktopClientArgs(%q) accepted invalid input", args)
+		}
+	}
+}
+
+func TestParseDesktopImportArgs(t *testing.T) {
+	name, source, overwrite, err := parseDesktopImportArgs([]string{
+		"office",
+		"office.conf",
+		"--overwrite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "office" || source != "office.conf" || !overwrite {
+		t.Fatalf(
+			"parseDesktopImportArgs() = (%q, %q, %v)",
+			name,
+			source,
+			overwrite,
+		)
+	}
+}
+
+func TestParseDesktopImportArgsRejectsInvalidInput(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"office"},
+		{"", "office.conf"},
+		{"office", "office.conf", "--replace"},
+	} {
+		if _, _, _, err := parseDesktopImportArgs(args); err == nil {
+			t.Fatalf("parseDesktopImportArgs(%q) accepted invalid input", args)
+		}
+	}
+}
