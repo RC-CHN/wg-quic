@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## v0.2.1 - 2026-08-11
+
+Windows desktop privilege and inactive-state repair release.
+
+- Added an MSI-installed, narrowly scoped LocalSystem management service so
+  local administrators can import, validate, activate, and deactivate tunnels
+  from the unelevated desktop after the install-time consent; true standard
+  users retain the per-operation UAC fallback, and profiles with lifecycle
+  hooks always require that explicit approval.
+- Authenticated the broker from the named-pipe client token, removed
+  client-side pipe-instance creation rights, bounded the authorization phase,
+  and prevented automatic retries after an operation may have been dispatched.
+- Hardened ProgramData configuration and runtime staging with known-folder
+  resolution, no-follow handles, LocalSystem-owned protected ACLs, single-link
+  checks, fresh random service runtimes, and quarantine migration for legacy
+  roots. Retired runtimes are reclaimed after confirmed SCM teardown, with a
+  fail-closed orphan sweep for interrupted lifecycle operations.
+- Hardened the desktop elevation IPC across filtered and elevated Windows
+  tokens, and coalesced overlapping startup refreshes to avoid stale UI state.
+- Normalized missing Windows control pipes into a stable inactive state so an
+  idle tunnel no longer exposes raw Named Pipe errors while genuine failures
+  remain visible.
+- Polished inactive, pending-action, and management-service status in the
+  desktop UI and expanded native Windows package coverage around the installed
+  privilege boundary, including a live v0.2.0 upgrade and a real WebView smoke
+  beneath a Windows LUA-limited Administrator token.
+
 ## v0.2.0 - 2026-08-11
 
 Protocol freeze, native desktop, and appliance observability release.

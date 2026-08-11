@@ -78,20 +78,38 @@ CI builds both supported desktop targets. Linux installs the generated Deb
 before its renderer smoke. Windows builds the MSI and then runs both
 `tests/windows/privileged-lifecycle.ps1` against the bundled commands and
 `tests/windows/desktop-installed-lifecycle.ps1` against the installed app.
-Together they cover installation, UI-driven import and UAC consent, a real
-LocalSystem service, Wintun, network policy, unprivileged status, teardown,
-and uninstall.
+Together they cover installation, UI-driven import, the persistent management
+broker from a UAC-filtered Administrator token, standard-user rejection, the
+one-operation UAC fallback, a real LocalSystem tunnel service, Wintun, network
+policy, unprivileged status, teardown, and uninstall. The Windows job also
+installs v0.2.0 first and upgrades it while a tunnel remains active. Because
+GitHub-hosted Windows disables UAC, its real Tauri/WebView lifecycle runs under
+a kernel-created `LUA_TOKEN` in the runner's existing session; the fixture
+fails unless that token is limited, non-elevated, and carries the
+Administrators SID only for deny checks.
 
 ## Privileges and platform boundary
 
-The webview process never runs as Administrator or root. On Windows,
-validation, imports, and tunnel start/stop are delegated to the narrow
-`wg-quic-quick desktop-helper` operation after UAC consent. Request values are
+The webview process never runs as Administrator or root. On Windows, the MSI
+uses its install-time elevation to register and start the narrow LocalSystem
+`wg-quic-manager` service. It authenticates the caller's named-pipe token and
+accepts only LocalSystem, a full local Administrator token, or the linked
+Administrator identity behind UAC filtering (including the kernel's exact
+limited-token deny-only representation). This gives the usual local
+Administrator account one-click import and tunnel controls while the desktop
+continues to run unelevated. A true standard user falls back to the existing
+one-operation UAC helper.
+
+The broker accepts only fixed validate/import/start/stop requests, bounded
+configuration bytes, and validated interface names; it never accepts an
+arbitrary executable, command line, or source path. Profiles containing
+`PreUp`, `PostUp`, `PreDown`, or `PostDown` are deliberately refused by the
+persistent broker and use the UAC helper, so passwordless tunnel management
+cannot become arbitrary LocalSystem command execution. UAC request values are
 sent over a one-use duplex local named pipe rather than inherited through the
-UAC environment or interpolated into PowerShell; only the random pipe name is
-placed on the helper command line. The result returns over the same pipe.
-Runtime status uses a separate status-only pipe; mutating core control remains
-restricted to LocalSystem and Administrators.
+elevated environment or interpolated into PowerShell. Runtime status uses a
+separate status-only pipe; mutating core control remains restricted to
+LocalSystem and Administrators.
 
 On Linux, privileged fixed operations are launched through `pkexec`. Imported
 configuration files are copied atomically with mode `0600`; the configuration
@@ -99,11 +117,22 @@ directory remains discoverable so the unprivileged UI can enumerate tunnel
 names. The status-only control socket permits observation without exposing
 activation or mutation.
 
-Before a Windows tunnel service is created, the native core, quick helper,
-and Wintun DLL are copied into an ACL-restricted, content-addressed runtime
-under `%ProgramData%\wg-quic\runtime`. The MSI installs the UI and helper under
-ACL-protected Program Files, so an unelevated process cannot replace the
-helper before UAC. Configuration and staged runtime data survive desktop
-uninstall, so uninstalling the UI cannot silently destroy an active tunnel.
+Before a Windows tunnel service is created, the native core, quick helper, and
+Wintun DLL are copied into a fresh unpredictable LocalSystem-owned directory
+under `%ProgramData%\wg-quic\runtime`; directory and file handles remain pinned
+until SCM reports the service running. ProgramData components are opened
+without following reparses or allowing delete-sharing, with a protected
+LocalSystem owner/DACL and single-link checks for privileged files. A legacy
+root that does not already have trusted provenance is atomically moved to a
+`.wg-quic-quarantine-*` directory before a clean root is created. Only valid,
+hook-free profiles are copied automatically; skipped profiles remain in the
+quarantine and must be reviewed and explicitly imported again.
+
+The MSI installs the UI and helper under ACL-protected Program Files, so an
+unelevated process cannot replace the broker or helper. Configuration and
+staged runtime data survive desktop uninstall, so uninstalling the UI cannot
+silently destroy an active tunnel. Runtimes are removed only after SCM confirms
+the corresponding tunnel service was deleted; broker startup also performs a
+fail-closed sweep of unreferenced remnants from interrupted operations.
 
 The desktop package intentionally targets only Windows and Linux.

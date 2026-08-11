@@ -144,8 +144,13 @@ sudo wg-quic-quick down wg0
 
 Windows preserves the same two-program boundary:
 `wg-quic.exe` owns the Wintun data plane, while `wg-quic-quick.exe` owns host
-`%ProgramData%\wg-quic\interfaces\`. The desktop prompts through a narrow UAC
-helper for imports and lifecycle changes; the equivalent elevated-terminal
+`%ProgramData%\wg-quic\interfaces\`. The per-machine MSI asks for elevation
+once and installs the `wg-quic-manager` LocalSystem service. An unelevated
+desktop running under a local Administrator account can then validate, import,
+start, and stop hook-free profiles through that narrow authenticated broker.
+Standard users, unavailable/incompatible broker versions, and profiles with
+`PreUp`, `PostUp`, `PreDown`, or `PostDown` retain the one-operation UAC helper;
+the desktop/WebView itself is never elevated. The equivalent elevated-terminal
 commands are:
 
 ```powershell
@@ -160,14 +165,17 @@ wg-quic-quick.exe down wg0 --repair
 The quick service runs as LocalSystem, supervises a separate sibling
 `wg-quic.exe`, and exposes an Administrators/System-only control Named Pipe
 plus a separate local status-only pipe using the same JSON request/response
-protocol as Unix sockets. Desktop-started services use an ACL-restricted,
-content-addressed native runtime under `%ProgramData%\wg-quic\runtime`, rather
-than the installer's replaceable application directory. The desktop itself is
-installed per-machine under ACL-protected Program Files by a WiX MSI. Shutdown
-uses bounded
-cleanup contexts, reports SCM checkpoints and wait hints for the current
-cleanup stage, and contains the core in a Windows Job Object. Normal `down`
-never force-terminates the service. The explicit
+protocol as Unix sockets. Desktop-started services use a fresh, unpredictable,
+LocalSystem-owned native runtime under `%ProgramData%\wg-quic\runtime`, rather
+than the installer's replaceable application directory. Privileged paths are
+opened without following reparses, and legacy permissive roots are isolated
+before a bounded batch of validated hook-free profiles is migrated. An active
+runtime survives desktop upgrade or uninstall; once SCM confirms a tunnel has
+stopped and its service record is gone, its retired runtime is reclaimed. The
+desktop itself is installed per-machine under ACL-protected Program Files by a
+WiX MSI. Shutdown uses bounded cleanup contexts, reports SCM checkpoints and
+wait hints for the current cleanup stage, and contains the core in a Windows
+Job Object. Normal `down` never force-terminates the service. The explicit
 `down --repair` path gives it a final graceful-stop window, may terminate only
 that tunnel's stuck service process, then removes the exact named residual
 Wintun adapter and reconciles only dead, provably managed route leases. Routes
@@ -199,9 +207,9 @@ Windows archives include the matching official Wintun DLL and its license.
 To build and validate the same six archives locally:
 
 ```sh
-make release-artifacts VERSION=0.2.0
+make release-artifacts VERSION=0.2.1
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.2.0-linux-amd64.tar.gz linux amd64 0.2.0
+  dist/wg-quic-v0.2.1-linux-amd64.tar.gz linux amd64 0.2.1
 ```
 
 The implementation and tests are under active development. See the local
