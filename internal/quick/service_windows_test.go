@@ -42,6 +42,185 @@ func TestWindowsQuickServiceReportsReadyAndStopsCleanly(t *testing.T) {
 	}
 }
 
+func TestWindowsQuickServiceStartupReportsProgressAndInterrogates(t *testing.T) {
+	requests := make(chan svc.ChangeRequest, 2)
+	changes := make(chan svc.Status, 16)
+	releaseStartup := make(chan struct{})
+	service := &windowsQuickService{
+		startupTimeout:    time.Second,
+		heartbeatInterval: 10 * time.Millisecond,
+		run: func(ctx context.Context, ready func(), _ func(string)) error {
+			select {
+			case <-releaseStartup:
+				ready()
+			case <-ctx.Done():
+				return nil
+			}
+			<-ctx.Done()
+			return nil
+		},
+	}
+	result := make(chan uint32, 1)
+	go func() {
+		_, code := service.Execute(nil, requests, changes)
+		result <- code
+	}()
+
+	first := expectWindowsServiceStatus(t, changes)
+	if first.State != svc.StartPending || first.CheckPoint == 0 ||
+		first.WaitHint != uint32(windowsServiceWaitHint/time.Millisecond) {
+		t.Fatalf("initial Windows service startup status = %#v", first)
+	}
+	requests <- svc.ChangeRequest{
+		Cmd:           svc.Interrogate,
+		CurrentStatus: svc.Status{State: svc.Running},
+	}
+	interrogated := expectWindowsServiceStatus(t, changes)
+	if interrogated.State != svc.StartPending ||
+		interrogated.CheckPoint < first.CheckPoint ||
+		interrogated.WaitHint != first.WaitHint {
+		t.Fatalf(
+			"interrogated startup status = %#v after %#v",
+			interrogated, first,
+		)
+	}
+
+	var heartbeat svc.Status
+	for heartbeat.CheckPoint <= interrogated.CheckPoint {
+		heartbeat = expectWindowsServiceStatus(t, changes)
+		if heartbeat.State != svc.StartPending {
+			t.Fatalf("startup heartbeat state = %v", heartbeat.State)
+		}
+	}
+	close(releaseStartup)
+	for {
+		status := expectWindowsServiceStatus(t, changes)
+		if status.State == svc.Running {
+			break
+		}
+		if status.State != svc.StartPending {
+			t.Fatalf("startup transition state = %v", status.State)
+		}
+	}
+	requests <- svc.ChangeRequest{Cmd: svc.Stop}
+	expectWindowsServiceState(t, changes, svc.StopPending)
+	select {
+	case code := <-result:
+		if code != 0 {
+			t.Fatalf("startup progress service exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("startup progress service did not stop")
+	}
+}
+
+func TestWindowsQuickServiceStartupTimeoutIsBounded(t *testing.T) {
+	requests := make(chan svc.ChangeRequest, 1)
+	changes := make(chan svc.Status, 64)
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	var logs []string
+	service := &windowsQuickService{
+		startupTimeout:    50 * time.Millisecond,
+		shutdownTimeout:   50 * time.Millisecond,
+		heartbeatInterval: 10 * time.Millisecond,
+		logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+		run: func(ctx context.Context, _ func(), _ func(string)) error {
+			<-ctx.Done()
+			close(canceled)
+			<-release
+			return nil
+		},
+	}
+	result := make(chan uint32, 1)
+	go func() {
+		_, code := service.Execute(nil, requests, changes)
+		result <- code
+	}()
+
+	var startupCheckpoints []uint32
+	var stopCheckpoints []uint32
+	for {
+		select {
+		case status := <-changes:
+			switch status.State {
+			case svc.StartPending:
+				if status.WaitHint != uint32(windowsServiceWaitHint/time.Millisecond) {
+					t.Fatalf("startup wait hint = %d", status.WaitHint)
+				}
+				startupCheckpoints = append(startupCheckpoints, status.CheckPoint)
+			case svc.StopPending:
+				stopCheckpoints = append(stopCheckpoints, status.CheckPoint)
+			default:
+				t.Fatalf("startup timeout state = %v", status.State)
+			}
+		case code := <-result:
+			if code != 1 {
+				t.Fatalf("startup timeout exit code = %d, want 1", code)
+			}
+			goto complete
+		case <-time.After(time.Second):
+			t.Fatal("startup timeout did not bound service execution")
+		}
+	}
+
+complete:
+	for draining := true; draining; {
+		select {
+		case status := <-changes:
+			if status.State != svc.StopPending {
+				t.Fatalf("status after startup timeout = %v", status.State)
+			}
+			stopCheckpoints = append(stopCheckpoints, status.CheckPoint)
+		default:
+			draining = false
+		}
+	}
+	if len(startupCheckpoints) < 2 {
+		t.Fatalf(
+			"startup checkpoints = %v, want initial status and heartbeat",
+			startupCheckpoints,
+		)
+	}
+	for index := 1; index < len(startupCheckpoints); index++ {
+		if startupCheckpoints[index] <= startupCheckpoints[index-1] {
+			t.Fatalf("startup checkpoints did not advance: %v", startupCheckpoints)
+		}
+	}
+	if len(stopCheckpoints) < 2 {
+		t.Fatalf(
+			"shutdown checkpoints = %v, want initial status and heartbeat",
+			stopCheckpoints,
+		)
+	}
+	select {
+	case <-canceled:
+	default:
+		t.Fatal("startup timeout did not cancel the service context")
+	}
+	joinedLogs := strings.Join(logs, "\n")
+	if !strings.Contains(joinedLogs, "startup timed out") ||
+		!strings.Contains(joinedLogs, "shutdown timed out") {
+		t.Fatalf("startup timeout logs = %q", joinedLogs)
+	}
+}
+
+func TestWindowsQuickServiceDeadlinesFitDesktopBrokerWindow(t *testing.T) {
+	const resultDeliveryMargin = 5 * time.Second
+	lifecycle := defaultWindowsServiceStartupTimeout +
+		defaultWindowsServiceShutdownTimeout +
+		defaultWindowsRuntimeCleanupTimeout
+	if lifecycle > windowsDesktopOperationTimeout-resultDeliveryMargin {
+		t.Fatalf(
+			"failed-start lifecycle budget %s exceeds desktop broker budget %s minus result margin %s",
+			lifecycle, windowsDesktopOperationTimeout, resultDeliveryMargin,
+		)
+	}
+}
+
 func TestWindowsQuickServiceFailsBeforeReady(t *testing.T) {
 	changes := make(chan svc.Status, 2)
 	service := &windowsQuickService{
@@ -207,12 +386,19 @@ func TestWindowsServiceNameIsNamespaced(t *testing.T) {
 
 func expectWindowsServiceState(t *testing.T, changes <-chan svc.Status, want svc.State) {
 	t.Helper()
+	status := expectWindowsServiceStatus(t, changes)
+	if status.State != want {
+		t.Fatalf("service state = %v, want %v", status.State, want)
+	}
+}
+
+func expectWindowsServiceStatus(t *testing.T, changes <-chan svc.Status) svc.Status {
+	t.Helper()
 	select {
 	case status := <-changes:
-		if status.State != want {
-			t.Fatalf("service state = %v, want %v", status.State, want)
-		}
+		return status
 	case <-time.After(5 * time.Second):
-		t.Fatalf("timed out waiting for service state %v", want)
+		t.Fatal("timed out waiting for Windows service status")
+		return svc.Status{}
 	}
 }

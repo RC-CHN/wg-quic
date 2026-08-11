@@ -13,6 +13,11 @@ import (
 )
 
 const (
+	// Keep the complete failed-start lifecycle inside the desktop broker's
+	// 90-second operation deadline: 45 seconds starting, 25 seconds stopping,
+	// and up to 15 seconds for the manager's secure runtime rollback leave a
+	// five-second result-delivery margin.
+	defaultWindowsServiceStartupTimeout  = 45 * time.Second
 	defaultWindowsServiceShutdownTimeout = 25 * time.Second
 	defaultWindowsServiceHeartbeat       = time.Second
 	windowsServiceWaitHint               = 5 * time.Second
@@ -55,6 +60,7 @@ func RunWindowsService(
 
 type windowsQuickService struct {
 	run               func(context.Context, func(), func(string)) error
+	startupTimeout    time.Duration
 	shutdownTimeout   time.Duration
 	heartbeatInterval time.Duration
 	logf              func(string, ...any)
@@ -62,7 +68,23 @@ type windowsQuickService struct {
 
 func (s *windowsQuickService) Execute(_ []string, requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	const accepted = svc.AcceptStop | svc.AcceptShutdown
-	changes <- svc.Status{State: svc.StartPending}
+	startupTimeout := s.startupTimeout
+	if startupTimeout <= 0 {
+		startupTimeout = defaultWindowsServiceStartupTimeout
+	}
+	heartbeat := s.heartbeatInterval
+	if heartbeat <= 0 {
+		heartbeat = defaultWindowsServiceHeartbeat
+	}
+	startupCheckpoint := uint32(1)
+	startupStatus := func() svc.Status {
+		return svc.Status{
+			State:      svc.StartPending,
+			CheckPoint: startupCheckpoint,
+			WaitHint:   uint32(windowsServiceWaitHint / time.Millisecond),
+		}
+	}
+	changes <- startupStatus()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan struct{})
@@ -81,12 +103,52 @@ func (s *windowsQuickService) Execute(_ []string, requests <-chan svc.ChangeRequ
 			},
 		)
 	}()
-	select {
-	case err := <-result:
-		return s.finish(err)
-	case <-ready:
-		changes <- svc.Status{State: svc.Running, Accepts: accepted}
+	startupTimer := time.NewTimer(startupTimeout)
+	defer startupTimer.Stop()
+	startupTicker := time.NewTicker(heartbeat)
+	defer startupTicker.Stop()
+startup:
+	for {
+		select {
+		case err := <-result:
+			return s.finish(err)
+		case <-ready:
+			changes <- svc.Status{State: svc.Running, Accepts: accepted}
+			break startup
+		case request, ok := <-requests:
+			if !ok {
+				return s.shutdown(
+					cancel, nil, result, progress, changes,
+				)
+			}
+			switch request.Cmd {
+			case svc.Interrogate:
+				changes <- startupStatus()
+			case svc.Stop, svc.Shutdown:
+				return s.shutdown(
+					cancel, requests, result, progress, changes,
+				)
+			}
+		case <-startupTicker.C:
+			startupCheckpoint++
+			changes <- startupStatus()
+		case <-startupTimer.C:
+			s.logger()(
+				"Windows service startup timed out after %s: checkpoint=%d wait_hint=%dms; canceling startup",
+				startupTimeout, startupCheckpoint,
+				uint32(windowsServiceWaitHint/time.Millisecond),
+			)
+			_, code := s.shutdown(
+				cancel, requests, result, progress, changes,
+			)
+			if code == 0 {
+				code = 1
+			}
+			return false, code
+		}
 	}
+	startupTimer.Stop()
+	startupTicker.Stop()
 	for {
 		select {
 		case err := <-result:
