@@ -93,6 +93,7 @@ type fakeRuntimeLifecycleService struct {
 	statusErr     error
 	startErr      error
 	controlErr    error
+	controlErrors []error
 	deleteErr     error
 	closeErr      error
 	startCalls    int
@@ -129,13 +130,18 @@ func (s *fakeRuntimeLifecycleService) start(...string) error {
 func (s *fakeRuntimeLifecycleService) control(
 	command svc.Cmd,
 ) (svc.Status, error) {
+	controlErr := s.controlErr
 	if command == svc.Stop {
 		s.stopCalls++
-		if s.controlErr == nil {
+		if len(s.controlErrors) != 0 {
+			controlErr = s.controlErrors[0]
+			s.controlErrors = s.controlErrors[1:]
+		}
+		if controlErr == nil {
 			s.statuses = []svc.Status{{State: svc.Stopped}}
 		}
 	}
-	return svc.Status{}, s.controlErr
+	return svc.Status{}, controlErr
 }
 
 func (s *fakeRuntimeLifecycleService) delete() error {
@@ -397,7 +403,7 @@ func TestWindowsRuntimeMissingServiceDiagnosticPreservesPrimaryFailure(
 	}
 }
 
-func TestWindowsRuntimeRollbackRetainsRuntimeUntilServiceDeletionConfirmed(
+func TestWindowsRuntimeRollbackRetainsServiceAndRuntimeWhenStopUnconfirmed(
 	t *testing.T,
 ) {
 	originalTimeout := windowsRuntimeCleanupTimeout
@@ -405,30 +411,142 @@ func TestWindowsRuntimeRollbackRetainsRuntimeUntilServiceDeletionConfirmed(
 	defer func() { windowsRuntimeCleanupTimeout = originalTimeout }()
 
 	manager := newFakeRuntimeLifecycleManager()
-	manager.created = &fakeRuntimeLifecycleService{
-		statuses:      []svc.Status{{State: svc.StartPending}},
-		controlErr:    windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL,
-		retainDeleted: true,
+	serviceName := windowsServiceName("office")
+	service := &fakeRuntimeLifecycleService{
+		manager:    manager,
+		name:       serviceName,
+		statuses:   []svc.Status{{State: svc.StartPending}},
+		controlErr: windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL,
 	}
+	manager.services[serviceName] = service
 	const runtime = `C:\ProgramData\wg-quic\runtime\run-pending\wg-quic-quick.exe`
 	var cleaned []string
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := startWindowsServiceManaged(
-		ctx,
+	stage := windowsRuntimeStage{executable: runtime}
+	beforeDeleteCalls := 0
+	err := rollbackWindowsStartedServiceBeforeDelete(
 		manager,
-		"office",
-		false,
+		service,
+		serviceName,
+		&stage,
 		fakeRuntimeOperations(runtime, &cleaned),
+		func() error {
+			beforeDeleteCalls++
+			return nil
+		},
 	)
 	if err == nil {
-		t.Fatal("Running wait and rollback unexpectedly succeeded")
+		t.Fatal("rollback unexpectedly confirmed the pending service stopped")
 	}
 	if len(cleaned) != 0 {
-		t.Fatalf("unconfirmed service deletion cleaned runtimes = %q", cleaned)
+		t.Fatalf("unconfirmed rollback cleaned runtimes = %q", cleaned)
 	}
-	if manager.created.deleteCalls != 1 {
-		t.Fatalf("pending rollback delete calls = %d", manager.created.deleteCalls)
+	if service.deleteCalls != 0 || service.closeCalls != 1 {
+		t.Fatalf(
+			"pending rollback delete/close calls = %d/%d",
+			service.deleteCalls,
+			service.closeCalls,
+		)
+	}
+	if beforeDeleteCalls != 0 {
+		t.Fatalf("pending rollback before-delete calls = %d", beforeDeleteCalls)
+	}
+	if manager.services[serviceName] != service {
+		t.Fatal("pending rollback did not retain the controllable service")
+	}
+	if !strings.Contains(err.Error(), "remained StartPending") {
+		t.Fatalf("pending rollback error = %v", err)
+	}
+}
+
+func TestWindowsRuntimeRollbackRetriesStopAfterStartPendingBecomesRunning(
+	t *testing.T,
+) {
+	manager := newFakeRuntimeLifecycleManager()
+	serviceName := windowsServiceName("office")
+	service := &fakeRuntimeLifecycleService{
+		manager: manager,
+		name:    serviceName,
+		statuses: []svc.Status{
+			{State: svc.StartPending},
+			{State: svc.Running},
+		},
+		controlErrors: []error{
+			windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL,
+			nil,
+		},
+	}
+	manager.services[serviceName] = service
+	const runtime = `C:\ProgramData\wg-quic\runtime\run-retry\wg-quic-quick.exe`
+	var cleaned []string
+	stage := windowsRuntimeStage{executable: runtime}
+	beforeDeleteCalls := 0
+	if err := rollbackWindowsStartedServiceBeforeDelete(
+		manager,
+		service,
+		serviceName,
+		&stage,
+		fakeRuntimeOperations(runtime, &cleaned),
+		func() error {
+			beforeDeleteCalls++
+			if service.deleteCalls != 0 || len(cleaned) != 0 {
+				t.Fatal("before-delete callback ran after deletion or cleanup")
+			}
+			return nil
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if service.stopCalls != 2 || service.deleteCalls != 1 {
+		t.Fatalf(
+			"transitioning rollback stop/delete calls = %d/%d",
+			service.stopCalls,
+			service.deleteCalls,
+		)
+	}
+	if beforeDeleteCalls != 1 {
+		t.Fatalf("transitioning rollback before-delete calls = %d", beforeDeleteCalls)
+	}
+	if len(cleaned) != 1 || cleaned[0] != runtime {
+		t.Fatalf("transitioning rollback cleaned runtimes = %q", cleaned)
+	}
+}
+
+func TestWindowsRuntimeRollbackJoinsBeforeDeleteErrorAndStillCleansStoppedService(
+	t *testing.T,
+) {
+	manager := newFakeRuntimeLifecycleManager()
+	serviceName := windowsServiceName("office")
+	service := &fakeRuntimeLifecycleService{
+		manager:  manager,
+		name:     serviceName,
+		statuses: []svc.Status{{State: svc.Stopped}},
+	}
+	manager.services[serviceName] = service
+	const runtime = `C:\ProgramData\wg-quic\runtime\run-diagnostic\wg-quic-quick.exe`
+	var cleaned []string
+	stage := windowsRuntimeStage{executable: runtime}
+	diagnosticErr := errors.New("read startup diagnostic")
+	err := rollbackWindowsStartedServiceBeforeDelete(
+		manager,
+		service,
+		serviceName,
+		&stage,
+		fakeRuntimeOperations(runtime, &cleaned),
+		func() error {
+			if service.deleteCalls != 0 || len(cleaned) != 0 {
+				t.Fatal("before-delete callback ran after deletion or cleanup")
+			}
+			return diagnosticErr
+		},
+	)
+	if !errors.Is(err, diagnosticErr) {
+		t.Fatalf("rollback error = %v, want diagnostic error", err)
+	}
+	if service.deleteCalls != 1 {
+		t.Fatalf("stopped rollback delete calls = %d", service.deleteCalls)
+	}
+	if len(cleaned) != 1 || cleaned[0] != runtime {
+		t.Fatalf("stopped rollback cleaned runtimes = %q", cleaned)
 	}
 }
 

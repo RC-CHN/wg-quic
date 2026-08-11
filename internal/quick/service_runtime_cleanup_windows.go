@@ -209,6 +209,24 @@ func rollbackWindowsStartedService(
 	stage *windowsRuntimeStage,
 	operation windowsRuntimeLifecycleOperations,
 ) error {
+	return rollbackWindowsStartedServiceBeforeDelete(
+		manager,
+		service,
+		serviceName,
+		stage,
+		operation,
+		nil,
+	)
+}
+
+func rollbackWindowsStartedServiceBeforeDelete(
+	manager windowsServiceLifecycleManager,
+	service windowsServiceLifecycleService,
+	serviceName string,
+	stage *windowsRuntimeStage,
+	operation windowsRuntimeLifecycleOperations,
+	beforeDelete func() error,
+) error {
 	rollbackContext, cancel := context.WithTimeout(
 		context.Background(),
 		windowsRuntimeCleanupTimeout,
@@ -216,26 +234,30 @@ func rollbackWindowsStartedService(
 	defer cancel()
 
 	var rollbackErrors []error
-	status, statusErr := service.status()
-	if statusErr != nil || status.State != svc.Stopped {
-		if statusErr != nil || status.State != svc.StopPending {
-			if _, stopErr := service.control(svc.Stop); stopErr != nil &&
-				!errors.Is(stopErr, windows.ERROR_SERVICE_NOT_ACTIVE) &&
-				!errors.Is(stopErr, windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL) {
-				rollbackErrors = append(rollbackErrors, fmt.Errorf(
-					"request rollback stop for Windows service %s: %w",
-					serviceName,
-					stopErr,
-				))
-			}
+	stopped, stopErr := confirmWindowsStartedServiceStopped(
+		rollbackContext,
+		service,
+		serviceName,
+	)
+	if stopErr != nil {
+		rollbackErrors = append(rollbackErrors, stopErr)
+	}
+	if !stopped {
+		if closeErr := service.close(); closeErr != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf(
+				"close retained Windows service %s after rollback could not confirm it stopped: %w",
+				serviceName,
+				closeErr,
+			))
 		}
-		if waitErr := waitWindowsLifecycleServiceState(
-			rollbackContext,
-			service,
-			serviceName,
-			svc.Stopped,
-		); waitErr != nil {
-			rollbackErrors = append(rollbackErrors, waitErr)
+		if closeErr := closeWindowsRuntimeStage(stage); closeErr != nil {
+			rollbackErrors = append(rollbackErrors, closeErr)
+		}
+		return errors.Join(rollbackErrors...)
+	}
+	if beforeDelete != nil {
+		if err := beforeDelete(); err != nil {
+			rollbackErrors = append(rollbackErrors, err)
 		}
 	}
 	deleteAccepted := true
@@ -278,6 +300,80 @@ func rollbackWindowsStartedService(
 		)
 	}
 	return errors.Join(rollbackErrors...)
+}
+
+func confirmWindowsStartedServiceStopped(
+	ctx context.Context,
+	service windowsServiceLifecycleService,
+	serviceName string,
+) (bool, error) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	started := time.Now()
+	var (
+		last                 svc.Status
+		haveLast             bool
+		lastStopAttemptState svc.State
+		haveStopAttempt      bool
+		stopErrors           []error
+	)
+	for {
+		status, err := service.status()
+		if err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf(
+				"query Windows service %s during rollback: %w",
+				serviceName,
+				err,
+			))
+			return false, errors.Join(stopErrors...)
+		}
+		previous := last
+		stateChanged := !haveLast || status.State != last.State
+		last = status
+		haveLast = true
+		if status.State == svc.Stopped {
+			if status.Win32ExitCode != 0 ||
+				status.ServiceSpecificExitCode != 0 {
+				if previous.State != svc.StopPending {
+					previous = status
+				}
+				stopErrors = append(stopErrors, windowsServiceStoppedError(
+					serviceName,
+					previous,
+					status,
+					time.Since(started),
+				))
+			}
+			return true, errors.Join(stopErrors...)
+		}
+		if status.State != svc.StopPending &&
+			(stateChanged || !haveStopAttempt ||
+				status.State != lastStopAttemptState) {
+			haveStopAttempt = true
+			lastStopAttemptState = status.State
+			if _, err := service.control(svc.Stop); err != nil &&
+				!errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) &&
+				!errors.Is(err, windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL) {
+				stopErrors = append(stopErrors, fmt.Errorf(
+					"request rollback stop for Windows service %s: %w",
+					serviceName,
+					err,
+				))
+			}
+		}
+		select {
+		case <-ctx.Done():
+			stopErrors = append(stopErrors, windowsServiceWaitError(
+				ctx.Err(),
+				serviceName,
+				svc.Stopped,
+				last,
+				time.Since(started),
+			))
+			return false, errors.Join(stopErrors...)
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitWindowsLifecycleServiceState(
