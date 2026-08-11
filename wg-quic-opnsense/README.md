@@ -69,11 +69,11 @@ make lint
 make package
 ```
 
-Version 0.1.0 targets OPNsense 26.1/FreeBSD 14 amd64 and
+Version 0.2.0 targets OPNsense 26.1/FreeBSD 14 amd64 and
 OPNsense 26.7/FreeBSD 15 amd64. Install a matching private package with:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.1.0-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.2.0-opnsense-26.7-amd64.pkg
 ```
 
 Remove it with `pkg delete os-wg-quic`.

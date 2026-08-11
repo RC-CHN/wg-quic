@@ -2,18 +2,28 @@
 
 ## Unreleased
 
-- Fixed Windows desktop imports and tunnel controls by delegating only the
-  privileged operation to a narrow UAC helper while leaving Electron
-  unelevated.
-- Replaced the per-user Squirrel package with a per-machine WiX MSI so the
-  elevation helper is installed under ACL-protected Program Files.
-- Added a local status-only Named Pipe so the desktop can display live tunnel
-  state without opening mutating control operations to unelevated callers.
-- Staged Windows service binaries in an ACL-restricted, content-addressed
-  ProgramData runtime so desktop upgrades and UI removal cannot invalidate an
-  installed tunnel service.
-- Added a Windows CI lifecycle that installs the generated MSI,
-  drives import/start/status/stop through the desktop, and uninstalls it.
+## v0.2.0 - 2026-08-11
+
+Protocol freeze, native desktop, and appliance observability release.
+
+- Froze the v1 wire contract for QUIC, WGQ1 fragmentation, WGQF FEC, and
+  Salamander obfuscation, with golden compatibility vectors and explicit
+  versioning rules.
+- Replaced the Electron shell with a smaller Tauri desktop for Windows and
+  Linux while retaining `wg-quic-quick` as the single tunnel lifecycle
+  implementation.
+- Added per-machine WiX MSI and Debian packages, constrained desktop operation
+  helpers, narrow UAC elevation, protected Windows runtime staging, and
+  read-only status endpoints for unprivileged clients.
+- Exposed live peer/session state consistently on Windows, Linux, FreeBSD, and
+  OPNsense, including WebUI status counters and notice-level service logs.
+- Hardened shutdown and crash cleanup for Windows services, Unix supervisors,
+  systemd control groups, FreeBSD child processes, endpoint routes, and
+  recoverable network-policy ledgers.
+- Added installed-package lifecycle coverage on native Windows and Linux
+  runners, Windows-to-Linux Proton interoperability over QUIC/FEC/Salamander,
+  and browser-driven OPNsense peer provisioning and traffic verification in
+  QEMU.
 
 ## v0.1.2 - 2026-08-05
 
