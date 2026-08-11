@@ -89,10 +89,17 @@ if ! sudo "$quick" up "$tunnel_name"; then
 fi
 
 ready=false
+status=
 for _ in {1..150}; do
+    candidate_status=$($core show "$tunnel_name" --json 2>/dev/null || true)
     if systemctl is-active --quiet "wg-quic@$tunnel_name.service" &&
         ip link show dev "$tunnel_name" >/dev/null 2>&1 &&
-        [[ -S $primary_socket && -S $status_socket ]]; then
+        [[ -S $primary_socket && -S $status_socket ]] &&
+        grep -Eq '"interface"[[:space:]]*:[[:space:]]*"'"$tunnel_name"'"' \
+            <<<"$candidate_status" &&
+        grep -Eq '"state"[[:space:]]*:[[:space:]]*"up"' \
+            <<<"$candidate_status"; then
+        status=$candidate_status
         ready=true
         break
     fi
@@ -105,7 +112,6 @@ if [[ $ready != true ]]; then
     exit 1
 fi
 
-status=$($core show "$tunnel_name" --json)
 grep -Eq '"interface"[[:space:]]*:[[:space:]]*"'"$tunnel_name"'"' \
     <<<"$status"
 grep -Eq '"state"[[:space:]]*:[[:space:]]*"up"' <<<"$status"
