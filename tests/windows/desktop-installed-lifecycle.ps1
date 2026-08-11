@@ -92,6 +92,8 @@ if (-not $principal.IsInRole(
 
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $installRoot = Join-Path $env:ProgramFiles "wg-quic"
+$managerServiceName = "wg-quic-manager"
+$manager = Join-Path $installRoot "wg-quic-manager.exe"
 $fixtureRoot = Join-Path $env:TEMP "wg-quic-desktop-install-$PID"
 $tunnelName = "wgqdesk$PID"
 $sourceConfig = Join-Path $fixtureRoot "$tunnelName.conf"
@@ -122,15 +124,49 @@ $core = $null
 $installedWintun = $null
 $stagedQuick = $null
 $stagedCore = $null
+$directRuntimeDirectory = $null
 $installed = $false
 $standardUserName = "wgqdesk$PID"
 $standardUserCreated = $false
+$filteredAdminUserName = "wgqadmin$PID"
+$filteredAdminUserCreated = $false
+$filteredAdminTaskName = "wg-quic-filtered-admin-$PID"
+$filteredAdminTaskRegistered = $false
 $standardUserRoot = Join-Path $env:PUBLIC "wg-quic-ci-$PID"
+$filteredDesktopTunnelName = "wgqmedium$PID"
+$filteredDesktopServiceName = "wg-quic-quick@$filteredDesktopTunnelName"
+$filteredDesktopSource = Join-Path $standardUserRoot (
+    "$filteredDesktopTunnelName.conf"
+)
+$filteredDesktopResult = Join-Path $standardUserRoot (
+    "filtered-desktop.result.txt"
+)
+$filteredDesktopStdout = Join-Path $standardUserRoot (
+    "filtered-desktop.stdout.txt"
+)
+$filteredDesktopStderr = Join-Path $standardUserRoot (
+    "filtered-desktop.stderr.txt"
+)
+$filteredDesktopInstalledConfig = Join-Path (
+    Join-Path $env:ProgramData "wg-quic\interfaces"
+) "$filteredDesktopTunnelName.conf"
+$filteredRetiredRuntimeResult = Join-Path $standardUserRoot (
+    "filtered-retired-runtime.txt"
+)
 $desktopIpcProbe = Join-Path $standardUserRoot "desktop-ipc-probe.exe"
+$managementPipeSquatProbe = Join-Path $standardUserRoot (
+    "management-pipe-squat-probe.exe"
+)
+$limitedTokenLauncher = Join-Path $standardUserRoot (
+    "limited-token-launcher.exe"
+)
 $desktopIpcReady = Join-Path $standardUserRoot "desktop-ipc.ready.json"
 $desktopIpcResult = Join-Path $standardUserRoot "desktop-ipc.result.txt"
 $desktopIpcStdout = Join-Path $standardUserRoot "desktop-ipc.stdout.txt"
 $desktopIpcStderr = Join-Path $standardUserRoot "desktop-ipc.stderr.txt"
+$brokerStatusResult = Join-Path $standardUserRoot "broker-status.json"
+$filteredAdminScript = Join-Path $standardUserRoot "filtered-admin-check.ps1"
+$filteredAdminResult = Join-Path $standardUserRoot "filtered-admin-result.txt"
 
 try {
     New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
@@ -167,7 +203,8 @@ try {
             -Recurse -File -Filter "wg-quic-desktop.exe" `
             -ErrorAction SilentlyContinue |
             Select-Object -First 1
-        if ($null -eq $quickItem -or $null -eq $desktopItem) {
+        if ($null -eq $quickItem -or $null -eq $desktopItem -or
+            -not (Test-Path -LiteralPath $manager -PathType Leaf)) {
             return $false
         }
         $script:quick = $quickItem.FullName
@@ -179,9 +216,48 @@ try {
     }
     Write-Host "desktop=$desktop"
     Write-Host "quick=$quick"
+    Write-Host "manager=$manager"
+
+    Wait-For -Description "the installed management service" `
+        -TimeoutSeconds 60 -Condition {
+            $candidateManagerService = Get-CimInstance `
+                -ClassName Win32_Service `
+                -Filter "Name='$managerServiceName'" `
+                -ErrorAction SilentlyContinue
+            $null -ne $candidateManagerService -and
+                $candidateManagerService.State -eq "Running"
+        }
+    $managerService = Get-CimInstance -ClassName Win32_Service `
+        -Filter "Name='$managerServiceName'" -ErrorAction Stop
+    if ($managerService.StartMode -ne "Auto") {
+        throw (
+            "$managerServiceName start mode is " +
+            "$($managerService.StartMode), expected Auto"
+        )
+    }
+    if ($managerService.StartName -ne "LocalSystem") {
+        throw (
+            "$managerServiceName runs as $($managerService.StartName), " +
+            "expected LocalSystem"
+        )
+    }
+    $expectedManagerPathName = "`"$manager`" broker-service"
+    if (-not ($managerService.PathName.Equals(
+        $expectedManagerPathName,
+        [StringComparison]::OrdinalIgnoreCase
+    ))) {
+        throw (
+            "$managerServiceName PathName is '$($managerService.PathName)', " +
+            "expected '$expectedManagerPathName'"
+        )
+    }
+    Write-Host (
+        "installed management service is Running/Auto/LocalSystem at " +
+        $expectedManagerPathName
+    )
 
     $unsafeSids = @("S-1-5-32-545", "S-1-5-11", "S-1-1-0")
-    foreach ($protectedExecutable in @($desktop, $quick)) {
+    foreach ($protectedExecutable in @($desktop, $quick, $manager)) {
         $executableAcl = Get-Acl -LiteralPath $protectedExecutable
         $unsafeRule = @(
             $executableAcl.GetAccessRules(
@@ -205,6 +281,32 @@ try {
         }
     }
     Write-Host "installed executable ACLs are protected"
+
+    $administratorBrokerStatus = $null
+    Wait-For -Description "the Administrator management broker status" `
+        -TimeoutSeconds 30 -Condition {
+            $statusText = Invoke-Native -FilePath $quick `
+                -Arguments @("desktop-broker-status")
+            $candidateStatus = $statusText | ConvertFrom-Json
+            if ($candidateStatus.status -ne "ready") {
+                throw "management broker returned $statusText"
+            }
+            $script:administratorBrokerStatus = $candidateStatus
+            return $true
+        }
+    if ($administratorBrokerStatus.service_name -ne $managerServiceName) {
+        throw (
+            "management broker reported service_name " +
+            "'$($administratorBrokerStatus.service_name)'"
+        )
+    }
+    if ([int] $administratorBrokerStatus.protocol_version -ne 1) {
+        throw (
+            "management broker reported protocol_version " +
+            "'$($administratorBrokerStatus.protocol_version)'"
+        )
+    }
+    Write-Host "Administrator management broker status is ready"
 
     $core = Join-Path (Split-Path -Parent $quick) "wg-quic.exe"
     $installedWintun = Join-Path (Split-Path -Parent $quick) "wintun.dll"
@@ -328,17 +430,14 @@ PersistentKeepalive = 1
     if ($unsafeDirectoryWrite.Count -ne 0) {
         throw "desktop configuration directory is writable by ordinary users"
     }
-    $runtimeFiles = @(
-        Get-ChildItem -LiteralPath (
-            Join-Path $env:ProgramData "wg-quic\runtime"
-        ) -Recurse -File -ErrorAction Stop |
-        Where-Object {
-            $_.Name -in @("wg-quic.exe", "wg-quic-quick.exe", "wintun.dll")
+    $runtimeRoot = Join-Path $env:ProgramData "wg-quic\runtime"
+    Wait-For -Description "the desktop smoke runtime cleanup" `
+        -TimeoutSeconds 30 -Condition {
+            @(
+                Get-ChildItem -LiteralPath $runtimeRoot -Directory `
+                    -Filter "run-*" -ErrorAction Stop
+            ).Count -eq 0
         }
-    )
-    if ($runtimeFiles.Count -lt 3) {
-        throw "installed desktop did not stage a stable service runtime"
-    }
 
     Write-Host $desktopOutput
 
@@ -441,6 +540,7 @@ PersistentKeepalive = 1
     if (-not (Test-Path -LiteralPath $stagedCore -PathType Leaf)) {
         throw "active service runtime is missing $stagedCore"
     }
+    $directRuntimeDirectory = Split-Path -Parent $stagedQuick
 
     $passwordText = "Wgq!1aA$([Guid]::NewGuid().ToString('N'))"
     $securePassword = ConvertTo-SecureString $passwordText `
@@ -479,6 +579,18 @@ PersistentKeepalive = 1
             "-o", $desktopIpcProbe,
             "./tests/windows/desktop-ipc-probe"
         ) | Out-Null
+        Invoke-Native -FilePath $goExecutable -Arguments @(
+            "build",
+            "-trimpath",
+            "-o", $managementPipeSquatProbe,
+            "./tests/windows/management-pipe-squat-probe"
+        ) | Out-Null
+        Invoke-Native -FilePath $goExecutable -Arguments @(
+            "build",
+            "-trimpath",
+            "-o", $limitedTokenLauncher,
+            "./tests/windows/limited-token-launcher"
+        ) | Out-Null
     }
     finally {
         Pop-Location
@@ -486,6 +598,31 @@ PersistentKeepalive = 1
     if (-not (Test-Path -LiteralPath $desktopIpcProbe -PathType Leaf)) {
         throw "desktop IPC probe build did not produce $desktopIpcProbe"
     }
+    if (-not (Test-Path -LiteralPath $managementPipeSquatProbe -PathType Leaf)) {
+        throw (
+            "management pipe squat probe build did not produce " +
+            $managementPipeSquatProbe
+        )
+    }
+    if (-not (Test-Path -LiteralPath $limitedTokenLauncher -PathType Leaf)) {
+        throw (
+            "limited token launcher build did not produce " +
+            $limitedTokenLauncher
+        )
+    }
+    $positiveSquatOutput = @(& $managementPipeSquatProbe created 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        ($positiveSquatOutput | Out-String) -notmatch
+            "management pipe instance creation succeeded") {
+        throw (
+            "elevated management pipe instance positive control failed`: " +
+            ($positiveSquatOutput | Out-String)
+        )
+    }
+    Write-Host (
+        "elevated management pipe instance positive control passed with " +
+        "the broker's exact pipe parameters"
+    )
     $standardCredential = [Management.Automation.PSCredential]::new(
         "$env:COMPUTERNAME\$standardUserName",
         $securePassword
@@ -592,6 +729,29 @@ PersistentKeepalive = 1
         "(standard-user listener -> Administrator helper)"
     )
 
+    $brokerConfigPathsBefore = @(
+        Get-ChildItem -LiteralPath (Split-Path -Parent $installedConfig) `
+            -Filter "*.conf" -File -ErrorAction Stop |
+            ForEach-Object { $_.FullName } |
+            Sort-Object
+    )
+    $brokerConfigHashBefore = (
+        Get-FileHash -LiteralPath $installedConfig -Algorithm SHA256
+    ).Hash
+    $brokerTunnelServicesBefore = @(
+        Get-Service -ErrorAction Stop |
+            Where-Object { $_.Name.StartsWith("wg-quic-quick@") } |
+            ForEach-Object { "$($_.Name)|$($_.Status)" } |
+            Sort-Object
+    )
+    $brokerAdapterBefore = Get-NetAdapter -Name $tunnelName `
+        -ErrorAction Stop
+    $brokerAdapterIdentityBefore = (
+        "$($brokerAdapterBefore.Name)|$($brokerAdapterBefore.ifIndex)|" +
+        "$($brokerAdapterBefore.Status)|" +
+        $brokerAdapterBefore.InterfaceDescription
+    )
+
     $standardScript = Join-Path $standardUserRoot "status-check.ps1"
     $standardResult = Join-Path $standardUserRoot "result.txt"
     $standardStdout = Join-Path $standardUserRoot "stdout.txt"
@@ -601,6 +761,9 @@ param(
     [string] $Core,
     [string] $Tunnel,
     [string] $Result,
+    [string] $BrokerResult,
+    [string] $Quick,
+    [string] $PipeSquatProbe,
     [string] $ConfigDirectory,
     [string] $ConfigPath
 )
@@ -617,6 +780,35 @@ try {
         [Security.Principal.WindowsBuiltInRole]::User
     )) {
         throw "status check token is not a member of the built-in Users group"
+    }
+    $squatOutput = @(& $PipeSquatProbe denied 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        ($squatOutput | Out-String) -notmatch
+            "management pipe instance creation denied") {
+        throw (
+            "ordinary user management pipe squat probe failed`: " +
+            ($squatOutput | Out-String)
+        )
+    }
+    $brokerOutput = @(& $Quick desktop-broker-status 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "desktop-broker-status failed with exit code $LASTEXITCODE`: " +
+            ($brokerOutput | Out-String)
+        )
+    }
+    $brokerText = ($brokerOutput | Out-String).Trim()
+    Set-Content -LiteralPath $BrokerResult -Value $brokerText `
+        -Encoding ascii
+    $brokerStatus = $brokerText | ConvertFrom-Json
+    if ($brokerStatus.status -ne "unauthorized") {
+        throw "ordinary user broker status is not unauthorized: $brokerText"
+    }
+    if ($brokerStatus.service_name -ne "wg-quic-manager") {
+        throw "ordinary user broker returned wrong service: $brokerText"
+    }
+    if ([int] $brokerStatus.protocol_version -ne 1) {
+        throw "ordinary user broker returned wrong protocol: $brokerText"
     }
     $profiles = @(Get-ChildItem -LiteralPath $ConfigDirectory -Filter "*.conf")
     if ($ConfigPath -notin @($profiles.FullName)) {
@@ -679,6 +871,9 @@ catch {
         "-Core", "`"$core`"",
         "-Tunnel", $tunnelName,
         "-Result", "`"$standardResult`"",
+        "-BrokerResult", "`"$brokerStatusResult`"",
+        "-Quick", "`"$quick`"",
+        "-PipeSquatProbe", "`"$managementPipeSquatProbe`"",
         "-ConfigDirectory", "`"$(Split-Path -Parent $installedConfig)`"",
         "-ConfigPath", "`"$installedConfig`""
     ) -Credential $standardCredential -LoadUserProfile -PassThru `
@@ -705,7 +900,554 @@ catch {
         ) -join "`n"
         throw "standard-user status check failed`n$standardOutput"
     }
+    $standardBrokerStatus = if (
+        Test-Path -LiteralPath $brokerStatusResult -PathType Leaf
+    ) {
+        Get-Content -LiteralPath $brokerStatusResult -Raw |
+            ConvertFrom-Json
+    }
+    else {
+        throw "standard-user broker status result is missing"
+    }
+    if ($standardBrokerStatus.status -ne "unauthorized") {
+        throw (
+            "standard-user broker boundary returned " +
+            "'$($standardBrokerStatus.status)'"
+        )
+    }
+    $brokerConfigPathsAfter = @(
+        Get-ChildItem -LiteralPath (Split-Path -Parent $installedConfig) `
+            -Filter "*.conf" -File -ErrorAction Stop |
+            ForEach-Object { $_.FullName } |
+            Sort-Object
+    )
+    if (@(Compare-Object $brokerConfigPathsBefore $brokerConfigPathsAfter).Count `
+        -ne 0) {
+        throw "ordinary-user broker status changed the installed profiles"
+    }
+    $brokerConfigHashAfter = (
+        Get-FileHash -LiteralPath $installedConfig -Algorithm SHA256
+    ).Hash
+    if ($brokerConfigHashAfter -ne $brokerConfigHashBefore) {
+        throw "ordinary-user broker status changed the tunnel configuration"
+    }
+    $brokerTunnelServicesAfter = @(
+        Get-Service -ErrorAction Stop |
+            Where-Object { $_.Name.StartsWith("wg-quic-quick@") } |
+            ForEach-Object { "$($_.Name)|$($_.Status)" } |
+            Sort-Object
+    )
+    if (@(Compare-Object `
+        $brokerTunnelServicesBefore $brokerTunnelServicesAfter
+    ).Count -ne 0) {
+        throw "ordinary-user broker status changed tunnel services"
+    }
+    if ((Get-Service -Name $managerServiceName -ErrorAction Stop).Status `
+        -ne "Running") {
+        throw "ordinary-user broker status stopped the management service"
+    }
+    $brokerAdapterAfter = Get-NetAdapter -Name $tunnelName `
+        -ErrorAction Stop
+    $brokerAdapterIdentityAfter = (
+        "$($brokerAdapterAfter.Name)|$($brokerAdapterAfter.ifIndex)|" +
+        "$($brokerAdapterAfter.Status)|" +
+        $brokerAdapterAfter.InterfaceDescription
+    )
+    if ($brokerAdapterIdentityAfter -ne $brokerAdapterIdentityBefore) {
+        throw "ordinary-user broker status changed the active adapter"
+    }
     Write-Host "installed Windows standard-user status boundary passed"
+    Write-Host (
+        "ordinary-user management broker status is unauthorized with no " +
+        "configuration, service, or adapter side effects"
+    )
+
+    $enableLUA = (
+        Get-ItemProperty -LiteralPath (
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        ) -Name EnableLUA -ErrorAction Stop
+    ).EnableLUA
+    $usesSyntheticLimitedToken = [int] $enableLUA -ne 1
+    Write-Host (Invoke-Native -FilePath $quick `
+        -Arguments @("down", $tunnelName))
+    Wait-For -Description "the direct service teardown before broker mutation" `
+        -TimeoutSeconds 60 -Condition {
+            $null -eq (Get-Service -Name $serviceName `
+                -ErrorAction SilentlyContinue)
+        }
+    Wait-For -Description "the direct adapter teardown before broker mutation" `
+        -TimeoutSeconds 60 -Condition {
+            $null -eq (Get-NetAdapter -Name $tunnelName `
+                -ErrorAction SilentlyContinue)
+        }
+    Wait-For -Description "the retired direct service runtime cleanup" `
+        -TimeoutSeconds 30 -Condition {
+            -not (Test-Path -LiteralPath $directRuntimeDirectory)
+        }
+    Write-Host (Invoke-Native -FilePath $quick `
+        -Arguments @("desktop-client", "up", $tunnelName))
+    Wait-For -Description "the broker-safe service before filtered mutation" `
+        -TimeoutSeconds 60 -Condition {
+            (Get-Service -Name $serviceName `
+                -ErrorAction SilentlyContinue).Status -eq "Running"
+        }
+    Wait-For -Description "the broker-safe adapter before filtered mutation" `
+        -TimeoutSeconds 60 -Condition {
+            $null -ne (Get-NetAdapter -Name $tunnelName `
+                -ErrorAction SilentlyContinue)
+        }
+    $brokerSafeService = Get-CimInstance -ClassName Win32_Service `
+        -Filter "Name='$serviceName'" -ErrorAction Stop
+    if ($brokerSafeService.PathName -notmatch '--broker-safe\s*$') {
+        throw (
+            "management broker did not mark the staged service broker-safe`: " +
+            $brokerSafeService.PathName
+        )
+    }
+    if (-not $usesSyntheticLimitedToken) {
+        $filteredAdminUser = New-LocalUser -Name $filteredAdminUserName `
+            -Password $securePassword -PasswordNeverExpires `
+            -UserMayNotChangePassword -AccountNeverExpires
+        $filteredAdminUserCreated = $true
+        $administratorsGroupSid = [Security.Principal.SecurityIdentifier]::new(
+            "S-1-5-32-544"
+        )
+        Add-LocalGroupMember -SID $administratorsGroupSid `
+            -Member $filteredAdminUser -ErrorAction Stop
+        $limitedFixtureSid = $filteredAdminUser.SID.Value
+    }
+    else {
+        # GitHub-hosted Windows deliberately disables UAC. The launcher derives
+        # a kernel LUA_TOKEN from this Administrator, so grant the unchanged
+        # user SID access to the fixture without relying on deny-only BA access.
+        $limitedFixtureSid = $identity.User.Value
+    }
+    & icacls.exe $standardUserRoot /grant:r (
+        "*${limitedFixtureSid}:(OI)(CI)M"
+    ) | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "grant limited Administrator fixture access failed"
+    }
+    @"
+[Interface]
+PrivateKey = $privateKey
+Address = 198.20.0.1/32
+ListenPort = $($listenPort + 1)
+MTU = 1380
+
+[Peer]
+PublicKey = $peerPublicKey
+AllowedIPs = 198.20.0.2/32
+Endpoint = 192.0.2.201:$($endpointPort + 1)
+PersistentKeepalive = 1
+"@ | Set-Content -LiteralPath $filteredDesktopSource -Encoding ascii
+    $filteredAdminScriptContent = @'
+$Quick = __WG_QUIC_QUICK__
+$Desktop = __WG_QUIC_DESKTOP__
+$Tunnel = __WG_QUIC_TUNNEL__
+$TunnelService = __WG_QUIC_SERVICE__
+$DesktopTunnel = __WG_QUIC_DESKTOP_TUNNEL__
+$DesktopSource = __WG_QUIC_DESKTOP_SOURCE__
+$DesktopResult = __WG_QUIC_DESKTOP_RESULT__
+$DesktopStdout = __WG_QUIC_DESKTOP_STDOUT__
+$DesktopStderr = __WG_QUIC_DESKTOP_STDERR__
+$RetiredRuntimeResult = __WG_QUIC_RETIRED_RUNTIME_RESULT__
+$Result = __WG_QUIC_RESULT__
+$ErrorActionPreference = "Stop"
+$LifecycleDeadline = [DateTime]::UtcNow.AddSeconds(360)
+function Wait-ForFiltered {
+    param(
+        [string] $Description,
+        [scriptblock] $Condition
+    )
+    do {
+        if (& $Condition) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $LifecycleDeadline)
+    throw "timed out waiting for $Description"
+}
+try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if ($principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )) {
+        throw "filtered-admin check unexpectedly has an elevated token"
+    }
+    if (-not $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::User
+    )) {
+        throw "filtered-admin token is not in the built-in Users group"
+    }
+    $brokerOutput = @(& $Quick desktop-broker-status 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "desktop-broker-status failed with exit code $LASTEXITCODE`: " +
+            ($brokerOutput | Out-String)
+        )
+    }
+    $brokerText = ($brokerOutput | Out-String).Trim()
+    $brokerStatus = $brokerText | ConvertFrom-Json
+    if ($brokerStatus.status -ne "ready") {
+        throw "filtered-admin broker status is not ready: $brokerText"
+    }
+    if ($brokerStatus.service_name -ne "wg-quic-manager" -or
+        [int] $brokerStatus.protocol_version -ne 1) {
+        throw "filtered-admin broker metadata is invalid: $brokerText"
+    }
+    $checkOutput = @(& $Quick desktop-client check $Tunnel 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "filtered-admin desktop check failed with exit code " +
+            "$LASTEXITCODE`: $($checkOutput | Out-String)"
+        )
+    }
+    if (($checkOutput | Out-String) -notmatch
+        "configuration is valid for wg-quic-quick") {
+        throw "filtered-admin desktop check returned unexpected output"
+    }
+    $beforeDownService = Get-CimInstance -ClassName Win32_Service `
+        -Filter "Name='$TunnelService'" -ErrorAction Stop
+    $beforeDownQuick = if ($beforeDownService.PathName -match '^"([^"]+)"') {
+        $Matches[1]
+    }
+    elseif ($beforeDownService.PathName -match '^(\S+)') {
+        $Matches[1]
+    }
+    else {
+        throw "cannot parse pre-down runtime $($beforeDownService.PathName)"
+    }
+    $beforeDownRuntime = Split-Path -Parent $beforeDownQuick
+    Set-Content -LiteralPath $RetiredRuntimeResult `
+        -Value $beforeDownRuntime -Encoding utf8
+    $downOutput = @(& $Quick desktop-client down $Tunnel 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "filtered-admin desktop down failed with exit code " +
+            "$LASTEXITCODE`: $($downOutput | Out-String)"
+        )
+    }
+    Wait-ForFiltered -Description "filtered-admin service teardown" `
+        -Condition {
+            $null -eq (Get-Service -Name $TunnelService `
+                -ErrorAction SilentlyContinue)
+        }
+    Wait-ForFiltered -Description "filtered-admin adapter teardown" `
+        -Condition {
+            $null -eq (Get-NetAdapter -Name $Tunnel `
+                -ErrorAction SilentlyContinue)
+        }
+    $upOutput = @(& $Quick desktop-client up $Tunnel 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "filtered-admin desktop up failed with exit code " +
+            "$LASTEXITCODE`: $($upOutput | Out-String)"
+        )
+    }
+    Wait-ForFiltered -Description "filtered-admin service startup" `
+        -Condition {
+            (Get-Service -Name $TunnelService `
+                -ErrorAction SilentlyContinue).Status -eq "Running"
+        }
+    Wait-ForFiltered -Description "filtered-admin adapter startup" `
+        -Condition {
+            $null -ne (Get-NetAdapter -Name $Tunnel `
+                -ErrorAction SilentlyContinue)
+        }
+    $afterUpService = Get-CimInstance -ClassName Win32_Service `
+        -Filter "Name='$TunnelService'" -ErrorAction Stop
+    $afterUpQuick = if ($afterUpService.PathName -match '^"([^"]+)"') {
+        $Matches[1]
+    }
+    elseif ($afterUpService.PathName -match '^(\S+)') {
+        $Matches[1]
+    }
+    else {
+        throw "cannot parse post-up runtime $($afterUpService.PathName)"
+    }
+    if ((Split-Path -Parent $afterUpQuick).Equals(
+        $beforeDownRuntime,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "filtered-admin up reused its retired random runtime"
+    }
+    if ((Get-Service -Name "wg-quic-manager" -ErrorAction Stop).Status `
+        -ne "Running") {
+        throw "filtered-admin mutation stopped the management service"
+    }
+
+    $desktopProcess = $null
+    $env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE = "1"
+    $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $DesktopSource
+    $env:WG_QUIC_DESKTOP_SMOKE_NAME = $DesktopTunnel
+    $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $DesktopResult
+    try {
+        $desktopProcess = Start-Process -FilePath $Desktop -PassThru `
+            -RedirectStandardOutput $DesktopStdout `
+            -RedirectStandardError $DesktopStderr
+        Wait-ForFiltered -Description "filtered desktop integration smoke" `
+            -Condition {
+                $desktopProcess.Refresh()
+                $desktopProcess.HasExited
+            }
+        $desktopProcess.Refresh()
+        if ($desktopProcess.ExitCode -ne 0) {
+            throw (
+                "filtered desktop exited with code " +
+                $desktopProcess.ExitCode
+            )
+        }
+        if (-not (Test-Path -LiteralPath $DesktopResult -PathType Leaf)) {
+            throw "filtered desktop did not write its smoke result"
+        }
+        $desktopResultText = (
+            Get-Content -LiteralPath $DesktopResult -Raw
+        ).Trim()
+        if ($desktopResultText -notmatch (
+            "installed desktop import/UAC/service/status lifecycle passed"
+        )) {
+            throw "filtered desktop smoke failed: $desktopResultText"
+        }
+    }
+    finally {
+        if ($null -ne $desktopProcess) {
+            try {
+                $desktopProcess.Refresh()
+                if (-not $desktopProcess.HasExited) {
+                    Stop-Process -Id $desktopProcess.Id -Force `
+                        -ErrorAction Stop
+                }
+            }
+            catch {
+                Write-Warning "failed to stop filtered desktop process: $_"
+            }
+        }
+        Remove-Item Env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE `
+            -ErrorAction SilentlyContinue
+        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_CONFIG `
+            -ErrorAction SilentlyContinue
+        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_NAME `
+            -ErrorAction SilentlyContinue
+        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_RESULT `
+            -ErrorAction SilentlyContinue
+    }
+    Set-Content -LiteralPath $Result -Value "passed" -Encoding ascii
+}
+catch {
+    Set-Content -LiteralPath $Result -Value "failed: $_" -Encoding utf8
+    throw
+}
+'@
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_QUICK__",
+        "'" + $quick.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP__",
+        "'" + $desktop.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_TUNNEL__",
+        "'" + $tunnelName.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_SERVICE__",
+        "'" + $serviceName.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP_TUNNEL__",
+        "'" + $filteredDesktopTunnelName.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP_SOURCE__",
+        "'" + $filteredDesktopSource.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP_RESULT__",
+        "'" + $filteredDesktopResult.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP_STDOUT__",
+        "'" + $filteredDesktopStdout.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_DESKTOP_STDERR__",
+        "'" + $filteredDesktopStderr.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_RETIRED_RUNTIME_RESULT__",
+        "'" + $filteredRetiredRuntimeResult.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_RESULT__",
+        "'" + $filteredAdminResult.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent | Set-Content `
+        -LiteralPath $filteredAdminScript -Encoding utf8
+    $taskPowerShell = Join-Path $env:SystemRoot (
+        "System32\WindowsPowerShell\v1.0\powershell.exe"
+    )
+    $taskCommand = (
+        "$taskPowerShell -NoLogo -NoProfile -NonInteractive " +
+        "-ExecutionPolicy Bypass -File `"$filteredAdminScript`""
+    )
+    $limitedTaskExitCode = 0
+    if (-not $usesSyntheticLimitedToken) {
+        $taskStartTime = [DateTime]::Now.AddMinutes(5).ToString("HH:mm")
+        $taskCreateArguments = @(
+            "/Create",
+            "/TN", $filteredAdminTaskName,
+            "/TR", $taskCommand,
+            "/SC", "ONCE",
+            "/ST", $taskStartTime,
+            "/RU", "$env:COMPUTERNAME\$filteredAdminUserName",
+            "/RP", $passwordText,
+            "/RL", "LIMITED",
+            "/F"
+        )
+        $taskScheduler = Join-Path $env:SystemRoot "System32\schtasks.exe"
+        $taskCreateOutput = @(& $taskScheduler @taskCreateArguments 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                "filtered-admin scheduled task registration failed`n" +
+                ($taskCreateOutput | Out-String)
+            )
+        }
+        $filteredAdminTaskRegistered = $true
+        Invoke-Native -FilePath $taskScheduler `
+            -Arguments @("/Run", "/TN", $filteredAdminTaskName) | Out-Null
+        Wait-For -Description "the filtered-admin broker lifecycle" `
+            -TimeoutSeconds 390 -Condition {
+                Test-Path -LiteralPath $filteredAdminResult -PathType Leaf
+            }
+        Wait-For -Description "the filtered-admin scheduled task exit" `
+            -TimeoutSeconds 30 -Condition {
+                (Get-ScheduledTask -TaskName $filteredAdminTaskName `
+                    -ErrorAction Stop).State -ne "Running"
+            }
+        $limitedTaskExitCode = (
+            Get-ScheduledTaskInfo -TaskName $filteredAdminTaskName `
+                -ErrorAction Stop
+        ).LastTaskResult
+    }
+    else {
+        # A hosted runner has no split UAC token. CreateRestrictedToken with
+        # LUA_TOKEN yields a genuine TokenElevationTypeLimited primary token in
+        # this same interactive session, then CreateProcessAsUser runs both the
+        # CLI lifecycle and the real Tauri/WebView process beneath it.
+        $limitedLauncherOutput = Invoke-Native `
+            -FilePath $limitedTokenLauncher -Arguments @(
+                "--",
+                $taskPowerShell,
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", $filteredAdminScript
+            )
+        Write-Host $limitedLauncherOutput
+    }
+    $filteredAdminResultText = (
+        Get-Content -LiteralPath $filteredAdminResult -Raw
+    ).Trim()
+    if ($limitedTaskExitCode -ne 0 -or
+        $filteredAdminResultText -ne "passed") {
+        throw (
+            "filtered-admin broker lifecycle failed with task result " +
+            "${limitedTaskExitCode}: " +
+            $filteredAdminResultText
+        )
+    }
+    if (-not (Test-Path -LiteralPath $filteredRetiredRuntimeResult `
+        -PathType Leaf)) {
+        throw "filtered-admin did not report its retired runtime"
+    }
+    $filteredRetiredRuntime = (
+        Get-Content -LiteralPath $filteredRetiredRuntimeResult -Raw
+    ).Trim()
+    Wait-For -Description "the filtered-admin retired runtime cleanup" `
+        -TimeoutSeconds 60 -Condition {
+            -not (Test-Path -LiteralPath $filteredRetiredRuntime)
+        }
+    if ((Get-Service -Name $serviceName -ErrorAction Stop).Status `
+        -ne "Running") {
+        throw "filtered-admin mutation did not restore the tunnel service"
+    }
+    if ($null -eq (Get-NetAdapter -Name $tunnelName `
+        -ErrorAction SilentlyContinue)) {
+        throw "filtered-admin mutation did not restore the Wintun adapter"
+    }
+    $restoredBrokerSafeService = Get-CimInstance `
+        -ClassName Win32_Service -Filter "Name='$serviceName'" `
+        -ErrorAction Stop
+    if ($restoredBrokerSafeService.PathName -notmatch '--broker-safe\s*$') {
+        throw (
+            "filtered-admin up restored a non-broker-safe service`: " +
+            $restoredBrokerSafeService.PathName
+        )
+    }
+    $stagedQuick = if ($restoredBrokerSafeService.PathName -match `
+        '^"([^"]+)"') {
+        $Matches[1]
+    }
+    elseif ($restoredBrokerSafeService.PathName -match '^(\S+)') {
+        $Matches[1]
+    }
+    else {
+        throw (
+            "cannot parse restored service runtime " +
+            $restoredBrokerSafeService.PathName
+        )
+    }
+    $activeRuntimeDirectory = Split-Path -Parent $stagedQuick
+    $stagedCore = Join-Path $activeRuntimeDirectory "wg-quic.exe"
+    if (-not (Test-Path -LiteralPath $stagedCore -PathType Leaf)) {
+        throw "restored active service runtime is missing $stagedCore"
+    }
+    if (Get-Service -Name $filteredDesktopServiceName `
+        -ErrorAction SilentlyContinue) {
+        throw "filtered desktop left service $filteredDesktopServiceName behind"
+    }
+    if (Get-NetAdapter -Name $filteredDesktopTunnelName `
+        -ErrorAction SilentlyContinue) {
+        throw "filtered desktop left adapter $filteredDesktopTunnelName behind"
+    }
+    if (-not (Test-Path -LiteralPath $filteredDesktopInstalledConfig `
+        -PathType Leaf)) {
+        throw "filtered desktop did not import $filteredDesktopInstalledConfig"
+    }
+    $remainingRuntimeDirectories = @(
+        Get-ChildItem -LiteralPath $runtimeRoot -Directory `
+            -Filter "run-*" -ErrorAction Stop
+    )
+    if ($remainingRuntimeDirectories.Count -ne 1 -or
+        -not $remainingRuntimeDirectories[0].FullName.Equals(
+            $activeRuntimeDirectory,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+        throw (
+            "runtime cleanup left unexpected directories: " +
+            ($remainingRuntimeDirectories.FullName -join ", ")
+        )
+    }
+    if ($filteredAdminTaskRegistered) {
+        Unregister-ScheduledTask -TaskName $filteredAdminTaskName `
+            -Confirm:$false -ErrorAction Stop
+        $filteredAdminTaskRegistered = $false
+    }
+    $limitedCoverage = if ($usesSyntheticLimitedToken) {
+        "a synthetic kernel LUA token in the current session"
+    }
+    else {
+        "a real UAC-filtered Administrator logon"
+    }
+    Write-Host (
+        "$limitedCoverage used the management broker without a prompt; " +
+        "the real desktop completed import/check/up/down and the CLI " +
+        "restored the primary service and adapter"
+    )
 
     $uninstall = Start-Process -FilePath "msiexec.exe" `
         -ArgumentList @(
@@ -722,11 +1464,16 @@ catch {
     Wait-For -Description "the installed desktop executable removal" `
         -TimeoutSeconds 30 -Condition {
             @(
-                @($desktop, $quick, $core, $installedWintun) |
+                @($desktop, $quick, $core, $installedWintun, $manager) |
                     Where-Object {
                         Test-Path -LiteralPath $_ -PathType Leaf
                     }
             ).Count -eq 0
+        }
+    Wait-For -Description "the management service removal" `
+        -TimeoutSeconds 30 -Condition {
+            $null -eq (Get-Service -Name $managerServiceName `
+                -ErrorAction SilentlyContinue)
         }
     $installed = $false
     if ((Get-Service -Name $serviceName -ErrorAction Stop).Status -ne "Running") {
@@ -794,6 +1541,12 @@ catch {
         $desktopIpcResult,
         $desktopIpcStdout,
         $desktopIpcStderr,
+        $brokerStatusResult,
+        $filteredAdminResult,
+        $filteredDesktopResult,
+        $filteredDesktopStdout,
+        $filteredDesktopStderr,
+        $filteredRetiredRuntimeResult,
         $msiLogPath
     )) {
         if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
@@ -828,6 +1581,14 @@ finally {
     Remove-Item Env:WG_QUIC_ELEVATED_EXE `
         -ErrorAction SilentlyContinue
 
+    if ($filteredAdminTaskRegistered) {
+        Stop-ScheduledTask -TaskName $filteredAdminTaskName `
+            -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $filteredAdminTaskName `
+            -Confirm:$false -ErrorAction SilentlyContinue
+        $filteredAdminTaskRegistered = $false
+    }
+
     foreach ($candidateProcess in @(
         $desktopProcess,
         $trayProcess,
@@ -858,18 +1619,32 @@ finally {
     }
     if ($null -ne $cleanupQuick -and
         (Test-Path -LiteralPath $cleanupQuick -PathType Leaf)) {
-        try {
-            Invoke-Native -FilePath $cleanupQuick -Arguments @(
-                "down", $tunnelName, "--repair"
-            ) | Write-Host
-        }
-        catch {
-            Write-Warning $_
+        foreach ($cleanupTunnel in @(
+            $tunnelName,
+            $filteredDesktopTunnelName
+        )) {
+            try {
+                Invoke-Native -FilePath $cleanupQuick -Arguments @(
+                    "down", $cleanupTunnel, "--repair"
+                ) | Write-Host
+            }
+            catch {
+                Write-Warning $_
+            }
         }
     }
-    Remove-Item -LiteralPath $installedConfig -Force `
-        -ErrorAction SilentlyContinue
+    foreach ($cleanupConfig in @(
+        $installedConfig,
+        $filteredDesktopInstalledConfig
+    )) {
+        Remove-Item -LiteralPath $cleanupConfig -Force `
+            -ErrorAction SilentlyContinue
+    }
 
+    if ($filteredAdminUserCreated) {
+        Remove-LocalUser -Name $filteredAdminUserName `
+            -ErrorAction SilentlyContinue
+    }
     if ($standardUserCreated) {
         Remove-LocalUser -Name $standardUserName `
             -ErrorAction SilentlyContinue

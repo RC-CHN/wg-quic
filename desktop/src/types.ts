@@ -57,6 +57,13 @@ export interface BackendInfo {
   supported: boolean;
   coreVersion?: string;
   quickVersion?: string;
+  managementStatus?:
+    | 'ready'
+    | 'unauthorized'
+    | 'unavailable'
+    | 'incompatible'
+    | 'error';
+  managementMessage?: string;
   error?: string;
 }
 

@@ -19,6 +19,7 @@ import {
   formatFECRecovery,
   formatRTT,
   managementErrorMessage,
+  managementServiceDisplay,
   tunnelDisplayState,
   tunnelStateLabel,
 } from './view-model';
@@ -264,6 +265,21 @@ function setNotice(snapshot: DesktopSnapshot): void {
     setText('notice-detail', backend.error);
     return;
   }
+  const management = managementServiceDisplay(
+    backend.platform,
+    backend.managementStatus,
+  );
+  if (management.needsAttention) {
+    notice.classList.remove('hidden');
+    setText('notice-title', management.label);
+    setText(
+      'notice-detail',
+      backend.managementStatus === 'incompatible'
+        ? 'The installed service does not match this desktop version. Repair or reinstall wg-quic; administrator approval will be used as a fallback.'
+        : 'Repair or reinstall wg-quic to restore one-click tunnel controls. Administrator approval will be used as a fallback.',
+    );
+    return;
+  }
   notice.classList.add('hidden');
 }
 
@@ -296,6 +312,15 @@ function render(snapshot: DesktopSnapshot): void {
   );
   byId('runtime-dot').className =
     `runtime-dot ${snapshot.backend.error ? 'error' : snapshot.backend.supported ? 'ready' : 'preview'}`;
+
+  const management = managementServiceDisplay(
+    snapshot.backend.platform,
+    snapshot.backend.managementStatus,
+  );
+  const managementLine = byId<HTMLDivElement>('management-line');
+  managementLine.classList.toggle('hidden', management.state === 'hidden');
+  setText('management-label', management.label);
+  byId('management-dot').className = `management-dot ${management.state}`;
 
   tunnelList.replaceChildren(
     ...snapshot.tunnels.map((tunnel) => createTunnelItem(tunnel)),
@@ -354,6 +379,7 @@ async function manageTunnel(
       `${name}: ${managementErrorMessage(errorMessage(error))}`,
       'error',
     );
+    await refresh(false);
   } finally {
     pending.delete(name);
     if (current) {
@@ -480,6 +506,14 @@ async function start(): Promise<void> {
         'desktop integration smoke requires a configuration path and tunnel name',
       );
     }
+    if (
+      current?.backend.platform === 'win32' &&
+      current.backend.managementStatus !== 'ready'
+    ) {
+      throw new Error(
+        `installed management service is not ready: ${JSON.stringify(current.backend)}`,
+      );
+    }
     const imported = await window.wgQuic.importConfigPath(
       smoke.source,
       false,
@@ -487,6 +521,12 @@ async function start(): Promise<void> {
     if (imported.importedName !== smoke.name) {
       throw new Error(
         `desktop imported ${JSON.stringify(imported.importedName)} instead of ${JSON.stringify(smoke.name)}`,
+      );
+    }
+    const checked = await window.wgQuic.check(smoke.name);
+    if (!/configuration is valid for wg-quic-quick/i.test(checked)) {
+      throw new Error(
+        `desktop returned an unexpected configuration check result: ${JSON.stringify(checked)}`,
       );
     }
     let active = false;

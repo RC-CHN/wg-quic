@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   package:
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -62,9 +62,17 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test Windows desktop IPC probe
+      - name: Test Windows broker identity and desktop helpers
         if: runner.os == 'Windows'
-        run: go test -count=1 ./tests/windows/desktop-ipc-probe
+        shell: pwsh
+        run: |
+          go test -count=1 `
+            ./internal/quick `
+            ./tests/windows/desktop-ipc-probe `
+            ./tests/windows/limited-token-launcher
+          go build -trimpath `
+            -o "$env:RUNNER_TEMP/limited-token-launcher.exe" `
+            ./tests/windows/limited-token-launcher
       - name: Install Tauri Linux build dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -107,6 +115,36 @@ jobs:
       - name: Smoke bundled wg-quic commands
         working-directory: desktop
         run: npm run smoke:native
+      - name: Download verified v0.2.0 Windows MSI for upgrade coverage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $destination = Join-Path `
+            $env:RUNNER_TEMP "wg-quic-desktop-v0.2.0-windows-x64.msi"
+          Invoke-WebRequest `
+            -Uri "https://github.com/RC-CHN/wg-quic/releases/download/v0.2.0/wg-quic-desktop-v0.2.0-windows-x64.msi" `
+            -OutFile $destination
+          $actual = (Get-FileHash -LiteralPath $destination `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = "963b9f1b73552ee9cb76c3a90816770dcbfc4b1748a32b8e00ad25a807dace55"
+          if ($actual -ne $expected) {
+            throw "v0.2.0 MSI SHA256 is $actual, expected $expected"
+          }
+          "WG_QUIC_PREVIOUS_DESKTOP_MSI=$destination" | `
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Exercise v0.2.0 to current Windows desktop upgrade
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem `
+            ./desktop/src-tauri/target/release/bundle/msi/*.msi |
+            Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "missing current Tauri WiX MSI"
+          }
+          ./tests/windows/desktop-upgrade-lifecycle.ps1 `
+            -PreviousInstaller $env:WG_QUIC_PREVIOUS_DESKTOP_MSI `
+            -CurrentInstaller $installer.FullName
       - name: Install and exercise Windows desktop lifecycle
         if: runner.os == 'Windows'
         shell: pwsh

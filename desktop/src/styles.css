@@ -499,6 +499,39 @@ dd {
   white-space: nowrap;
 }
 
+.management-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  color: #65707c;
+  font-size: 8px;
+}
+
+.management-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border: 1px solid #59636f;
+  border-radius: 50%;
+  background: #303844;
+}
+
+.management-dot.ready {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.management-dot.fallback {
+  border-color: var(--amber);
+  background: var(--amber);
+}
+
+.management-dot.error {
+  border-color: var(--red);
+  background: var(--red);
+}
+
 .detail-pane {
   min-width: 0;
   min-height: 0;

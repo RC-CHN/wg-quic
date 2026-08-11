@@ -1,5 +1,52 @@
 import type { TunnelAction, TunnelView } from './types';
 
+export interface ManagementServiceDisplay {
+  label: string;
+  state: 'ready' | 'fallback' | 'error' | 'hidden';
+  needsAttention: boolean;
+}
+
+export function managementServiceDisplay(
+  platform: string,
+  status?: string,
+): ManagementServiceDisplay {
+  if (platform !== 'win32') {
+    return { label: '', state: 'hidden', needsAttention: false };
+  }
+  switch (status) {
+    case 'ready':
+      return {
+        label: 'Management service ready',
+        state: 'ready',
+        needsAttention: false,
+      };
+    case 'unauthorized':
+      return {
+        label: 'Administrator approval on changes',
+        state: 'fallback',
+        needsAttention: false,
+      };
+    case 'incompatible':
+      return {
+        label: 'Management service needs an update',
+        state: 'error',
+        needsAttention: true,
+      };
+    case 'unavailable':
+      return {
+        label: 'Management service unavailable',
+        state: 'error',
+        needsAttention: true,
+      };
+    default:
+      return {
+        label: 'Management service check failed',
+        state: 'error',
+        needsAttention: true,
+      };
+  }
+}
+
 export type TunnelDisplayState =
   | 'active'
   | 'inactive'
@@ -85,6 +132,9 @@ export function formatFECRecovery(recovered = 0, rawLost = 0): string {
 }
 
 export function managementErrorMessage(message: string): string {
+  if (/outcome is unknown/i.test(message)) {
+    return `${message} Tunnel status was refreshed; verify it before retrying.`;
+  }
   if (/administrator privileges|administrator approval/i.test(message)) {
     return message;
   }

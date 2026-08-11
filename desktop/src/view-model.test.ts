@@ -9,6 +9,7 @@ import {
   formatFECRecovery,
   formatRTT,
   managementErrorMessage,
+  managementServiceDisplay,
   tunnelDisplayState,
   tunnelStateLabel,
 } from './view-model';
@@ -53,6 +54,27 @@ test('management errors add privilege guidance only when relevant', () => {
   assert.equal(
     managementErrorMessage('administrator approval was canceled'),
     'administrator approval was canceled',
+  );
+  assert.equal(
+    managementErrorMessage('management operation outcome is unknown'),
+    'management operation outcome is unknown Tunnel status was refreshed; verify it before retrying.',
+  );
+});
+
+test('management service state distinguishes one-click control from UAC fallback', () => {
+  assert.deepEqual(managementServiceDisplay('linux'), {
+    label: '',
+    state: 'hidden',
+    needsAttention: false,
+  });
+  assert.equal(managementServiceDisplay('win32', 'ready').state, 'ready');
+  assert.equal(
+    managementServiceDisplay('win32', 'unauthorized').state,
+    'fallback',
+  );
+  assert.equal(
+    managementServiceDisplay('win32', 'unavailable').needsAttention,
+    true,
   );
 });
 

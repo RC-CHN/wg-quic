@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { renderManagementServiceFragment } from './wix-management-service.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, '..');
@@ -88,6 +89,20 @@ if (targetOS === 'windows') {
       path.join(wintunLicenseDirectory, file),
     );
   }
+
+  const wixFragmentDirectory = path.join(
+    desktopDir,
+    'src-tauri',
+    'target',
+    'wix-fragments',
+  );
+  mkdirSync(wixFragmentDirectory, { recursive: true });
+  writeFileSync(
+    path.join(wixFragmentDirectory, 'management-service.wxs'),
+    renderManagementServiceFragment(
+      path.resolve(outputDir, 'wg-quic-quick.exe'),
+    ),
+  );
 }
 
 writeFileSync(

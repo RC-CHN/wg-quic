@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -36,7 +36,18 @@ struct BackendInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     quick_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    management_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    management_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DesktopBrokerStatus {
+    status: String,
+    #[serde(default)]
+    message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -329,7 +340,15 @@ fn configured_profiles(directory: &Path) -> Result<Vec<(String, PathBuf)>, Strin
     for entry in entries {
         let entry = entry.map_err(|error| format!("read configuration entry: {error}"))?;
         let path = entry.path();
-        if !path.is_file()
+        // On Windows the unelevated UI may list profile names but is
+        // deliberately unable to open LocalSystem-owned configuration files.
+        // DirEntry::file_type uses the metadata returned by directory
+        // enumeration, avoiding a second child-file open just to identify a
+        // regular .conf file. It also keeps symlinks out of the profile list.
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("inspect configuration entry {}: {error}", path.display()))?;
+        if !file_type.is_file()
             || !path
                 .extension()
                 .and_then(OsStr::to_str)
@@ -381,6 +400,26 @@ fn validate_backend_versions(core: &str, quick: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn desktop_broker_status(paths: &NativePaths) -> Result<DesktopBrokerStatus, String> {
+    let output = run_output(&paths.quick, &[argument("desktop-broker-status")])?;
+    parse_desktop_broker_status(&output)
+}
+
+fn parse_desktop_broker_status(output: &str) -> Result<DesktopBrokerStatus, String> {
+    let status = serde_json::from_str::<DesktopBrokerStatus>(output)
+        .map_err(|error| format!("wg-quic-quick returned invalid broker status JSON: {error}"))?;
+    if !matches!(
+        status.status.as_str(),
+        "ready" | "unauthorized" | "unavailable" | "incompatible" | "error"
+    ) {
+        return Err(format!(
+            "wg-quic-quick returned unknown broker status {:?}",
+            status.status
+        ));
+    }
+    Ok(status)
+}
+
 fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapshot, String> {
     let directory = config_directory();
     let mut backend = BackendInfo {
@@ -390,6 +429,8 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
         supported: cfg!(any(target_os = "windows", target_os = "linux")),
         core_version: None,
         quick_version: None,
+        management_status: None,
+        management_message: None,
         error: None,
     };
     let paths = match native_paths(app) {
@@ -412,6 +453,18 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
             backend.quick_version = Some(quick);
         }
         Err(error) => backend.error = Some(error),
+    }
+    if cfg!(target_os = "windows") {
+        match desktop_broker_status(&paths) {
+            Ok(status) => {
+                backend.management_status = Some(status.status);
+                backend.management_message = status.message;
+            }
+            Err(error) => {
+                backend.management_status = Some("error".to_string());
+                backend.management_message = Some(error);
+            }
+        }
     }
     let profiles = match configured_profiles(&directory) {
         Ok(profiles) => profiles,
@@ -817,6 +870,16 @@ mod tests {
         assert!(!is_inactive_status_error(
             r#"open \\.\pipe\wg-quic-wg0: Access is denied. open \\.\pipe\wg-quic-wg0-status: The system cannot find the file specified. The system cannot find the file specified."#
         ));
+    }
+
+    #[test]
+    fn accepts_only_known_desktop_broker_states() {
+        let ready = parse_desktop_broker_status(
+            r#"{"status":"ready","service_name":"wg-quic-manager","protocol_version":1}"#,
+        )
+        .expect("parse broker status");
+        assert_eq!(ready.status, "ready");
+        assert!(parse_desktop_broker_status(r#"{"status":"surprising"}"#).is_err());
     }
 
     #[test]
