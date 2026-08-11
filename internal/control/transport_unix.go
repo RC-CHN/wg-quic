@@ -12,6 +12,13 @@ import (
 )
 
 func listen(path string) (net.Listener, func() error, error) {
+	return listenUnix(path, 0o600)
+}
+
+func listenUnix(
+	path string,
+	mode os.FileMode,
+) (net.Listener, func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, nil, err
 	}
@@ -29,7 +36,7 @@ func listen(path string) (net.Listener, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := os.Chmod(path, mode); err != nil {
 		listener.Close()
 		os.Remove(path)
 		return nil, nil, err
@@ -49,11 +56,21 @@ func dial(path string, timeout time.Duration) (net.Conn, error) {
 }
 
 func listenReadOnlyStatus(
-	string,
+	path string,
 ) (net.Listener, func() error, error) {
-	return nil, nil, nil
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return nil, nil, err
+	}
+	// The endpoint itself is status-only, so its parent must also be
+	// traversable by unprivileged local users. A restrictive service umask
+	// otherwise turns the world-readable socket into an unusable endpoint.
+	if err := os.Chmod(directory, 0o755); err != nil {
+		return nil, nil, err
+	}
+	return listenUnix(readOnlyStatusPath(path), 0o666)
 }
 
-func readOnlyStatusPath(string) string {
-	return ""
+func readOnlyStatusPath(path string) string {
+	return path + ".status"
 }
