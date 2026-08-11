@@ -140,6 +140,12 @@ func ioCompletionProcessor(h windows.Handle) {
 // the operation has actually completed.
 func (f *file) asyncIo(c *ioOperation, d *deadlineHandler, bytes uint32, err error) (int, error) {
 	if err != windows.ERROR_IO_PENDING {
+		// Cancellation can win the small race between issuing an overlapped
+		// operation and observing ERROR_IO_PENDING. Keep that synchronous path
+		// consistent with an aborted completion dequeued below.
+		if err == windows.ERROR_OPERATION_ABORTED && f.closing.Load() {
+			err = os.ErrClosed
+		}
 		return int(bytes), err
 	}
 
