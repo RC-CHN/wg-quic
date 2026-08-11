@@ -22,7 +22,7 @@ func TestParseCommand(t *testing.T) {
 	}
 }
 
-func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
+func TestOpenLimitedTokenAndLaunch(t *testing.T) {
 	source, err := openLauncherSourceToken()
 	if err != nil {
 		t.Fatal(err)
@@ -35,11 +35,12 @@ func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
 	if !enabled {
 		t.Skip("integration assertion requires an elevated Administrator test token")
 	}
-	limited, err := createLUARestrictedToken(source)
+	limited, tokenSource, err := openLauncherLimitedToken(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer limited.Close()
+	t.Logf("using limited token from %s", tokenSource)
 	if _, err := verifyLUARestrictedToken(limited); err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +49,13 @@ func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
 	if commandInterpreter == "" {
 		commandInterpreter = `C:\Windows\System32\cmd.exe`
 	}
-	exitCode, err := launchCommandAsUser(limited, []string{
-		commandInterpreter, "/d", "/s", "/c", "exit 23",
+	t.Setenv("WG_QUIC_LIMITED_TOKEN_MARKER", "inherited")
+	exitCode, err := launchCommandWithToken(limited, []string{
+		commandInterpreter,
+		"/d",
+		"/s",
+		"/c",
+		`if defined WG_QUIC_LIMITED_TOKEN_MARKER (exit /b 23) else (exit /b 24)`,
 	})
 	if err != nil {
 		t.Fatal(err)

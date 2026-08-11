@@ -1,9 +1,9 @@
 //go:build windows
 
-// limited-token-launcher creates the same kernel-defined LUA token shape used
-// by a UAC-filtered Administrator and starts a command with that token in the
-// launcher's current session. It exists only as a Windows integration-test
-// fixture; production privilege transitions remain owned by wg-quic.
+// limited-token-launcher obtains a genuine UAC-filtered Administrator token
+// and starts a command with it in the launcher's current interactive session.
+// It exists only as a Windows integration-test fixture; production privilege
+// transitions remain owned by wg-quic.
 package main
 
 import (
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -19,15 +20,21 @@ import (
 )
 
 const (
-	createRestrictedTokenLUA        = 0x00000004
-	tokenElevationTypeLimited       = 3
-	limitedTokenLauncherUsage       = "limited-token-launcher -- command [argument ...]"
-	interactiveWindowStationDesktop = `winsta0\default`
+	createRestrictedTokenLUA  = 0x00000004
+	tokenElevationTypeLimited = 3
+	limitedTokenLauncherUsage = "limited-token-launcher -- command [argument ...]"
+	launcherTokenAccess       = windows.TOKEN_QUERY |
+		windows.TOKEN_DUPLICATE |
+		windows.TOKEN_ASSIGN_PRIMARY
 )
 
 var createRestrictedToken = windows.NewLazySystemDLL(
 	"advapi32.dll",
 ).NewProc("CreateRestrictedToken")
+
+var createProcessWithToken = windows.NewLazySystemDLL(
+	"advapi32.dll",
+).NewProc("CreateProcessWithTokenW")
 
 func main() {
 	command, err := parseCommand(os.Args[1:])
@@ -36,16 +43,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "limited-token-launcher:", err)
 		os.Exit(2)
 	}
-	exitCode, sessionID, err := runLimitedCommand(command)
+	exitCode, sessionID, tokenSource, err := runLimitedCommand(command)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "limited-token-launcher:", err)
 		os.Exit(1)
 	}
 	fmt.Fprintf(
 		os.Stderr,
-		"limited-token-launcher: child completed in session %d with exit code %d\n",
+		"limited-token-launcher: child completed in session %d with exit code %d using %s\n",
 		sessionID,
 		exitCode,
+		tokenSource,
 	)
 	os.Exit(int(exitCode))
 }
@@ -60,38 +68,38 @@ func parseCommand(arguments []string) ([]string, error) {
 	return append([]string(nil), arguments...), nil
 }
 
-func runLimitedCommand(command []string) (uint32, uint32, error) {
+func runLimitedCommand(command []string) (uint32, uint32, string, error) {
 	source, err := openLauncherSourceToken()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", err
 	}
 	defer source.Close()
 
 	enabled, exactDenyOnly, err := administratorGroupState(source)
 	if err != nil {
-		return 0, 0, fmt.Errorf("inspect launcher source token: %w", err)
+		return 0, 0, "", fmt.Errorf("inspect launcher source token: %w", err)
 	}
 	if !enabled || exactDenyOnly {
-		return 0, 0, errors.New(
+		return 0, 0, "", errors.New(
 			"launcher requires a full Administrator source token",
 		)
 	}
 
-	limited, err := createLUARestrictedToken(source)
+	limited, tokenSource, err := openLauncherLimitedToken(source)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", err
 	}
 	defer limited.Close()
 	sessionID, err := verifyLUARestrictedToken(limited)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", err
 	}
 
-	exitCode, err := launchCommandAsUser(limited, command)
+	exitCode, err := launchCommandWithToken(limited, command)
 	if err != nil {
-		return 0, sessionID, err
+		return 0, sessionID, tokenSource, err
 	}
-	return exitCode, sessionID, nil
+	return exitCode, sessionID, tokenSource, nil
 }
 
 func openLauncherSourceToken() (windows.Token, error) {
@@ -133,6 +141,225 @@ func createLUARestrictedToken(source windows.Token) (windows.Token, error) {
 	return token, nil
 }
 
+// openLauncherLimitedToken prefers the real filtered token owned by the
+// interactive shell in this same user session. If no shell token is available,
+// it asks Windows to derive a LUA token from the launcher's full Administrator
+// token. Service-hosted test agents can have a TokenElevationTypeDefault token
+// with no linked UAC pair; on those hosts the derived token is restricted but
+// still is not an authentic UAC limited token. Production code never borrows
+// or manufactures tokens; this is strictly an installed-GUI test fixture.
+func openLauncherLimitedToken(source windows.Token) (
+	windows.Token,
+	string,
+	error,
+) {
+	shell, processID, shellErr := openInteractiveShellLimitedToken(source)
+	if shellErr == nil {
+		return shell, fmt.Sprintf("interactive shell process %d", processID), nil
+	}
+
+	derived, derivedErr := createLUARestrictedToken(source)
+	if derivedErr == nil {
+		if _, verifyErr := verifyLUARestrictedToken(derived); verifyErr == nil {
+			return derived, "CreateRestrictedToken(LUA_TOKEN)", nil
+		} else {
+			derivedErr = verifyErr
+		}
+		_ = derived.Close()
+	}
+
+	return 0, "", fmt.Errorf(
+		"derive authentic limited token: interactive shell: %v; LUA_TOKEN: %w",
+		shellErr,
+		derivedErr,
+	)
+}
+
+func openInteractiveShellLimitedToken(source windows.Token) (
+	windows.Token,
+	uint32,
+	error,
+) {
+	sourceUser, err := source.GetTokenUser()
+	if err != nil {
+		return 0, 0, fmt.Errorf("inspect launcher user: %w", err)
+	}
+	expectedSession, err := launcherTokenSessionID(source)
+	if err != nil {
+		return 0, 0, fmt.Errorf("inspect launcher session: %w", err)
+	}
+
+	candidates, candidateErr := interactiveShellProcessIDs(expectedSession)
+	var failures []string
+	if candidateErr != nil {
+		failures = append(failures, candidateErr.Error())
+	}
+	for _, processID := range candidates {
+		limited, err := duplicateInteractiveLimitedToken(
+			processID,
+			expectedSession,
+			sourceUser.User.Sid,
+		)
+		if err == nil {
+			return limited, processID, nil
+		}
+		failures = append(
+			failures,
+			fmt.Sprintf("process %d: %v", processID, err),
+		)
+	}
+	if len(failures) == 0 {
+		failures = append(failures, "no shell process was found")
+	}
+	return 0, 0, fmt.Errorf("find same-session limited shell token: %s", strings.Join(failures, "; "))
+}
+
+func interactiveShellProcessIDs(expectedSession uint32) ([]uint32, error) {
+	var processIDs []uint32
+	addCandidate := func(processID uint32) {
+		if processID == 0 {
+			return
+		}
+		for _, existing := range processIDs {
+			if existing == processID {
+				return
+			}
+		}
+		var sessionID uint32
+		if windows.ProcessIdToSessionId(processID, &sessionID) == nil &&
+			sessionID == expectedSession {
+			processIDs = append(processIDs, processID)
+		}
+	}
+
+	if shellWindow := windows.GetShellWindow(); shellWindow != 0 {
+		var processID uint32
+		if _, err := windows.GetWindowThreadProcessId(
+			shellWindow,
+			&processID,
+		); err == nil {
+			addCandidate(processID)
+		}
+	}
+
+	snapshot, err := windows.CreateToolhelp32Snapshot(
+		windows.TH32CS_SNAPPROCESS,
+		0,
+	)
+	if err != nil {
+		return processIDs, fmt.Errorf("enumerate shell processes: %w", err)
+	}
+	defer windows.CloseHandle(snapshot)
+	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
+	if err := windows.Process32First(snapshot, &entry); err != nil {
+		return processIDs, fmt.Errorf("read first shell process: %w", err)
+	}
+	for {
+		if strings.EqualFold(
+			windows.UTF16ToString(entry.ExeFile[:]),
+			"explorer.exe",
+		) {
+			addCandidate(entry.ProcessID)
+		}
+		if err := windows.Process32Next(snapshot, &entry); err != nil {
+			if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+				return processIDs, fmt.Errorf(
+					"enumerate next shell process: %w",
+					err,
+				)
+			}
+			break
+		}
+	}
+	return processIDs, nil
+}
+
+func duplicateInteractiveLimitedToken(
+	processID uint32,
+	expectedSession uint32,
+	expectedUser *windows.SID,
+) (windows.Token, error) {
+	var processSession uint32
+	if err := windows.ProcessIdToSessionId(
+		processID,
+		&processSession,
+	); err != nil {
+		return 0, fmt.Errorf("inspect process session: %w", err)
+	}
+	if processSession != expectedSession {
+		return 0, fmt.Errorf(
+			"session %d differs from launcher session %d",
+			processSession,
+			expectedSession,
+		)
+	}
+
+	process, err := windows.OpenProcess(
+		windows.PROCESS_QUERY_LIMITED_INFORMATION,
+		false,
+		processID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("open shell process: %w", err)
+	}
+	defer windows.CloseHandle(process)
+	var candidate windows.Token
+	if err := windows.OpenProcessToken(
+		process,
+		windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE,
+		&candidate,
+	); err != nil {
+		return 0, fmt.Errorf("open shell token: %w", err)
+	}
+	defer candidate.Close()
+	candidateUser, err := candidate.GetTokenUser()
+	if err != nil {
+		return 0, fmt.Errorf("inspect shell user: %w", err)
+	}
+	if !candidateUser.User.Sid.Equals(expectedUser) {
+		return 0, errors.New("shell token belongs to another user")
+	}
+	if err := verifyInteractiveShellLimitedToken(candidate); err != nil {
+		return 0, err
+	}
+
+	var duplicate windows.Token
+	if err := windows.DuplicateTokenEx(
+		candidate,
+		launcherTokenAccess,
+		nil,
+		windows.SecurityImpersonation,
+		windows.TokenPrimary,
+		&duplicate,
+	); err != nil {
+		return 0, fmt.Errorf("duplicate shell primary token: %w", err)
+	}
+	if err := verifyInteractiveShellLimitedToken(duplicate); err != nil {
+		_ = duplicate.Close()
+		return 0, fmt.Errorf("verify duplicated shell token: %w", err)
+	}
+	return duplicate, nil
+}
+
+func verifyInteractiveShellLimitedToken(token windows.Token) error {
+	if _, err := verifyLUARestrictedToken(token); err != nil {
+		return err
+	}
+	linked, err := token.GetLinkedToken()
+	if err != nil {
+		return fmt.Errorf("open shell token's linked token: %w", err)
+	}
+	defer linked.Close()
+	linkedAdministrator, _, err := administratorGroupState(linked)
+	if err != nil {
+		return fmt.Errorf("inspect shell token's linked token: %w", err)
+	}
+	if !linkedAdministrator {
+		return errors.New("shell token's linked token is not an Administrator")
+	}
+	return nil
+}
+
 func verifyLUARestrictedToken(token windows.Token) (uint32, error) {
 	elevationType, err := launcherTokenElevationType(token)
 	if err != nil {
@@ -140,7 +367,7 @@ func verifyLUARestrictedToken(token windows.Token) (uint32, error) {
 	}
 	if elevationType != tokenElevationTypeLimited {
 		return 0, fmt.Errorf(
-			"CreateRestrictedToken returned elevation type %d, want limited (%d)",
+			"token elevation type is %d, want limited (%d)",
 			elevationType,
 			tokenElevationTypeLimited,
 		)
@@ -245,7 +472,7 @@ func launcherTokenSessionID(token windows.Token) (uint32, error) {
 	return sessionID, nil
 }
 
-func launchCommandAsUser(
+func launchCommandWithToken(
 	token windows.Token,
 	command []string,
 ) (uint32, error) {
@@ -276,12 +503,15 @@ func launchCommandAsUser(
 	if err != nil {
 		return 0, fmt.Errorf("encode child working directory: %w", err)
 	}
-	desktop, err := windows.UTF16PtrFromString(
-		interactiveWindowStationDesktop,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("encode interactive desktop: %w", err)
+	var environment *uint16
+	if err := windows.CreateEnvironmentBlock(
+		&environment,
+		token,
+		true,
+	); err != nil {
+		return 0, fmt.Errorf("create inherited child environment: %w", err)
 	}
+	defer windows.DestroyEnvironmentBlock(environment)
 
 	standardHandles, err := duplicateLauncherStandardHandles()
 	if err != nil {
@@ -290,27 +520,28 @@ func launchCommandAsUser(
 	defer standardHandles.close()
 	startup := windows.StartupInfo{
 		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
-		Desktop:   desktop,
 		Flags:     windows.STARTF_USESTDHANDLES,
 		StdInput:  standardHandles.input,
 		StdOutput: standardHandles.output,
 		StdErr:    standardHandles.errput,
 	}
 	var process windows.ProcessInformation
-	if err := windows.CreateProcessAsUser(
-		token,
-		application,
-		commandLine,
-		nil,
-		nil,
-		true,
+	result, _, callErr := createProcessWithToken.Call(
+		uintptr(token),
 		0,
-		nil,
-		currentDirectory,
-		&startup,
-		&process,
-	); err != nil {
-		return 0, fmt.Errorf("CreateProcessAsUser: %w", err)
+		uintptr(unsafe.Pointer(application)),
+		uintptr(unsafe.Pointer(commandLine)),
+		uintptr(windows.CREATE_UNICODE_ENVIRONMENT),
+		uintptr(unsafe.Pointer(environment)),
+		uintptr(unsafe.Pointer(currentDirectory)),
+		uintptr(unsafe.Pointer(&startup)),
+		uintptr(unsafe.Pointer(&process)),
+	)
+	if result == 0 {
+		if errno, ok := callErr.(syscall.Errno); ok && errno == 0 {
+			callErr = windows.ERROR_INVALID_FUNCTION
+		}
+		return 0, fmt.Errorf("CreateProcessWithTokenW: %w", callErr)
 	}
 	defer windows.CloseHandle(process.Process)
 	defer windows.CloseHandle(process.Thread)

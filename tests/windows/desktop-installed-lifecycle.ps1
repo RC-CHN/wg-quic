@@ -967,7 +967,9 @@ catch {
             "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
         ) -Name EnableLUA -ErrorAction Stop
     ).EnableLUA
-    $usesSyntheticLimitedToken = [int] $enableLUA -ne 1
+    if ([int] $enableLUA -ne 1) {
+        throw "installed filtered-Administrator lifecycle requires EnableLUA=1"
+    }
     Write-Host (Invoke-Native -FilePath $quick `
         -Arguments @("down", $tunnelName))
     Wait-For -Description "the direct service teardown before broker mutation" `
@@ -1004,29 +1006,28 @@ catch {
             $brokerSafeService.PathName
         )
     }
-    if (-not $usesSyntheticLimitedToken) {
-        $filteredAdminUser = New-LocalUser -Name $filteredAdminUserName `
-            -Password $securePassword -PasswordNeverExpires `
-            -UserMayNotChangePassword -AccountNeverExpires
-        $filteredAdminUserCreated = $true
-        $administratorsGroupSid = [Security.Principal.SecurityIdentifier]::new(
-            "S-1-5-32-544"
-        )
-        Add-LocalGroupMember -SID $administratorsGroupSid `
-            -Member $filteredAdminUser -ErrorAction Stop
-        $limitedFixtureSid = $filteredAdminUser.SID.Value
-    }
-    else {
-        # GitHub-hosted Windows deliberately disables UAC. The launcher derives
-        # a kernel LUA_TOKEN from this Administrator, so grant the unchanged
-        # user SID access to the fixture without relying on deny-only BA access.
-        $limitedFixtureSid = $identity.User.Value
-    }
-    & icacls.exe $standardUserRoot /grant:r (
-        "*${limitedFixtureSid}:(OI)(CI)M"
-    ) | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "grant limited Administrator fixture access failed"
+    $filteredAdminUser = New-LocalUser -Name $filteredAdminUserName `
+        -Password $securePassword -PasswordNeverExpires `
+        -UserMayNotChangePassword -AccountNeverExpires
+    $filteredAdminUserCreated = $true
+    $administratorsGroupSid = [Security.Principal.SecurityIdentifier]::new(
+        "S-1-5-32-544"
+    )
+    Add-LocalGroupMember -SID $administratorsGroupSid `
+        -Member $filteredAdminUser -ErrorAction Stop
+    foreach ($limitedFixtureSid in @(
+        $filteredAdminUser.SID.Value,
+        $identity.User.Value
+    )) {
+        & icacls.exe $standardUserRoot /grant:r (
+            "*${limitedFixtureSid}:(OI)(CI)M"
+        ) | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                "grant limited Administrator fixture access to " +
+                "$limitedFixtureSid failed"
+            )
+        }
     }
     @"
 [Interface]
@@ -1204,49 +1205,30 @@ catch {
         "System32\WindowsPowerShell\v1.0\powershell.exe"
     )
     $limitedTaskExitCode = 0
-    if (-not $usesSyntheticLimitedToken) {
-        # Task Scheduler password logons can return the full Administrator
-        # token even with /RL LIMITED. CreateProcessWithLogonW, used by
-        # Start-Process -Credential, performs a normal interactive logon and
-        # gives an asInvoker process the real UAC-filtered linked token.
-        $filteredCredential = [Management.Automation.PSCredential]::new(
-            "$env:COMPUTERNAME\$filteredAdminUserName",
-            $securePassword
-        )
-        $filteredProcess = Start-Process -FilePath $taskPowerShell `
-            -ArgumentList @(
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy", "Bypass",
-                "-File", "`"$filteredAdminScript`""
-            ) `
-            -Credential $filteredCredential `
-            -LoadUserProfile `
-            -WorkingDirectory $standardUserRoot `
-            -PassThru
-        $limitedTaskExitCode = Wait-ProcessExit `
-            -Process $filteredProcess `
-            -Description "the filtered-admin broker lifecycle" `
-            -TimeoutSeconds 390
-    }
-    else {
-        # A hosted runner has no split UAC token. CreateRestrictedToken with
-        # LUA_TOKEN yields a genuine TokenElevationTypeLimited primary token in
-        # this same interactive session, then CreateProcessAsUser runs the CLI
-        # lifecycle beneath it.
-        $limitedLauncherOutput = Invoke-Native `
-            -FilePath $limitedTokenLauncher -Arguments @(
-                "--",
-                $taskPowerShell,
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy", "Bypass",
-                "-File", $filteredAdminScript
-            )
-        Write-Host $limitedLauncherOutput
-    }
+    # Task Scheduler password logons can return the full Administrator token
+    # even with /RL LIMITED. CreateProcessWithLogonW, used by Start-Process
+    # -Credential, performs a normal interactive logon and gives this asInvoker
+    # process the real UAC-filtered linked token.
+    $filteredCredential = [Management.Automation.PSCredential]::new(
+        "$env:COMPUTERNAME\$filteredAdminUserName",
+        $securePassword
+    )
+    $filteredProcess = Start-Process -FilePath $taskPowerShell `
+        -ArgumentList @(
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy", "Bypass",
+            "-File", "`"$filteredAdminScript`""
+        ) `
+        -Credential $filteredCredential `
+        -LoadUserProfile `
+        -WorkingDirectory $standardUserRoot `
+        -PassThru
+    $limitedTaskExitCode = Wait-ProcessExit `
+        -Process $filteredProcess `
+        -Description "the filtered-admin broker lifecycle" `
+        -TimeoutSeconds 390
     $filteredAdminResultText = (
         Get-Content -LiteralPath $filteredAdminResult -Raw
     ).Trim()
@@ -1262,9 +1244,10 @@ catch {
     # CreateProcessWithLogonW gives the alternate Administrator a genuine UAC
     # filtered token, but its separate logon cannot reliably open the hosted
     # runner's existing WebView desktop. Exercise the real GUI separately with
-    # a kernel LUA_TOKEN derived in this interactive session. The launcher
-    # verifies TokenElevationTypeLimited, a deny-only Administrators SID, and
-    # the same session ID before it starts the installed Tauri executable.
+    # the current session shell's actual UAC-filtered token. The launcher
+    # verifies TokenElevationTypeLimited, a deny-only Administrators SID, its
+    # enabled linked Administrator, the same user, and the same session before
+    # it starts the installed Tauri executable.
     Remove-Item -LiteralPath $filteredDesktopResult -Force `
         -ErrorAction SilentlyContinue
     $env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE = "1"
@@ -1301,6 +1284,14 @@ catch {
             throw (
                 "limited-token desktop exited with code " +
                 "$filteredDesktopExitCode`n$filteredDesktopOutput"
+            )
+        }
+        if ($filteredDesktopOutput -notmatch (
+            "using interactive shell process [0-9]+"
+        )) {
+            throw (
+                "desktop launcher did not use the real interactive shell " +
+                "token`n$filteredDesktopOutput"
             )
         }
         if (-not (Test-Path -LiteralPath $filteredDesktopResult `
@@ -1410,17 +1401,11 @@ catch {
             ($remainingRuntimeDirectories.FullName -join ", ")
         )
     }
-    $brokerCoverage = if ($usesSyntheticLimitedToken) {
-        "a synthetic kernel LUA token in the current session"
-    }
-    else {
-        "a real UAC-filtered Administrator logon"
-    }
     Write-Host (
-        "$brokerCoverage used the management broker CLI without a prompt; " +
-        "a separate same-session kernel LUA token ran the real desktop " +
-        "through import/check/up/down, and the CLI restored the primary " +
-        "service and adapter"
+        "a real UAC-filtered Administrator logon used the management broker " +
+        "CLI without a prompt; the current session shell's separate real " +
+        "UAC-filtered token ran the desktop through import/check/up/down, " +
+        "and the CLI restored the primary service and adapter"
     )
 
     $uninstall = Start-Process -FilePath "msiexec.exe" `
