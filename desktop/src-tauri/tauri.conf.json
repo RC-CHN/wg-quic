@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "wg-quic",
+  "mainBinaryName": "wg-quic-desktop",
+  "version": "0.1.2",
+  "identifier": "com.rc-chn.wg-quic.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "wg-quic",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 920,
+        "minHeight": 620,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "RC-CHN",
+    "category": "Utility",
+    "shortDescription": "WireGuard over resilient QUIC",
+    "longDescription": "A lightweight desktop shell for wg-quic-quick.",
+    "resources": {
+      "../resources/bin/": "bin/",
+      "../resources/licenses/": "licenses/"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "upgradeCode": "7a67f9da-0b3f-4a51-9062-7f3b921fec39",
+        "language": "en-US"
+      }
+    }
+  }
+}

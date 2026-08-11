@@ -25,7 +25,13 @@ if (desktopPackage.version !== version) {
 
 const artifacts = collectReleaseArtifacts({
   platform,
-  sourceDirectory: path.join(desktopDirectory, 'out', 'make'),
+  sourceDirectory: path.join(
+    desktopDirectory,
+    'src-tauri',
+    'target',
+    'release',
+    'bundle',
+  ),
   outputDirectory: path.join(
     repositoryDirectory,
     'dist',

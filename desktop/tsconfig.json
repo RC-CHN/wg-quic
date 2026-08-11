@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM"],
     "strict": true,
     "esModuleInterop": true,
@@ -11,12 +11,18 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["vite/client"]
   },
   "include": [
-    "forge.config.ts",
-    "webpack.*.ts",
+    "vite.config.ts",
     "src/**/*.ts",
     "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/cli.ts",
+    "src/main.ts",
+    "src/preload.ts",
+    "src/windows-elevation.ts",
+    "src/windows-elevation.test.ts"
   ]
 }

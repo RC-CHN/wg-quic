@@ -9,6 +9,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, '..');
 const repositoryDir = path.resolve(desktopDir, '..');
 const outputDir = path.join(desktopDir, 'resources', 'bin');
+const licenseDir = path.join(desktopDir, 'resources', 'licenses');
 const targetOS = {
   linux: 'linux',
   win32: 'windows',
@@ -26,7 +27,24 @@ const version = readFileSync(path.join(repositoryDir, 'VERSION'), 'utf8').trim()
 const suffix = targetOS === 'windows' ? '.exe' : '';
 
 rmSync(outputDir, { recursive: true, force: true });
+rmSync(licenseDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(licenseDir, { recursive: true });
+copyFileSync(
+  path.join(repositoryDir, 'LICENSE'),
+  path.join(licenseDir, 'wg-quic-AGPL-3.0.txt'),
+);
+
+for (const component of ['quic-go', 'wireguard-go']) {
+  const componentDirectory = path.join(licenseDir, component);
+  mkdirSync(componentDirectory, { recursive: true });
+  for (const file of ['LICENSE', 'ORIGIN.md']) {
+    copyFileSync(
+      path.join(repositoryDir, 'third_party', component, file),
+      path.join(componentDirectory, file),
+    );
+  }
+}
 
 for (const command of ['wg-quic', 'wg-quic-quick']) {
   const output = path.join(outputDir, `${command}${suffix}`);
@@ -62,6 +80,14 @@ if (targetOS === 'windows') {
     path.join(repositoryDir, 'third_party', 'wintun', targetArch, 'wintun.dll'),
     path.join(outputDir, 'wintun.dll'),
   );
+  const wintunLicenseDirectory = path.join(licenseDir, 'wintun');
+  mkdirSync(wintunLicenseDirectory, { recursive: true });
+  for (const file of ['LICENSE.txt', 'ORIGIN.md']) {
+    copyFileSync(
+      path.join(repositoryDir, 'third_party', 'wintun', file),
+      path.join(wintunLicenseDirectory, file),
+    );
+  }
 }
 
 writeFileSync(

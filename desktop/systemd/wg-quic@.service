@@ -1,0 +1,17 @@
+[Unit]
+Description=wg-quic tunnel %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/wg-quic/bin/wg-quic-quick run %i
+Restart=on-failure
+RestartSec=2s
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+DeviceAllow=/dev/net/tun rw
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

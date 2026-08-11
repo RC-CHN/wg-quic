@@ -1,4 +1,10 @@
 import './styles.css';
+import './tauri-api';
+import {
+  completeDesktopSmoke,
+  desktopSmokeSettings,
+  reportDesktopSmoke,
+} from './tauri-api';
 import type {
   CoreStatus,
   DesktopSnapshot,
@@ -35,6 +41,7 @@ let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
 let refreshInFlight = false;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -95,7 +102,7 @@ function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
 
 function stateDescription(tunnel: TunnelView): string {
   if (!tunnel.running) {
-    return 'The tunnel service is not running.';
+    return tunnel.statusDetail || 'The tunnel service is not running.';
   }
   const sessions = tunnel.status?.stats.active_sessions || 0;
   if (sessions === 0) {
@@ -106,6 +113,10 @@ function stateDescription(tunnel: TunnelView): string {
 
 function setText(id: string, value: string): void {
   byId(id).textContent = value;
+}
+
+function refreshedAtDate(value: string): Date {
+  return /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
 }
 
 function renderPeers(status?: CoreStatus): void {
@@ -255,7 +266,7 @@ function render(snapshot: DesktopSnapshot): void {
   setText('config-location', snapshot.backend.configDirectory);
   setText(
     'last-refresh',
-    `Updated ${new Date(snapshot.refreshedAt).toLocaleTimeString()}`,
+    `Updated ${refreshedAtDate(snapshot.refreshedAt).toLocaleTimeString()}`,
   );
   setText(
     'runtime-title',
@@ -284,18 +295,20 @@ function render(snapshot: DesktopSnapshot): void {
   document.body.dataset.ready = 'true';
 }
 
-async function refresh(showErrors = true): Promise<void> {
+async function refresh(showErrors = true): Promise<boolean> {
   if (refreshInFlight) {
-    return;
+    return false;
   }
   refreshInFlight = true;
   byId('refresh').classList.add('spinning');
   try {
     render(await window.wgQuic.snapshot());
+    return true;
   } catch (error) {
     if (showErrors) {
       showToast(errorMessage(error), 'error');
     }
+    return false;
   } finally {
     refreshInFlight = false;
     byId('refresh').classList.remove('spinning');
@@ -413,7 +426,91 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-void refresh();
+async function start(): Promise<void> {
+  const smoke = await desktopSmokeSettings();
+  smokeMode = smoke.mode;
+  if (!(await refresh())) {
+    throw new Error('desktop could not load its native backend snapshot');
+  }
+  if (smoke.mode !== 'none') {
+    const backend = current?.backend;
+    if (!backend || backend.error) {
+      throw new Error(
+        backend?.error || 'desktop did not return native backend information',
+      );
+    }
+    if (!backend.coreVersion || !backend.quickVersion) {
+      throw new Error('desktop did not verify its bundled native versions');
+    }
+  }
+  if (smoke.mode === 'renderer') {
+    await completeDesktopSmoke('wg-quic desktop renderer smoke test passed');
+    return;
+  }
+  if (smoke.mode === 'tray') {
+    await reportDesktopSmoke('wg-quic desktop tray smoke ready');
+    return;
+  }
+  if (smoke.mode === 'integration') {
+    if (!smoke.source || !smoke.name) {
+      throw new Error(
+        'desktop integration smoke requires a configuration path and tunnel name',
+      );
+    }
+    const imported = await window.wgQuic.importConfigPath(
+      smoke.source,
+      false,
+    );
+    if (imported.importedName !== smoke.name) {
+      throw new Error(
+        `desktop imported ${JSON.stringify(imported.importedName)} instead of ${JSON.stringify(smoke.name)}`,
+      );
+    }
+    let active = false;
+    try {
+      const running = await window.wgQuic.manage(smoke.name, 'up');
+      active = true;
+      const tunnel = running.tunnels.find(
+        (candidate) => candidate.name === smoke.name,
+      );
+      if (
+        !tunnel?.running ||
+        tunnel.status?.interface !== smoke.name ||
+        tunnel.status.state !== 'up'
+      ) {
+        throw new Error(
+          `desktop did not observe the active tunnel: ${JSON.stringify(tunnel)}`,
+        );
+      }
+    } finally {
+      if (active) {
+        await window.wgQuic.manage(smoke.name, 'down');
+      }
+    }
+    const stopped = await window.wgQuic.snapshot();
+    const tunnel = stopped.tunnels.find(
+      (candidate) => candidate.name === smoke.name,
+    );
+    if (!tunnel || tunnel.running) {
+      throw new Error(
+        `desktop did not observe the stopped tunnel: ${JSON.stringify(tunnel)}`,
+      );
+    }
+    await completeDesktopSmoke(
+      'wg-quic installed desktop import/UAC/service/status lifecycle passed',
+    );
+  }
+}
+
+void start().catch((error: unknown) => {
+  showToast(errorMessage(error), 'error');
+  if (smokeMode !== 'none') {
+    void completeDesktopSmoke(
+      `wg-quic desktop smoke test failed: ${errorMessage(error)}`,
+      true,
+    );
+  }
+});
 setInterval(() => {
   if (!document.hidden) {
     void refresh(false);

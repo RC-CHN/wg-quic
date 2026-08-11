@@ -15,7 +15,7 @@ The broadest exercised runtime is currently Linux. The FreeBSD data plane and
 `wg-quic-quick` host-policy layer are also QEMU-validated through the OPNsense
 plugin on FreeBSD 14 and 15, and an rc.d service script is included. Windows
 has a Wintun, host-network, Named Pipe, and per-tunnel SCM implementation with
-an Electron desktop shell; hosted CI validates the installed UI's UAC
+a Tauri desktop shell; hosted CI validates the installed UI's elevation
 boundary plus its privileged Wintun, LocalSystem service, address, MTU, DNS,
 route, status, and cleanup lifecycle. All platforms share the same userspace
 WireGuard, QUIC, FEC,
@@ -97,7 +97,7 @@ subtree. Its Web UI, Dashboard widget, package, services, and `quicN`
 interfaces are isolated from OPNsense's built-in WireGuard integration.
 
 The Windows and Linux desktop shell lives in
-[`desktop/`](desktop/README.md). It is a sandboxed Electron UI over the
+[`desktop/`](desktop/README.md). It is a constrained Tauri webview over the
 existing `wg-quic-quick check/up/down` and `wg-quic show --json` commands;
 there is no separate desktop tunnel implementation or configuration model.
 

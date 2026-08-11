@@ -80,11 +80,6 @@ export function collectReleaseArtifacts({
       (file) => file.toLowerCase().endsWith('.deb'),
       'Debian package',
     );
-    const zip = findExactlyOne(
-      files,
-      (file) => file.toLowerCase().endsWith('.zip'),
-      'Linux ZIP archive',
-    );
     return [
       copyArtifact(
         deb,
@@ -94,15 +89,6 @@ export function collectReleaseArtifacts({
         ),
         Buffer.from('!<arch>\n'),
         'Debian package',
-      ),
-      copyArtifact(
-        zip,
-        path.join(
-          outputDirectory,
-          `wg-quic-desktop-v${version}-linux-amd64.zip`,
-        ),
-        Buffer.from('PK'),
-        'Linux ZIP archive',
       ),
     ];
   }

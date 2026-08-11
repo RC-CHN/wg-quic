@@ -1,0 +1,22 @@
+{
+  "bundle": {
+    "targets": ["deb"],
+    "linux": {
+      "deb": {
+        "depends": [
+          "dbus",
+          "iproute2",
+          "libayatana-appindicator3-1",
+          "pkexec",
+          "systemd",
+          "xdg-utils"
+        ],
+        "files": {
+          "/lib/systemd/system/wg-quic@.service": "../systemd/wg-quic@.service"
+        },
+        "postInstallScript": "../systemd/postinst",
+        "postRemoveScript": "../systemd/postrm"
+      }
+    }
+  }
+}

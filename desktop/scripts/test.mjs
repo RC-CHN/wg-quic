@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -24,12 +24,15 @@ function run(args) {
 
 rmSync(outputDir, { recursive: true, force: true });
 try {
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(
+    path.join(outputDir, 'package.json'),
+    '{"type":"commonjs"}\n',
+  );
   if (
     run([tsc, '--project', 'tsconfig.test.json']) &&
     run([
       '--test',
-      path.join(outputDir, 'src', 'paths.test.js'),
-      path.join(outputDir, 'src', 'windows-elevation.test.js'),
       path.join(outputDir, 'src', 'view-model.test.js'),
       path.join(scriptDir, 'release-artifacts.test.mjs'),
     ])

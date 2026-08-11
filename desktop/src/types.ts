@@ -51,7 +51,7 @@ export interface TunnelView {
 }
 
 export interface BackendInfo {
-  platform: NodeJS.Platform;
+  platform: string;
   arch: string;
   configDirectory: string;
   supported: boolean;
@@ -77,5 +77,9 @@ export interface DesktopAPI {
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;
   importConfig(): Promise<ImportResult>;
+  importConfigPath(
+    sourcePath: string,
+    overwrite: boolean,
+  ): Promise<ImportResult>;
   openConfigDirectory(): Promise<string>;
 }

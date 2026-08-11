@@ -4,14 +4,13 @@
     "noEmit": false,
     "outDir": ".test-build",
     "rootDir": ".",
-    "sourceMap": false
+    "sourceMap": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node"]
   },
   "include": [
     "src/types.ts",
-    "src/paths.ts",
-    "src/paths.test.ts",
-    "src/windows-elevation.ts",
-    "src/windows-elevation.test.ts",
     "src/view-model.ts",
     "src/view-model.test.ts"
   ]

@@ -40,7 +40,7 @@ test('collects and renames the Windows installer', () => {
   }
 });
 
-test('collects and renames both Linux distributions', () => {
+test('collects and renames the Linux Debian package', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'wg-quic-release-'));
   try {
     const source = path.join(root, 'make');
@@ -50,12 +50,6 @@ test('collects and renames both Linux distributions', () => {
       'deb/x64/wg-quic_0.1.2_amd64.deb',
       Buffer.from('!<arch>\ndebian'),
     );
-    fixture(
-      source,
-      'zip/linux/x64/wg-quic-linux-x64-0.1.2.zip',
-      Buffer.from('PKarchive'),
-    );
-
     const artifacts = collectReleaseArtifacts({
       platform: 'linux',
       sourceDirectory: source,
@@ -65,7 +59,6 @@ test('collects and renames both Linux distributions', () => {
 
     assert.deepEqual(artifacts, [
       path.join(output, 'wg-quic-desktop-v0.1.2-linux-amd64.deb'),
-      path.join(output, 'wg-quic-desktop-v0.1.2-linux-amd64.zip'),
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

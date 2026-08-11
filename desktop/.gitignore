@@ -2,5 +2,15 @@
 /.webpack/
 /.test-build/
 /out/
+/dist/
 /resources/bin/
+/resources/licenses/
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/icons/android/
+/src-tauri/icons/ios/
+/src-tauri/icons/icon.icns
+/src-tauri/icons/64x64.png
+/src-tauri/icons/Square*Logo.png
+/src-tauri/icons/StoreLogo.png
 *.log

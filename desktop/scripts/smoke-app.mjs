@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, '..');
-const platformDirectory = `wg-quic-${process.platform}-${process.arch}`;
-const packageDirectory = path.join(desktopDir, 'out', platformDirectory);
+const packageDirectory = path.join(desktopDir, 'src-tauri', 'target', 'release');
 const executable =
   process.env.WG_QUIC_DESKTOP_EXECUTABLE ||
   {
-    linux: path.join(packageDirectory, 'wg-quic'),
-    win32: path.join(packageDirectory, 'wg-quic.exe'),
+    linux: path.join(packageDirectory, 'wg-quic-desktop'),
+    win32: path.join(packageDirectory, 'wg-quic-desktop.exe'),
   }[process.platform];
 
 if (!executable) {
@@ -26,6 +25,7 @@ const configDirectory = mkdtempSync(
 );
 const integrationSmoke =
   process.env.WG_QUIC_DESKTOP_INTEGRATION_SMOKE === '1';
+const resultPath = path.join(configDirectory, 'result.txt');
 let output = '';
 
 try {
@@ -33,7 +33,7 @@ try {
     cwd: packageDirectory,
     env: {
       ...process.env,
-      ELECTRON_ENABLE_LOGGING: '1',
+      WG_QUIC_DESKTOP_SMOKE_RESULT: resultPath,
       ...(integrationSmoke
         ? {}
         : {
@@ -81,19 +81,19 @@ try {
     });
   });
 
-  if (
-    exitCode !== 0 ||
-    !output.includes(
-      integrationSmoke
-        ? 'wg-quic installed desktop import/UAC/service/status lifecycle passed'
-        : 'wg-quic desktop renderer smoke test passed',
-    )
-  ) {
+  const expected = integrationSmoke
+    ? 'wg-quic installed desktop import/UAC/service/status lifecycle passed'
+    : 'wg-quic desktop renderer smoke test passed';
+  const result = readFileSync(resultPath, 'utf8').trim();
+  if (exitCode !== 0 || result !== expected) {
     throw new Error(
-      `packaged desktop app smoke test failed (exit ${exitCode})\n${output}`,
+      `packaged desktop app smoke test failed (exit ${exitCode}, result ${JSON.stringify(result)})\n${output}`,
     );
   }
-  process.stdout.write(output);
+  console.log(result);
+  if (output) {
+    process.stdout.write(output);
+  }
 } finally {
   rmSync(configDirectory, { recursive: true, force: true });
 }

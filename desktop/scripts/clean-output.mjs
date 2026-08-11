@@ -5,6 +5,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const outputDirectory = path.resolve(scriptDir, '..', 'out');
+const desktopDirectory = path.resolve(scriptDir, '..');
 
-rmSync(outputDirectory, { recursive: true, force: true });
+for (const outputDirectory of [
+  path.join(desktopDirectory, 'out'),
+  path.join(desktopDirectory, 'dist'),
+  path.join(desktopDirectory, 'src-tauri', 'target', 'release', 'bundle'),
+]) {
+  rmSync(outputDirectory, { recursive: true, force: true });
+}
