@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/lib/wg-quic/bin/wg-quic-quick run %i
+KillMode=control-group
 Restart=on-failure
 RestartSec=2s
 AmbientCapabilities=CAP_NET_ADMIN

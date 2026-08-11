@@ -55,6 +55,11 @@ if ! systemctl cat wg-quic@.service | grep -Fq \
     echo "installed systemd service does not use the bundled runtime" >&2
     exit 1
 fi
+if ! systemctl cat wg-quic@.service | grep -Fq \
+    'KillMode=control-group'; then
+    echo "installed systemd service does not own the complete process group" >&2
+    exit 1
+fi
 
 private_key=$($core genkey)
 peer_private_key=$($core genkey)
@@ -76,7 +81,12 @@ EOF
 sudo install -d -m 0755 -- "$config_directory"
 sudo install -m 0600 -- "$source_config" "$config_path"
 sudo "$quick" check "$config_path"
-sudo "$quick" up "$tunnel_name"
+if ! sudo "$quick" up "$tunnel_name"; then
+    sudo systemctl status --no-pager "wg-quic@$tunnel_name.service" || true
+    sudo journalctl --no-pager -u "wg-quic@$tunnel_name.service" -n 120 || true
+    echo "installed Linux desktop service failed to start" >&2
+    exit 1
+fi
 
 ready=false
 for _ in {1..150}; do

@@ -34,14 +34,6 @@ func newCoreProcess(launch coreLaunch) (coreProcess, error) {
 	return &execCoreProcess{cmd: cmd, done: make(chan struct{})}, nil
 }
 
-// configureCoreProcess makes the data-plane process follow the lifetime of
-// wg-quic-quick. This matters in particular on FreeBSD, where a supervisor
-// killed with SIGKILL cannot run its normal cleanup and an orphaned core keeps
-// the tun device open indefinitely.
-func configureCoreProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-}
-
 func (p *execCoreProcess) Start() error {
 	if err := p.cmd.Start(); err != nil {
 		return err
