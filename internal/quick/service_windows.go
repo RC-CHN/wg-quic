@@ -23,11 +23,12 @@ func RunWindowsService(
 	requestedName string,
 	brokerSafe bool,
 ) error {
+	diagnostics := &windowsServiceDiagnostics{}
 	_, name, err := ResolveConfig(input, requestedName, platform.Current())
 	if err != nil {
-		return err
+		return diagnostics.recordFailure(err)
 	}
-	return svc.Run(windowsServiceName(name), &windowsQuickService{
+	err = svc.Run(windowsServiceName(name), &windowsQuickService{
 		run: func(
 			ctx context.Context,
 			ready func(),
@@ -37,12 +38,19 @@ func RunWindowsService(
 			if brokerSafe {
 				policy = validateWindowsManagementHookFreeConfig
 			}
-			return runWithHostReadyProgressPolicy(
-				ctx, input, name, platform.Current(), newCoreProcess,
+			runErr := runWithHostReadyLog(
+				ctx, input, name, platform.Current(),
+				diagnostics.newCoreProcess,
 				ready, shutdownProgress, policy,
+				diagnostics.runLog(),
 			)
+			return diagnostics.recordFailure(runErr)
 		},
 	})
+	if err != nil {
+		return diagnostics.recordFailure(err)
+	}
+	return nil
 }
 
 type windowsQuickService struct {

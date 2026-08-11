@@ -297,15 +297,27 @@ func TestWindowsRuntimeCleanupAfterRunningWaitFailure(t *testing.T) {
 	var cleaned []string
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	operations := fakeRuntimeOperations(runtime, &cleaned)
+	diagnosedBeforeCleanup := false
+	operations.diagnose = func(string) (string, error) {
+		diagnosedBeforeCleanup = len(cleaned) == 0
+		return "core startup failed: fixture detail", nil
+	}
 	err := startWindowsServiceManaged(
 		ctx,
 		manager,
 		"office",
 		false,
-		fakeRuntimeOperations(runtime, &cleaned),
+		operations,
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Running wait failure error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "core startup failed: fixture detail") {
+		t.Fatalf("Running wait failure omitted service diagnostics: %v", err)
+	}
+	if !diagnosedBeforeCleanup {
+		t.Fatal("service diagnostics were read after runtime cleanup")
 	}
 	if manager.created.stopCalls != 1 || manager.created.deleteCalls != 1 {
 		t.Fatalf(
@@ -316,6 +328,72 @@ func TestWindowsRuntimeCleanupAfterRunningWaitFailure(t *testing.T) {
 	}
 	if len(cleaned) != 1 || cleaned[0] != runtime {
 		t.Fatalf("Running wait failure cleaned runtimes = %q", cleaned)
+	}
+}
+
+func TestWindowsRuntimeDiagnosesServiceStoppedBeforeRunning(t *testing.T) {
+	manager := newFakeRuntimeLifecycleManager()
+	manager.created = &fakeRuntimeLifecycleService{
+		statuses: []svc.Status{{
+			State:         svc.Stopped,
+			Win32ExitCode: 1,
+		}},
+	}
+	const runtime = `C:\ProgramData\wg-quic\runtime\run-stopped\wg-quic-quick.exe`
+	var cleaned []string
+	operations := fakeRuntimeOperations(runtime, &cleaned)
+	operations.diagnose = func(executable string) (string, error) {
+		if executable != runtime {
+			t.Fatalf("diagnostic executable = %q, want %q", executable, runtime)
+		}
+		if len(cleaned) != 0 {
+			t.Fatal("service diagnostics were read after runtime cleanup")
+		}
+		return "prepare Wintun: fixture failure", nil
+	}
+	err := startWindowsServiceManaged(
+		context.Background(),
+		manager,
+		"office",
+		false,
+		operations,
+	)
+	if err == nil || !strings.Contains(
+		err.Error(),
+		"stopped before reaching state Running",
+	) {
+		t.Fatalf("stopped service error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "prepare Wintun: fixture failure") {
+		t.Fatalf("stopped service omitted diagnostics: %v", err)
+	}
+	if len(cleaned) != 1 || cleaned[0] != runtime {
+		t.Fatalf("stopped service cleaned runtimes = %q", cleaned)
+	}
+}
+
+func TestWindowsRuntimeMissingServiceDiagnosticPreservesPrimaryFailure(
+	t *testing.T,
+) {
+	manager := newFakeRuntimeLifecycleManager()
+	manager.created = &fakeRuntimeLifecycleService{
+		statuses: []svc.Status{{State: svc.Stopped, Win32ExitCode: 1}},
+	}
+	const runtime = `C:\ProgramData\wg-quic\runtime\run-no-record\wg-quic-quick.exe`
+	var cleaned []string
+	operations := fakeRuntimeOperations(runtime, &cleaned)
+	operations.diagnose = func(string) (string, error) { return "", nil }
+	err := startWindowsServiceManaged(
+		context.Background(), manager, "office", false, operations,
+	)
+	if err == nil || !strings.Contains(
+		err.Error(),
+		"stopped before reaching state Running",
+	) {
+		t.Fatalf("missing diagnostic changed primary failure: %v", err)
+	}
+	if strings.Contains(err.Error(), "Windows service diagnostics") {
+		t.Fatalf("missing diagnostic added an empty section: %v", err)
 	}
 }
 
@@ -419,6 +497,7 @@ func TestWindowsRuntimeCleanupGuardsCurrentProcessAndWhitelist(t *testing.T) {
 		"wg-quic-quick.exe",
 		"wg-quic.exe",
 		"wintun.dll",
+		windowsServiceFailureFileName,
 	} {
 		if !windowsRuntimeCleanupEntryAllowed(name) {
 			t.Fatalf("cleanup rejected whitelisted entry %q", name)
@@ -427,6 +506,8 @@ func TestWindowsRuntimeCleanupGuardsCurrentProcessAndWhitelist(t *testing.T) {
 	for _, name := range []string{
 		"other.exe",
 		"wg-quic.exe.log",
+		"service-error.txt.bak",
+		"SERVICE-ERROR.TXT",
 		"WG-QUIC.EXE",
 		"subdirectory",
 	} {

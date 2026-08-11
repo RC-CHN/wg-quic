@@ -185,6 +185,23 @@ func startWindowsServiceManaged(
 	if err := waitWindowsLifecycleServiceState(
 		ctx, service, serviceName, svc.Running,
 	); err != nil {
+		if runtimeOperations.diagnose != nil {
+			detail, diagnosticErr := runtimeOperations.diagnose(
+				stage.executable,
+			)
+			if diagnosticErr != nil {
+				err = errors.Join(err, fmt.Errorf(
+					"read Windows service startup diagnostics: %w",
+					diagnosticErr,
+				))
+			} else if detail != "" {
+				err = fmt.Errorf(
+					"%w\nWindows service diagnostics:\n%s",
+					err,
+					detail,
+				)
+			}
+		}
 		rollbackErr := rollbackWindowsStartedService(
 			manager,
 			service,

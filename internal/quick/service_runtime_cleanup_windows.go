@@ -118,9 +118,10 @@ type windowsRuntimeStage struct {
 }
 
 type windowsRuntimeLifecycleOperations struct {
-	stage   func() (windowsRuntimeStage, error)
-	capture func(windowsServiceLifecycleService) string
-	cleanup func(
+	stage    func() (windowsRuntimeStage, error)
+	capture  func(windowsServiceLifecycleService) string
+	diagnose func(string) (string, error)
+	cleanup  func(
 		context.Context,
 		windowsServiceLifecycleManager,
 		string,
@@ -142,8 +143,9 @@ func defaultWindowsRuntimeLifecycleOperations() windowsRuntimeLifecycleOperation
 				lease:      lease,
 			}, err
 		},
-		capture: windowsTrustedRuntimeExecutableFromService,
-		cleanup: cleanupWindowsServiceRuntime,
+		capture:  windowsTrustedRuntimeExecutableFromService,
+		diagnose: readWindowsServiceFailureRecord,
+		cleanup:  cleanupWindowsServiceRuntime,
 	}
 }
 
@@ -706,7 +708,8 @@ func windowsRuntimeDirectoryIsCurrentProcess(
 
 func windowsRuntimeCleanupEntryAllowed(name string) bool {
 	switch name {
-	case "wg-quic-quick.exe", "wg-quic.exe", "wintun.dll":
+	case "wg-quic-quick.exe", "wg-quic.exe", "wintun.dll",
+		windowsServiceFailureFileName:
 		return true
 	default:
 		return false
