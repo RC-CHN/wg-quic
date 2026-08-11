@@ -111,11 +111,13 @@ if ([string]::IsNullOrWhiteSpace($TunnelName)) {
 }
 
 $serviceName = "wg-quic-quick@$TunnelName"
-$fixtureRoot = Join-Path $env:ProgramData "wg-quic\ci\$TunnelName"
+$fixtureRoot = Join-Path $env:TEMP "wg-quic-ci-$TunnelName"
 $runtimeDirectory = Join-Path $fixtureRoot "bin"
 $configDirectory = Join-Path $env:ProgramData "wg-quic\interfaces"
 $configPath = Join-Path $configDirectory "$TunnelName.conf"
 $staleConfigPath = Join-Path $configDirectory "$TunnelName-stale.conf"
+$sourceConfigPath = Join-Path $fixtureRoot "$TunnelName.conf"
+$staleSourceConfigPath = Join-Path $fixtureRoot "$TunnelName-stale.conf"
 $core = Join-Path $runtimeDirectory "wg-quic.exe"
 $quick = Join-Path $runtimeDirectory "wg-quic-quick.exe"
 $octet = 20 + ($PID % 200)
@@ -134,7 +136,7 @@ $endpointRoutesBefore = @(
 )
 
 try {
-    New-Item -ItemType Directory -Force -Path $runtimeDirectory, $configDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $sourceDirectory "wg-quic.exe") -Destination $runtimeDirectory
     Copy-Item -LiteralPath (Join-Path $sourceDirectory "wg-quic-quick.exe") -Destination $runtimeDirectory
     Copy-Item -LiteralPath (Join-Path $sourceDirectory "wintun.dll") -Destination $runtimeDirectory
@@ -161,10 +163,20 @@ AllowedIPs = $peerPrefix
 Endpoint = ${endpointAddress}:$endpointPort
 PersistentKeepalive = 1
 "@
-    Set-Content -LiteralPath $configPath -Value $configuration -Encoding ascii
-    Set-Content -LiteralPath $staleConfigPath -Value $configuration -Encoding ascii
+    Set-Content -LiteralPath $sourceConfigPath -Value $configuration `
+        -Encoding ascii
+    Set-Content -LiteralPath $staleSourceConfigPath -Value $configuration `
+        -Encoding ascii
 
-    Write-Host (Invoke-Native -FilePath $quick -Arguments @("check", $configPath))
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @(
+        "desktop-import", $TunnelName, $sourceConfigPath
+    ))
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @(
+        "desktop-import", "$TunnelName-stale", $staleSourceConfigPath
+    ))
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @(
+        "check", $configPath
+    ))
     Write-Host (Invoke-Native -FilePath $quick -Arguments @("up", $TunnelName))
     $serviceStarted = $true
 
