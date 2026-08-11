@@ -17,7 +17,7 @@ fixture_directory=$(mktemp -d -p /tmp wg-quic-desktop-linux.XXXXXX)
 source_config="$fixture_directory/$tunnel_name.conf"
 
 # Invoked by the EXIT trap.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     sudo "$quick" down "$tunnel_name" >/dev/null 2>&1 || true
     sudo rm -f -- "$config_path"
