@@ -272,15 +272,30 @@ func TestWindowsRuntimeCleanupAfterServiceStartFailure(t *testing.T) {
 	}
 	const runtime = `C:\ProgramData\wg-quic\runtime\run-failed\wg-quic-quick.exe`
 	var cleaned []string
+	operations := fakeRuntimeOperations(runtime, &cleaned)
+	diagnosedBeforeCleanup := false
+	operations.diagnose = func(executable string) (string, error) {
+		diagnosedBeforeCleanup = len(cleaned) == 0
+		if executable != runtime {
+			t.Fatalf("diagnostic executable = %q, want %q", executable, runtime)
+		}
+		return "dispatcher rejected fixture configuration", nil
+	}
 	err := startWindowsServiceManaged(
 		context.Background(),
 		manager,
 		"office",
 		false,
-		fakeRuntimeOperations(runtime, &cleaned),
+		operations,
 	)
 	if !errors.Is(err, startFailure) {
 		t.Fatalf("start failure error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "dispatcher rejected fixture configuration") {
+		t.Fatalf("start failure omitted service diagnostics: %v", err)
+	}
+	if !diagnosedBeforeCleanup {
+		t.Fatal("start failure diagnostics were read after runtime cleanup")
 	}
 	if manager.created.stopCalls != 1 || manager.created.deleteCalls != 1 {
 		t.Fatalf(
@@ -305,8 +320,13 @@ func TestWindowsRuntimeCleanupAfterRunningWaitFailure(t *testing.T) {
 	cancel()
 	operations := fakeRuntimeOperations(runtime, &cleaned)
 	diagnosedBeforeCleanup := false
+	diagnosticCalls := 0
 	operations.diagnose = func(string) (string, error) {
+		diagnosticCalls++
 		diagnosedBeforeCleanup = len(cleaned) == 0
+		if diagnosticCalls == 1 {
+			return "", nil
+		}
 		return "core startup failed: fixture detail", nil
 	}
 	err := startWindowsServiceManaged(
@@ -324,6 +344,9 @@ func TestWindowsRuntimeCleanupAfterRunningWaitFailure(t *testing.T) {
 	}
 	if !diagnosedBeforeCleanup {
 		t.Fatal("service diagnostics were read after runtime cleanup")
+	}
+	if diagnosticCalls != 2 {
+		t.Fatalf("service diagnostic reads = %d, want 2", diagnosticCalls)
 	}
 	if manager.created.stopCalls != 1 || manager.created.deleteCalls != 1 {
 		t.Fatalf(

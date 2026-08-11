@@ -19,6 +19,38 @@ import (
 
 const windowsServicePrefix = "wg-quic-quick@"
 
+type windowsServiceStartupDiagnostics struct {
+	operation  windowsRuntimeLifecycleOperations
+	executable string
+	detail     string
+}
+
+func (d *windowsServiceStartupDiagnostics) collect() error {
+	if d == nil || d.detail != "" || d.operation.diagnose == nil {
+		return nil
+	}
+	detail, err := d.operation.diagnose(d.executable)
+	if err != nil {
+		return fmt.Errorf(
+			"read Windows service startup diagnostics: %w",
+			err,
+		)
+	}
+	d.detail = detail
+	return nil
+}
+
+func (d *windowsServiceStartupDiagnostics) attach(primary error) error {
+	if d == nil || d.detail == "" {
+		return primary
+	}
+	return fmt.Errorf(
+		"%w\nWindows service diagnostics:\n%s",
+		primary,
+		d.detail,
+	)
+}
+
 func Manage(ctx context.Context, action, name string) error {
 	return manageWindows(ctx, action, name, false)
 }
@@ -170,46 +202,48 @@ func startWindowsServiceManaged(
 		)
 	}
 	if err := service.start(); err != nil {
-		rollbackErr := rollbackWindowsStartedService(
+		diagnostics := &windowsServiceStartupDiagnostics{
+			operation:  runtimeOperations,
+			executable: stage.executable,
+		}
+		diagnosticErr := diagnostics.collect()
+		rollbackErr := rollbackWindowsStartedServiceBeforeDelete(
 			manager,
 			service,
 			serviceName,
 			&stage,
 			runtimeOperations,
+			diagnostics.collect,
 		)
 		return errors.Join(
-			fmt.Errorf("start Windows service %s: %w", serviceName, err),
+			diagnostics.attach(fmt.Errorf(
+				"start Windows service %s: %w", serviceName, err,
+			)),
+			diagnosticErr,
 			rollbackErr,
 		)
 	}
 	if err := waitWindowsLifecycleServiceState(
 		ctx, service, serviceName, svc.Running,
 	); err != nil {
-		if runtimeOperations.diagnose != nil {
-			detail, diagnosticErr := runtimeOperations.diagnose(
-				stage.executable,
-			)
-			if diagnosticErr != nil {
-				err = errors.Join(err, fmt.Errorf(
-					"read Windows service startup diagnostics: %w",
-					diagnosticErr,
-				))
-			} else if detail != "" {
-				err = fmt.Errorf(
-					"%w\nWindows service diagnostics:\n%s",
-					err,
-					detail,
-				)
-			}
+		diagnostics := &windowsServiceStartupDiagnostics{
+			operation:  runtimeOperations,
+			executable: stage.executable,
 		}
-		rollbackErr := rollbackWindowsStartedService(
+		diagnosticErr := diagnostics.collect()
+		rollbackErr := rollbackWindowsStartedServiceBeforeDelete(
 			manager,
 			service,
 			serviceName,
 			&stage,
 			runtimeOperations,
+			diagnostics.collect,
 		)
-		return errors.Join(err, rollbackErr)
+		return errors.Join(
+			diagnostics.attach(err),
+			diagnosticErr,
+			rollbackErr,
+		)
 	}
 	return errors.Join(service.close(), closeWindowsRuntimeStage(&stage))
 }

@@ -14,10 +14,10 @@ import (
 
 const (
 	// Keep the complete failed-start lifecycle inside the desktop broker's
-	// 90-second operation deadline: 45 seconds starting, 25 seconds stopping,
+	// 90-second operation deadline: 40 seconds starting, 25 seconds stopping,
 	// and up to 15 seconds for the manager's secure runtime rollback leave a
-	// five-second result-delivery margin.
-	defaultWindowsServiceStartupTimeout  = 45 * time.Second
+	// ten-second staging, diagnostics, and result-delivery margin.
+	defaultWindowsServiceStartupTimeout  = 40 * time.Second
 	defaultWindowsServiceShutdownTimeout = 25 * time.Second
 	defaultWindowsServiceHeartbeat       = time.Second
 	windowsServiceWaitHint               = 5 * time.Second

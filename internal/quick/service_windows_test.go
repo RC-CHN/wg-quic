@@ -209,7 +209,7 @@ complete:
 }
 
 func TestWindowsQuickServiceDeadlinesFitDesktopBrokerWindow(t *testing.T) {
-	const resultDeliveryMargin = 5 * time.Second
+	const resultDeliveryMargin = 10 * time.Second
 	lifecycle := defaultWindowsServiceStartupTimeout +
 		defaultWindowsServiceShutdownTimeout +
 		defaultWindowsRuntimeCleanupTimeout
