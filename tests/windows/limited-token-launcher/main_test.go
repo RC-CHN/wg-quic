@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -42,6 +43,9 @@ func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
 	}
 	defer limited.Close()
 	if _, err := verifyLUARestrictedToken(limited); err != nil {
+		if errors.Is(err, errLUALimitedTokenUnavailable) {
+			t.Skipf("host cannot synthesize a genuine UAC-limited token: %v", err)
+		}
 		t.Fatal(err)
 	}
 

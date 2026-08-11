@@ -808,8 +808,17 @@ func verifyWindowsPathHandleSecurity(
 	if control&windows.SE_DACL_PROTECTED == 0 {
 		return fmt.Errorf("Windows %s DACL is not protected", description)
 	}
-	if windowsDACLACEs(actual.String()) != windowsDACLACEs(expected.String()) {
-		return fmt.Errorf("Windows %s DACL does not match the required policy", description)
+	policiesEqual, err := windowsDACLPoliciesEqual(actual, expected)
+	if err != nil {
+		return fmt.Errorf("verify Windows %s DACL policy: %w", description, err)
+	}
+	if !policiesEqual {
+		return fmt.Errorf(
+			"Windows %s DACL does not match the required policy: actual=%s expected=%s",
+			description,
+			actual.String(),
+			expected.String(),
+		)
 	}
 	return nil
 }
@@ -860,15 +869,125 @@ func verifyWindowsExistingPathProvenance(
 	if err != nil {
 		return fmt.Errorf("inspect existing Windows %s DACL control: %w", description, err)
 	}
-	if control&windows.SE_DACL_PROTECTED == 0 ||
-		windowsDACLACEs(actual.String()) != windowsDACLACEs(expected.String()) {
+	policiesEqual, policyErr := windowsDACLPoliciesEqual(actual, expected)
+	if policyErr != nil {
 		return fmt.Errorf(
-			"%w: existing Windows %s does not have the trusted protected DACL; refusing in-place repair",
+			"%w: inspect existing Windows %s DACL policy: %v",
 			errWindowsUntrustedExistingPath,
 			description,
+			policyErr,
+		)
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 || !policiesEqual {
+		return fmt.Errorf(
+			"%w: existing Windows %s does not have the trusted protected DACL; refusing in-place repair: actual=%s expected=%s",
+			errWindowsUntrustedExistingPath,
+			description,
+			actual.String(),
+			expected.String(),
 		)
 	}
 	return nil
+}
+
+// windowsDACLPoliciesEqual compares the effective file access policy rather
+// than its SDDL rendering. Windows maps GENERIC_* rights to file-specific
+// rights when an ACL is applied to a filesystem object, so a descriptor read
+// back from NTFS can be semantically identical while rendering differently.
+// Only the simple allow ACEs used by wg-quic's fixed policies are accepted;
+// unfamiliar ACE shapes fail closed.
+func windowsDACLPoliciesEqual(
+	actual *windows.SECURITY_DESCRIPTOR,
+	expected *windows.SECURITY_DESCRIPTOR,
+) (bool, error) {
+	actualPolicy, err := windowsNormalizedDACLPolicy(actual)
+	if err != nil {
+		return false, fmt.Errorf("normalize actual DACL: %w", err)
+	}
+	expectedPolicy, err := windowsNormalizedDACLPolicy(expected)
+	if err != nil {
+		return false, fmt.Errorf("normalize expected DACL: %w", err)
+	}
+	if len(actualPolicy) != len(expectedPolicy) {
+		return false, nil
+	}
+	for index := range actualPolicy {
+		if actualPolicy[index] != expectedPolicy[index] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func windowsNormalizedDACLPolicy(
+	descriptor *windows.SECURITY_DESCRIPTOR,
+) ([]string, error) {
+	if descriptor == nil {
+		return nil, errors.New("security descriptor is nil")
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		return nil, err
+	}
+	if dacl == nil {
+		return nil, errors.New("DACL is nil")
+	}
+	header := (*windowsACLHeader)(unsafe.Pointer(dacl))
+	policy := make([]string, 0, header.aceCount)
+	for index := uint32(0); index < uint32(header.aceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, index, &ace); err != nil {
+			return nil, fmt.Errorf("read ACE %d: %w", index, err)
+		}
+		if ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			aceType := uint8(0xff)
+			if ace != nil {
+				aceType = ace.Header.AceType
+			}
+			return nil, fmt.Errorf("ACE %d has unsupported type %d", index, aceType)
+		}
+		sidOffset := int(unsafe.Offsetof(ace.SidStart))
+		aceSize := int(ace.Header.AceSize)
+		const minimumSIDSize = 8
+		if aceSize < sidOffset+minimumSIDSize {
+			return nil, fmt.Errorf("ACE %d has invalid size %d", index, aceSize)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !sid.IsValid() || sidOffset+sid.Len() != aceSize {
+			return nil, fmt.Errorf("ACE %d has an invalid SID payload", index)
+		}
+		sidString := sid.String()
+		if sidString == "" {
+			return nil, fmt.Errorf("ACE %d SID cannot be rendered", index)
+		}
+		policy = append(policy, fmt.Sprintf(
+			"%02x:%08x:%s",
+			ace.Header.AceFlags,
+			uint32(windowsNormalizeFileAccessMask(ace.Mask)),
+			sidString,
+		))
+	}
+	return policy, nil
+}
+
+func windowsNormalizeFileAccessMask(mask windows.ACCESS_MASK) windows.ACCESS_MASK {
+	if mask&windows.GENERIC_ALL != 0 {
+		mask &^= windows.GENERIC_ALL
+		mask |= windows.STANDARD_RIGHTS_REQUIRED | windows.SYNCHRONIZE | 0x1ff
+	}
+	if mask&windows.GENERIC_READ != 0 {
+		mask &^= windows.GENERIC_READ
+		mask |= windows.FILE_GENERIC_READ
+	}
+	if mask&windows.GENERIC_WRITE != 0 {
+		mask &^= windows.GENERIC_WRITE
+		mask |= windows.FILE_GENERIC_WRITE
+	}
+	if mask&windows.GENERIC_EXECUTE != 0 {
+		mask &^= windows.GENERIC_EXECUTE
+		mask |= windows.FILE_GENERIC_EXECUTE
+	}
+	return mask
 }
 
 // windowsDACLACEs strips descriptor control flags such as AI. SetSecurityInfo

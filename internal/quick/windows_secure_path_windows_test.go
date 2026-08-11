@@ -28,6 +28,88 @@ func TestWindowsDACLACEsIgnoresDescriptorControlFlags(t *testing.T) {
 	}
 }
 
+func TestWindowsDACLPolicyMapsGenericFileRights(t *testing.T) {
+	generic, err := windows.SecurityDescriptorFromString(
+		"O:SYD:P(A;;GRGX;;;BU)",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapped, err := windows.SecurityDescriptorFromString(
+		"O:SYD:P(A;;0x1200a9;;;BU)",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal, err := windowsDACLPoliciesEqual(generic, mapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal {
+		t.Fatal("generic and mapped file rights were not equivalent")
+	}
+}
+
+func TestWindowsDACLPolicyRejectsUnexpectedChanges(t *testing.T) {
+	expected, err := windows.SecurityDescriptorFromString(
+		"O:SYD:P(A;;FA;;;SY)(A;;GRGX;;;BU)",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		sddl string
+	}{
+		{
+			name: "extra ACE",
+			sddl: "O:SYD:P(A;;FA;;;SY)(A;;GRGX;;;BU)(A;;GR;;;WD)",
+		},
+		{
+			name: "changed flags",
+			sddl: "O:SYD:P(A;;FA;;;SY)(A;CI;GRGX;;;BU)",
+		},
+		{
+			name: "changed SID",
+			sddl: "O:SYD:P(A;;FA;;;SY)(A;;GRGX;;;WD)",
+		},
+		{
+			name: "changed mask",
+			sddl: "O:SYD:P(A;;FA;;;SY)(A;;GRGWGX;;;BU)",
+		},
+		{
+			name: "changed order",
+			sddl: "O:SYD:P(A;;GRGX;;;BU)(A;;FA;;;SY)",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := windows.SecurityDescriptorFromString(test.sddl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal, err := windowsDACLPoliciesEqual(actual, expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if equal {
+				t.Fatalf("unexpected DACL %q matched the fixed policy", test.sddl)
+			}
+		})
+	}
+	t.Run("deny ACE", func(t *testing.T) {
+		actual, err := windows.SecurityDescriptorFromString(
+			"O:SYD:P(A;;FA;;;SY)(D;;GRGX;;;BU)",
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := windowsDACLPoliciesEqual(actual, expected); err == nil {
+			t.Fatal("deny ACE was not rejected")
+		}
+	})
+}
+
 func TestWindowsHandleRenameWithOpenDescendantIsAtomic(t *testing.T) {
 	parent := t.TempDir()
 	legacy := filepath.Join(parent, "legacy")
@@ -79,7 +161,8 @@ func TestWindowsHandleRenameWithOpenDescendantIsAtomic(t *testing.T) {
 		return
 	}
 	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) &&
-		!errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		!errors.Is(err, windows.ERROR_ACCESS_DENIED) &&
+		!errors.Is(err, windows.STATUS_ACCESS_DENIED) {
 		t.Fatalf("handle rename with pinned descendant failed unexpectedly: %v", err)
 	}
 	if !oldExists || newExists {
