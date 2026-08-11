@@ -67,14 +67,14 @@ func (s *windowsQuickService) Execute(_ []string, requests <-chan svc.ChangeRequ
 	}()
 	select {
 	case err := <-result:
-		return s.finish(err, changes)
+		return s.finish(err)
 	case <-ready:
 		changes <- svc.Status{State: svc.Running, Accepts: accepted}
 	}
 	for {
 		select {
 		case err := <-result:
-			return s.finish(err, changes)
+			return s.finish(err)
 		case request, ok := <-requests:
 			if !ok {
 				return s.shutdown(
@@ -132,7 +132,7 @@ func (s *windowsQuickService) shutdown(
 	for {
 		select {
 		case err := <-result:
-			return s.finish(err, changes)
+			return s.finish(err)
 		case next := <-progress:
 			if index := windowsShutdownStageIndex(next); index > stageIndex {
 				stage = next
@@ -163,7 +163,6 @@ func (s *windowsQuickService) shutdown(
 				timeout, stage, checkpoint,
 				uint32(windowsServiceWaitHint/time.Millisecond),
 			)
-			changes <- svc.Status{State: svc.Stopped}
 			return false, 1
 		}
 	}
@@ -171,9 +170,7 @@ func (s *windowsQuickService) shutdown(
 
 func (s *windowsQuickService) finish(
 	err error,
-	changes chan<- svc.Status,
 ) (bool, uint32) {
-	changes <- svc.Status{State: svc.Stopped}
 	if err != nil {
 		s.logger()("Windows service stopped with cleanup error: %v", err)
 		return false, 1

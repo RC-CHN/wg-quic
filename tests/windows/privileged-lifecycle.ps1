@@ -443,22 +443,59 @@ PersistentKeepalive = 1
     ))
     Wait-ForAll -Checks $cleanupChecks
 
+    $failingConfiguration = $configuration.Replace(
+        "MTU = 1380",
+        "MTU = 1380`r`nPreDown = exit /b 23"
+    )
+    Set-Content -LiteralPath $configPath -Value $failingConfiguration `
+        -Encoding ascii
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @("up", $TunnelName))
+    $serviceStarted = $true
+    Wait-For -Description "the failure-path Windows service" -Condition {
+        (Get-Service -Name $serviceName -ErrorAction SilentlyContinue).Status `
+            -eq "Running"
+    }
+
+    $failedDownOutput = @(& $quick down $TunnelName 2>&1) |
+        Out-String
+    $failedDownExitCode = $LASTEXITCODE
+    if ($failedDownExitCode -eq 0) {
+        throw "down unexpectedly accepted a failing PreDown hook"
+    }
+    if ($failedDownOutput -notmatch "shutdown failure" -or
+        $failedDownOutput -notmatch "--repair") {
+        throw (
+            "down did not preserve the SCM cleanup failure diagnostics`n" +
+            $failedDownOutput
+        )
+    }
+    Wait-For -Description "the failed service stop result" -Condition {
+        $failedService = Get-CimInstance -ClassName Win32_Service `
+            -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+        $null -ne $failedService -and
+            $failedService.State -eq "Stopped" -and
+            [int] $failedService.ExitCode -ne 0
+    }
+    Write-Host $failedDownOutput
+    Write-Host (Invoke-Native -FilePath $quick -Arguments @(
+        "down", $TunnelName, "--repair"
+    ))
+    $serviceStarted = $false
+    Wait-ForAll -Checks $cleanupChecks
+
     Write-Host "privileged Windows Wintun/service/network lifecycle cleanup passed"
 }
 finally {
-    if ($serviceStarted -or $null -ne (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+    if (Test-Path -LiteralPath $quick -PathType Leaf) {
         try {
-            $null = Invoke-Native -FilePath $quick -Arguments @("down", $TunnelName)
+            $null = Invoke-Native -FilePath $quick -Arguments @(
+                "down", $TunnelName, "--repair"
+            )
         }
         catch {
-            Write-Warning "normal tunnel cleanup failed: $_"
-            try {
-                $null = Invoke-Native -FilePath $quick -Arguments @(
-                    "down", $TunnelName, "--repair"
-                )
-            }
-            catch {
-                Write-Warning "explicit tunnel repair failed: $_"
+            Write-Warning "explicit tunnel repair failed: $_"
+            if ($null -ne (Get-Service -Name $serviceName `
+                -ErrorAction SilentlyContinue)) {
                 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
                 & sc.exe delete $serviceName | Out-Null
             }

@@ -32,7 +32,6 @@ func TestWindowsQuickServiceReportsReadyAndStopsCleanly(t *testing.T) {
 	expectWindowsServiceState(t, changes, svc.Running)
 	requests <- svc.ChangeRequest{Cmd: svc.Stop}
 	expectWindowsServiceState(t, changes, svc.StopPending)
-	expectWindowsServiceState(t, changes, svc.Stopped)
 	select {
 	case code := <-result:
 		if code != 0 {
@@ -55,7 +54,11 @@ func TestWindowsQuickServiceFailsBeforeReady(t *testing.T) {
 		t.Fatalf("failed service exit code = %d, want 1", code)
 	}
 	expectWindowsServiceState(t, changes, svc.StartPending)
-	expectWindowsServiceState(t, changes, svc.Stopped)
+	select {
+	case status := <-changes:
+		t.Fatalf("handler reported final state %v instead of returning it to SCM", status.State)
+	default:
+	}
 }
 
 func TestWindowsQuickServiceShutdownTimesOutWithProgress(t *testing.T) {
@@ -91,12 +94,9 @@ func TestWindowsQuickServiceShutdownTimesOutWithProgress(t *testing.T) {
 	requests <- svc.ChangeRequest{Cmd: svc.Stop}
 
 	var checkpoints []uint32
-	for {
+	for collecting := true; collecting; {
 		select {
 		case status := <-changes:
-			if status.State == svc.Stopped {
-				goto stopped
-			}
 			if status.State != svc.StopPending {
 				t.Fatalf("shutdown state = %v, want StopPending", status.State)
 			}
@@ -104,12 +104,16 @@ func TestWindowsQuickServiceShutdownTimesOutWithProgress(t *testing.T) {
 				t.Fatalf("shutdown wait hint = %d", status.WaitHint)
 			}
 			checkpoints = append(checkpoints, status.CheckPoint)
+		case code := <-result:
+			if code != 1 {
+				t.Fatalf("timed-out service exit code = %d, want 1", code)
+			}
+			collecting = false
 		case <-time.After(time.Second):
 			t.Fatal("service shutdown timeout did not fire")
 		}
 	}
 
-stopped:
 	if len(checkpoints) < 2 {
 		t.Fatalf("shutdown checkpoints = %v, want heartbeat progress", checkpoints)
 	}
@@ -119,12 +123,9 @@ stopped:
 		}
 	}
 	select {
-	case code := <-result:
-		if code != 1 {
-			t.Fatalf("timed-out service exit code = %d, want 1", code)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed-out service handler did not return")
+	case status := <-changes:
+		t.Fatalf("handler reported final state %v instead of returning it to SCM", status.State)
+	default:
 	}
 	if got := strings.Join(logs, "\n"); !strings.Contains(got, "timed out") ||
 		!strings.Contains(got, shutdownStageNetwork) {
