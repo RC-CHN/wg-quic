@@ -37,6 +37,10 @@ func TestOpenLimitedTokenAndLaunch(t *testing.T) {
 	}
 	limited, tokenSource, err := openLauncherLimitedToken(source)
 	if err != nil {
+		elevationType, elevationErr := launcherTokenElevationType(source)
+		if elevationErr == nil && elevationType == tokenElevationTypeDefault {
+			t.Skipf("host has no authentic linked UAC token pair: %v", err)
+		}
 		t.Fatal(err)
 	}
 	defer limited.Close()

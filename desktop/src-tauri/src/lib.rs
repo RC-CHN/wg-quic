@@ -550,6 +550,22 @@ fn is_inactive_status_error(error: &str) -> bool {
         && !lower.contains("access is denied")
 }
 
+fn windows_desktop_client_arguments(
+    action: &str,
+    name: &str,
+    source: Option<&Path>,
+    overwrite: bool,
+) -> Vec<OsString> {
+    let mut arguments = vec![argument("desktop-client"), argument(action), argument(name)];
+    if let Some(source) = source {
+        arguments.push(argument(source));
+        if overwrite {
+            arguments.push(argument("--overwrite"));
+        }
+    }
+    arguments
+}
+
 fn run_privileged(
     paths: &NativePaths,
     action: &str,
@@ -558,13 +574,7 @@ fn run_privileged(
     overwrite: bool,
 ) -> Result<String, String> {
     if cfg!(target_os = "windows") {
-        let mut arguments = vec![argument("desktop-client"), argument(action), argument(name)];
-        if let Some(source) = source {
-            arguments.push(argument(source));
-            if overwrite {
-                arguments.push(argument("--overwrite"));
-            }
-        }
+        let arguments = windows_desktop_client_arguments(action, name, source, overwrite);
         return run_output_with_timeout(&paths.quick, &arguments, Duration::from_secs(100));
     }
     let mut arguments = vec![argument(&paths.quick)];
@@ -891,5 +901,35 @@ mod tests {
         )
         .is_ok());
         assert!(validate_backend_versions("wg-quic old", "wg-quic-quick old").is_err());
+    }
+
+    #[test]
+    fn windows_tunnel_actions_use_the_authenticated_desktop_client() {
+        let source = Path::new(r"C:\Users\alice\office.conf");
+        assert_eq!(
+            windows_desktop_client_arguments("up", "office", None, false),
+            ["desktop-client", "up", "office"]
+                .map(OsString::from)
+                .to_vec()
+        );
+        assert_eq!(
+            windows_desktop_client_arguments("import", "office", Some(source), true),
+            [
+                OsString::from("desktop-client"),
+                OsString::from("import"),
+                OsString::from("office"),
+                source.as_os_str().to_os_string(),
+                OsString::from("--overwrite"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_desktop_manifest_is_explicitly_unelevated() {
+        let manifest = include_str!("../windows-app-manifest.xml");
+        assert!(manifest.contains(r#"requestedExecutionLevel level="asInvoker""#));
+        assert!(!manifest.contains("requireAdministrator"));
+        assert!(!manifest.contains("highestAvailable"));
+        assert!(manifest.contains("Microsoft.Windows.Common-Controls"));
     }
 }

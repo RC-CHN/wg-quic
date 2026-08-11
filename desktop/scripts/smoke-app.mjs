@@ -82,7 +82,7 @@ try {
   });
 
   const expected = integrationSmoke
-    ? 'wg-quic installed desktop import/UAC/service/status lifecycle passed'
+    ? 'wg-quic installed desktop import/broker/service/status lifecycle passed'
     : 'wg-quic desktop renderer smoke test passed';
   const result = readFileSync(resultPath, 'utf8').trim();
   if (exitCode !== 0 || result !== expected) {

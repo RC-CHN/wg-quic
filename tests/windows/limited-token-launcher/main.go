@@ -21,6 +21,7 @@ import (
 
 const (
 	createRestrictedTokenLUA  = 0x00000004
+	tokenElevationTypeDefault = 1
 	tokenElevationTypeLimited = 3
 	limitedTokenLauncherUsage = "limited-token-launcher -- command [argument ...]"
 	launcherTokenAccess       = windows.TOKEN_QUERY |

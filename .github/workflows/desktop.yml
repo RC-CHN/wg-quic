@@ -76,10 +76,8 @@ jobs:
           }
           go test -count=1 `
             ./internal/quick `
-            ./tests/windows/desktop-ipc-probe `
-            ./tests/windows/limited-token-launcher
-          go build -trimpath `
-            -o "$env:RUNNER_TEMP/limited-token-launcher.exe" `
+            ./tests/windows/desktop-ipc-probe
+          go test -v -count=1 `
             ./tests/windows/limited-token-launcher
       - name: Install Tauri Linux build dependencies
         if: runner.os == 'Linux'

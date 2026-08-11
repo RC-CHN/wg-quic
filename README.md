@@ -146,7 +146,8 @@ Windows preserves the same two-program boundary:
 `wg-quic.exe` owns the Wintun data plane, while `wg-quic-quick.exe` owns host
 `%ProgramData%\wg-quic\interfaces\`. The per-machine MSI asks for elevation
 once and installs the `wg-quic-manager` LocalSystem service. An unelevated
-desktop running under a local Administrator account can then validate, import,
+desktop, explicitly marked `asInvoker`, running under a local Administrator
+account can then validate, import,
 start, and stop hook-free profiles through that narrow authenticated broker.
 Standard users, unavailable/incompatible broker versions, and profiles with
 `PreUp`, `PostUp`, `PreDown`, or `PostDown` retain the one-operation UAC helper;

@@ -120,7 +120,6 @@ $trayProcess = $null
 $secondDesktopProcess = $null
 $desktopIpcProbeProcess = $null
 $filteredProcess = $null
-$filteredDesktopProcess = $null
 $quick = $null
 $core = $null
 $installedWintun = $null
@@ -133,32 +132,12 @@ $standardUserCreated = $false
 $filteredAdminUserName = "wgqadmin$PID"
 $filteredAdminUserCreated = $false
 $standardUserRoot = Join-Path $env:PUBLIC "wg-quic-ci-$PID"
-$filteredDesktopTunnelName = "wgqmedium$PID"
-$filteredDesktopServiceName = "wg-quic-quick@$filteredDesktopTunnelName"
-$filteredDesktopSource = Join-Path $standardUserRoot (
-    "$filteredDesktopTunnelName.conf"
-)
-$filteredDesktopResult = Join-Path $standardUserRoot (
-    "filtered-desktop.result.txt"
-)
-$filteredDesktopStdout = Join-Path $standardUserRoot (
-    "filtered-desktop.stdout.txt"
-)
-$filteredDesktopStderr = Join-Path $standardUserRoot (
-    "filtered-desktop.stderr.txt"
-)
-$filteredDesktopInstalledConfig = Join-Path (
-    Join-Path $env:ProgramData "wg-quic\interfaces"
-) "$filteredDesktopTunnelName.conf"
 $filteredRetiredRuntimeResult = Join-Path $standardUserRoot (
     "filtered-retired-runtime.txt"
 )
 $desktopIpcProbe = Join-Path $standardUserRoot "desktop-ipc-probe.exe"
 $managementPipeSquatProbe = Join-Path $standardUserRoot (
     "management-pipe-squat-probe.exe"
-)
-$limitedTokenLauncher = Join-Path $standardUserRoot (
-    "limited-token-launcher.exe"
 )
 $desktopIpcReady = Join-Path $standardUserRoot "desktop-ipc.ready.json"
 $desktopIpcResult = Join-Path $standardUserRoot "desktop-ipc.result.txt"
@@ -339,10 +318,8 @@ PersistentKeepalive = 1
     $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $sourceConfig
     $env:WG_QUIC_DESKTOP_SMOKE_NAME = $tunnelName
     $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $resultPath
-    # A real UAC transition does not reliably carry caller-specific
-    # environment variables. Poison the legacy request variables so this
-    # lifecycle proves the elevated helper takes its request from the duplex
-    # IPC channel instead.
+    # Poison the legacy helper request variables so this lifecycle proves the
+    # installed desktop uses the authenticated broker request path instead.
     $env:WG_QUIC_DESKTOP_ACTION = "invalid-inherited-action"
     $env:WG_QUIC_DESKTOP_NAME = "invalid-inherited-name"
     $env:WG_QUIC_DESKTOP_SOURCE = "invalid-inherited-source"
@@ -377,7 +354,7 @@ PersistentKeepalive = 1
         ""
     }
     if ($desktopResult -notmatch
-        "installed desktop import/UAC/service/status lifecycle passed") {
+        "installed desktop import/broker/service/status lifecycle passed") {
         throw (
             "installed desktop did not report lifecycle success`n" +
             "result=$desktopResult`n$desktopOutput"
@@ -585,12 +562,6 @@ PersistentKeepalive = 1
             "-o", $managementPipeSquatProbe,
             "./tests/windows/management-pipe-squat-probe"
         ) | Out-Null
-        Invoke-Native -FilePath $goExecutable -Arguments @(
-            "build",
-            "-trimpath",
-            "-o", $limitedTokenLauncher,
-            "./tests/windows/limited-token-launcher"
-        ) | Out-Null
     }
     finally {
         Pop-Location
@@ -602,12 +573,6 @@ PersistentKeepalive = 1
         throw (
             "management pipe squat probe build did not produce " +
             $managementPipeSquatProbe
-        )
-    }
-    if (-not (Test-Path -LiteralPath $limitedTokenLauncher -PathType Leaf)) {
-        throw (
-            "limited token launcher build did not produce " +
-            $limitedTokenLauncher
         )
     }
     $positiveSquatOutput = @(& $managementPipeSquatProbe created 2>&1)
@@ -1015,33 +980,12 @@ catch {
     )
     Add-LocalGroupMember -SID $administratorsGroupSid `
         -Member $filteredAdminUser -ErrorAction Stop
-    foreach ($limitedFixtureSid in @(
-        $filteredAdminUser.SID.Value,
-        $identity.User.Value
-    )) {
-        & icacls.exe $standardUserRoot /grant:r (
-            "*${limitedFixtureSid}:(OI)(CI)M"
-        ) | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw (
-                "grant limited Administrator fixture access to " +
-                "$limitedFixtureSid failed"
-            )
-        }
+    & icacls.exe $standardUserRoot /grant:r (
+        "*$($filteredAdminUser.SID.Value):(OI)(CI)M"
+    ) | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "grant filtered Administrator fixture access failed"
     }
-    @"
-[Interface]
-PrivateKey = $privateKey
-Address = 198.20.0.1/32
-ListenPort = $($listenPort + 1)
-MTU = 1380
-
-[Peer]
-PublicKey = $peerPublicKey
-AllowedIPs = 198.20.0.2/32
-Endpoint = 192.0.2.201:$($endpointPort + 1)
-PersistentKeepalive = 1
-"@ | Set-Content -LiteralPath $filteredDesktopSource -Encoding ascii
     $filteredAdminScriptContent = @'
 $Quick = __WG_QUIC_QUICK__
 $Tunnel = __WG_QUIC_TUNNEL__
@@ -1241,94 +1185,6 @@ catch {
         )
     }
 
-    # CreateProcessWithLogonW gives the alternate Administrator a genuine UAC
-    # filtered token, but its separate logon cannot reliably open the hosted
-    # runner's existing WebView desktop. Exercise the real GUI separately with
-    # the current session shell's actual UAC-filtered token. The launcher
-    # verifies TokenElevationTypeLimited, a deny-only Administrators SID, its
-    # enabled linked Administrator, the same user, and the same session before
-    # it starts the installed Tauri executable.
-    Remove-Item -LiteralPath $filteredDesktopResult -Force `
-        -ErrorAction SilentlyContinue
-    $env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE = "1"
-    $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $filteredDesktopSource
-    $env:WG_QUIC_DESKTOP_SMOKE_NAME = $filteredDesktopTunnelName
-    $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $filteredDesktopResult
-    $env:WG_QUIC_DESKTOP_ACTION = "invalid-inherited-action"
-    $env:WG_QUIC_DESKTOP_NAME = "invalid-inherited-name"
-    $env:WG_QUIC_DESKTOP_SOURCE = "invalid-inherited-source"
-    $env:WG_QUIC_DESKTOP_OVERWRITE = "invalid-inherited-overwrite"
-    try {
-        $filteredDesktopProcess = Start-Process `
-            -FilePath $limitedTokenLauncher `
-            -ArgumentList @("--", "`"$desktop`"") `
-            -WorkingDirectory $standardUserRoot `
-            -PassThru `
-            -RedirectStandardOutput $filteredDesktopStdout `
-            -RedirectStandardError $filteredDesktopStderr
-        $filteredDesktopExitCode = Wait-ProcessExit `
-            -Process $filteredDesktopProcess `
-            -Description "the same-session limited-token desktop smoke" `
-            -TimeoutSeconds 240
-        $filteredDesktopOutput = @(
-            if (Test-Path -LiteralPath $filteredDesktopStdout `
-                -PathType Leaf) {
-                Get-Content -LiteralPath $filteredDesktopStdout -Raw
-            }
-            if (Test-Path -LiteralPath $filteredDesktopStderr `
-                -PathType Leaf) {
-                Get-Content -LiteralPath $filteredDesktopStderr -Raw
-            }
-        ) -join "`n"
-        if ($filteredDesktopExitCode -ne 0) {
-            throw (
-                "limited-token desktop exited with code " +
-                "$filteredDesktopExitCode`n$filteredDesktopOutput"
-            )
-        }
-        if ($filteredDesktopOutput -notmatch (
-            "using interactive shell process [0-9]+"
-        )) {
-            throw (
-                "desktop launcher did not use the real interactive shell " +
-                "token`n$filteredDesktopOutput"
-            )
-        }
-        if (-not (Test-Path -LiteralPath $filteredDesktopResult `
-            -PathType Leaf)) {
-            throw (
-                "limited-token desktop did not write its smoke result`n" +
-                $filteredDesktopOutput
-            )
-        }
-        $filteredDesktopResultText = (
-            Get-Content -LiteralPath $filteredDesktopResult -Raw
-        ).Trim()
-        if ($filteredDesktopResultText -notmatch (
-            "installed desktop import/UAC/service/status lifecycle passed"
-        )) {
-            throw (
-                "limited-token desktop smoke failed: " +
-                "$filteredDesktopResultText`n$filteredDesktopOutput"
-            )
-        }
-        Write-Host $filteredDesktopOutput
-    }
-    finally {
-        foreach ($environmentName in @(
-            "WG_QUIC_DESKTOP_INTEGRATION_SMOKE",
-            "WG_QUIC_DESKTOP_SMOKE_CONFIG",
-            "WG_QUIC_DESKTOP_SMOKE_NAME",
-            "WG_QUIC_DESKTOP_SMOKE_RESULT",
-            "WG_QUIC_DESKTOP_ACTION",
-            "WG_QUIC_DESKTOP_NAME",
-            "WG_QUIC_DESKTOP_SOURCE",
-            "WG_QUIC_DESKTOP_OVERWRITE"
-        )) {
-            Remove-Item -LiteralPath "Env:$environmentName" `
-                -ErrorAction SilentlyContinue
-        }
-    }
     if (-not (Test-Path -LiteralPath $filteredRetiredRuntimeResult `
         -PathType Leaf)) {
         throw "filtered-admin did not report its retired runtime"
@@ -1375,18 +1231,6 @@ catch {
     if (-not (Test-Path -LiteralPath $stagedCore -PathType Leaf)) {
         throw "restored active service runtime is missing $stagedCore"
     }
-    if (Get-Service -Name $filteredDesktopServiceName `
-        -ErrorAction SilentlyContinue) {
-        throw "filtered desktop left service $filteredDesktopServiceName behind"
-    }
-    if (Get-NetAdapter -Name $filteredDesktopTunnelName `
-        -ErrorAction SilentlyContinue) {
-        throw "filtered desktop left adapter $filteredDesktopTunnelName behind"
-    }
-    if (-not (Test-Path -LiteralPath $filteredDesktopInstalledConfig `
-        -PathType Leaf)) {
-        throw "filtered desktop did not import $filteredDesktopInstalledConfig"
-    }
     $remainingRuntimeDirectories = @(
         Get-ChildItem -LiteralPath $runtimeRoot -Directory `
             -Filter "run-*" -ErrorAction Stop
@@ -1403,9 +1247,9 @@ catch {
     }
     Write-Host (
         "a real UAC-filtered Administrator logon used the management broker " +
-        "CLI without a prompt; the current session shell's separate real " +
-        "UAC-filtered token ran the desktop through import/check/up/down, " +
-        "and the CLI restored the primary service and adapter"
+        "CLI without a prompt; the installed asInvoker desktop independently " +
+        "completed import/check/up/down, and the CLI restored the primary " +
+        "service and adapter"
     )
 
     $uninstall = Start-Process -FilePath "msiexec.exe" `
@@ -1502,9 +1346,6 @@ catch {
         $desktopIpcStderr,
         $brokerStatusResult,
         $filteredAdminResult,
-        $filteredDesktopResult,
-        $filteredDesktopStdout,
-        $filteredDesktopStderr,
         $filteredRetiredRuntimeResult,
         $msiLogPath
     )) {
@@ -1545,8 +1386,7 @@ finally {
         $trayProcess,
         $secondDesktopProcess,
         $desktopIpcProbeProcess,
-        $filteredProcess,
-        $filteredDesktopProcess
+        $filteredProcess
     )) {
         if ($null -eq $candidateProcess) {
             continue
@@ -1572,10 +1412,7 @@ finally {
     }
     if ($null -ne $cleanupQuick -and
         (Test-Path -LiteralPath $cleanupQuick -PathType Leaf)) {
-        foreach ($cleanupTunnel in @(
-            $tunnelName,
-            $filteredDesktopTunnelName
-        )) {
+        foreach ($cleanupTunnel in @($tunnelName)) {
             try {
                 Invoke-Native -FilePath $cleanupQuick -Arguments @(
                     "down", $cleanupTunnel, "--repair"
@@ -1586,10 +1423,7 @@ finally {
             }
         }
     }
-    foreach ($cleanupConfig in @(
-        $installedConfig,
-        $filteredDesktopInstalledConfig
-    )) {
+    foreach ($cleanupConfig in @($installedConfig)) {
         Remove-Item -LiteralPath $cleanupConfig -Force `
             -ErrorAction SilentlyContinue
     }

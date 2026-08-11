@@ -560,7 +560,7 @@ async function start(): Promise<void> {
       );
     }
     await completeDesktopSmoke(
-      'wg-quic installed desktop import/UAC/service/status lifecycle passed',
+      'wg-quic installed desktop import/broker/service/status lifecycle passed',
     );
   }
 }

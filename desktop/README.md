@@ -83,16 +83,19 @@ broker from a UAC-filtered Administrator token, standard-user rejection, the
 one-operation UAC fallback, a real LocalSystem tunnel service, Wintun, network
 policy, unprivileged status, teardown, and uninstall. The Windows job also
 installs v0.2.0 first and upgrades it while a tunnel remains active. It requires
-UAC to be enabled, creates a temporary local Administrator, and runs the real
-Tauri/WebView lifecycle from that account at `LIMITED` run level. The fixture
-fails unless the resulting token is non-elevated and the broker accepts the
-linked Administrator identity without a prompt.
+UAC to be enabled, runs the real installed Tauri/WebView import/check/up/down
+lifecycle, and separately creates a temporary local Administrator whose real
+UAC-filtered token must complete the same broker check/down/up path without a
+prompt. The desktop manifest and backend tests also pin the UI to `asInvoker`
+and the Windows management path to `desktop-client`; hosted runners do not
+provide an authentic limited Explorer token to a service-session GUI.
 
 ## Privileges and platform boundary
 
 The webview process never runs as Administrator or root. On Windows, the MSI
 uses its install-time elevation to register and start the narrow LocalSystem
-`wg-quic-manager` service. It authenticates the caller's named-pipe token and
+`wg-quic-manager` service, while the desktop executable explicitly requests
+`asInvoker`. It authenticates the caller's named-pipe token and
 accepts only LocalSystem, a full local Administrator token, or the linked
 Administrator identity behind UAC filtering (including the kernel's exact
 limited-token deny-only representation). This gives the usual local
