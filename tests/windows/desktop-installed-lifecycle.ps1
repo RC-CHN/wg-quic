@@ -120,6 +120,7 @@ $trayProcess = $null
 $secondDesktopProcess = $null
 $desktopIpcProbeProcess = $null
 $filteredProcess = $null
+$filteredDesktopProcess = $null
 $quick = $null
 $core = $null
 $installedWintun = $null
@@ -1042,14 +1043,8 @@ PersistentKeepalive = 1
 "@ | Set-Content -LiteralPath $filteredDesktopSource -Encoding ascii
     $filteredAdminScriptContent = @'
 $Quick = __WG_QUIC_QUICK__
-$Desktop = __WG_QUIC_DESKTOP__
 $Tunnel = __WG_QUIC_TUNNEL__
 $TunnelService = __WG_QUIC_SERVICE__
-$DesktopTunnel = __WG_QUIC_DESKTOP_TUNNEL__
-$DesktopSource = __WG_QUIC_DESKTOP_SOURCE__
-$DesktopResult = __WG_QUIC_DESKTOP_RESULT__
-$DesktopStdout = __WG_QUIC_DESKTOP_STDOUT__
-$DesktopStderr = __WG_QUIC_DESKTOP_STDERR__
 $RetiredRuntimeResult = __WG_QUIC_RETIRED_RUNTIME_RESULT__
 $Result = __WG_QUIC_RESULT__
 $ErrorActionPreference = "Stop"
@@ -1176,62 +1171,6 @@ try {
         -ne "Running") {
         throw "filtered-admin mutation stopped the management service"
     }
-
-    $desktopProcess = $null
-    $env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE = "1"
-    $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $DesktopSource
-    $env:WG_QUIC_DESKTOP_SMOKE_NAME = $DesktopTunnel
-    $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $DesktopResult
-    try {
-        $desktopProcess = Start-Process -FilePath $Desktop -PassThru `
-            -RedirectStandardOutput $DesktopStdout `
-            -RedirectStandardError $DesktopStderr
-        Wait-ForFiltered -Description "filtered desktop integration smoke" `
-            -Condition {
-                $desktopProcess.Refresh()
-                $desktopProcess.HasExited
-            }
-        $desktopProcess.Refresh()
-        if ($desktopProcess.ExitCode -ne 0) {
-            throw (
-                "filtered desktop exited with code " +
-                $desktopProcess.ExitCode
-            )
-        }
-        if (-not (Test-Path -LiteralPath $DesktopResult -PathType Leaf)) {
-            throw "filtered desktop did not write its smoke result"
-        }
-        $desktopResultText = (
-            Get-Content -LiteralPath $DesktopResult -Raw
-        ).Trim()
-        if ($desktopResultText -notmatch (
-            "installed desktop import/UAC/service/status lifecycle passed"
-        )) {
-            throw "filtered desktop smoke failed: $desktopResultText"
-        }
-    }
-    finally {
-        if ($null -ne $desktopProcess) {
-            try {
-                $desktopProcess.Refresh()
-                if (-not $desktopProcess.HasExited) {
-                    Stop-Process -Id $desktopProcess.Id -Force `
-                        -ErrorAction Stop
-                }
-            }
-            catch {
-                Write-Warning "failed to stop filtered desktop process: $_"
-            }
-        }
-        Remove-Item Env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE `
-            -ErrorAction SilentlyContinue
-        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_CONFIG `
-            -ErrorAction SilentlyContinue
-        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_NAME `
-            -ErrorAction SilentlyContinue
-        Remove-Item Env:WG_QUIC_DESKTOP_SMOKE_RESULT `
-            -ErrorAction SilentlyContinue
-    }
     Set-Content -LiteralPath $Result -Value "passed" -Encoding ascii
 }
 catch {
@@ -1244,36 +1183,12 @@ catch {
         "'" + $quick.Replace("'", "''") + "'"
     )
     $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP__",
-        "'" + $desktop.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
         "__WG_QUIC_TUNNEL__",
         "'" + $tunnelName.Replace("'", "''") + "'"
     )
     $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
         "__WG_QUIC_SERVICE__",
         "'" + $serviceName.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP_TUNNEL__",
-        "'" + $filteredDesktopTunnelName.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP_SOURCE__",
-        "'" + $filteredDesktopSource.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP_RESULT__",
-        "'" + $filteredDesktopResult.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP_STDOUT__",
-        "'" + $filteredDesktopStdout.Replace("'", "''") + "'"
-    )
-    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
-        "__WG_QUIC_DESKTOP_STDERR__",
-        "'" + $filteredDesktopStderr.Replace("'", "''") + "'"
     )
     $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
         "__WG_QUIC_RETIRED_RUNTIME_RESULT__",
@@ -1318,8 +1233,8 @@ catch {
     else {
         # A hosted runner has no split UAC token. CreateRestrictedToken with
         # LUA_TOKEN yields a genuine TokenElevationTypeLimited primary token in
-        # this same interactive session, then CreateProcessAsUser runs both the
-        # CLI lifecycle and the real Tauri/WebView process beneath it.
+        # this same interactive session, then CreateProcessAsUser runs the CLI
+        # lifecycle beneath it.
         $limitedLauncherOutput = Invoke-Native `
             -FilePath $limitedTokenLauncher -Arguments @(
                 "--",
@@ -1342,6 +1257,86 @@ catch {
             "${limitedTaskExitCode}: " +
             $filteredAdminResultText
         )
+    }
+
+    # CreateProcessWithLogonW gives the alternate Administrator a genuine UAC
+    # filtered token, but its separate logon cannot reliably open the hosted
+    # runner's existing WebView desktop. Exercise the real GUI separately with
+    # a kernel LUA_TOKEN derived in this interactive session. The launcher
+    # verifies TokenElevationTypeLimited, a deny-only Administrators SID, and
+    # the same session ID before it starts the installed Tauri executable.
+    Remove-Item -LiteralPath $filteredDesktopResult -Force `
+        -ErrorAction SilentlyContinue
+    $env:WG_QUIC_DESKTOP_INTEGRATION_SMOKE = "1"
+    $env:WG_QUIC_DESKTOP_SMOKE_CONFIG = $filteredDesktopSource
+    $env:WG_QUIC_DESKTOP_SMOKE_NAME = $filteredDesktopTunnelName
+    $env:WG_QUIC_DESKTOP_SMOKE_RESULT = $filteredDesktopResult
+    $env:WG_QUIC_DESKTOP_ACTION = "invalid-inherited-action"
+    $env:WG_QUIC_DESKTOP_NAME = "invalid-inherited-name"
+    $env:WG_QUIC_DESKTOP_SOURCE = "invalid-inherited-source"
+    $env:WG_QUIC_DESKTOP_OVERWRITE = "invalid-inherited-overwrite"
+    try {
+        $filteredDesktopProcess = Start-Process `
+            -FilePath $limitedTokenLauncher `
+            -ArgumentList @("--", "`"$desktop`"") `
+            -WorkingDirectory $standardUserRoot `
+            -PassThru `
+            -RedirectStandardOutput $filteredDesktopStdout `
+            -RedirectStandardError $filteredDesktopStderr
+        $filteredDesktopExitCode = Wait-ProcessExit `
+            -Process $filteredDesktopProcess `
+            -Description "the same-session limited-token desktop smoke" `
+            -TimeoutSeconds 240
+        $filteredDesktopOutput = @(
+            if (Test-Path -LiteralPath $filteredDesktopStdout `
+                -PathType Leaf) {
+                Get-Content -LiteralPath $filteredDesktopStdout -Raw
+            }
+            if (Test-Path -LiteralPath $filteredDesktopStderr `
+                -PathType Leaf) {
+                Get-Content -LiteralPath $filteredDesktopStderr -Raw
+            }
+        ) -join "`n"
+        if ($filteredDesktopExitCode -ne 0) {
+            throw (
+                "limited-token desktop exited with code " +
+                "$filteredDesktopExitCode`n$filteredDesktopOutput"
+            )
+        }
+        if (-not (Test-Path -LiteralPath $filteredDesktopResult `
+            -PathType Leaf)) {
+            throw (
+                "limited-token desktop did not write its smoke result`n" +
+                $filteredDesktopOutput
+            )
+        }
+        $filteredDesktopResultText = (
+            Get-Content -LiteralPath $filteredDesktopResult -Raw
+        ).Trim()
+        if ($filteredDesktopResultText -notmatch (
+            "installed desktop import/UAC/service/status lifecycle passed"
+        )) {
+            throw (
+                "limited-token desktop smoke failed: " +
+                "$filteredDesktopResultText`n$filteredDesktopOutput"
+            )
+        }
+        Write-Host $filteredDesktopOutput
+    }
+    finally {
+        foreach ($environmentName in @(
+            "WG_QUIC_DESKTOP_INTEGRATION_SMOKE",
+            "WG_QUIC_DESKTOP_SMOKE_CONFIG",
+            "WG_QUIC_DESKTOP_SMOKE_NAME",
+            "WG_QUIC_DESKTOP_SMOKE_RESULT",
+            "WG_QUIC_DESKTOP_ACTION",
+            "WG_QUIC_DESKTOP_NAME",
+            "WG_QUIC_DESKTOP_SOURCE",
+            "WG_QUIC_DESKTOP_OVERWRITE"
+        )) {
+            Remove-Item -LiteralPath "Env:$environmentName" `
+                -ErrorAction SilentlyContinue
+        }
     }
     if (-not (Test-Path -LiteralPath $filteredRetiredRuntimeResult `
         -PathType Leaf)) {
@@ -1415,16 +1410,17 @@ catch {
             ($remainingRuntimeDirectories.FullName -join ", ")
         )
     }
-    $limitedCoverage = if ($usesSyntheticLimitedToken) {
+    $brokerCoverage = if ($usesSyntheticLimitedToken) {
         "a synthetic kernel LUA token in the current session"
     }
     else {
         "a real UAC-filtered Administrator logon"
     }
     Write-Host (
-        "$limitedCoverage used the management broker without a prompt; " +
-        "the real desktop completed import/check/up/down and the CLI " +
-        "restored the primary service and adapter"
+        "$brokerCoverage used the management broker CLI without a prompt; " +
+        "a separate same-session kernel LUA token ran the real desktop " +
+        "through import/check/up/down, and the CLI restored the primary " +
+        "service and adapter"
     )
 
     $uninstall = Start-Process -FilePath "msiexec.exe" `
@@ -1564,7 +1560,8 @@ finally {
         $trayProcess,
         $secondDesktopProcess,
         $desktopIpcProbeProcess,
-        $filteredProcess
+        $filteredProcess,
+        $filteredDesktopProcess
     )) {
         if ($null -eq $candidateProcess) {
             continue

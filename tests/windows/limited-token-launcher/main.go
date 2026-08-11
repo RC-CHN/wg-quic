@@ -20,7 +20,6 @@ import (
 
 const (
 	createRestrictedTokenLUA        = 0x00000004
-	tokenElevationTypeDefault       = 1
 	tokenElevationTypeLimited       = 3
 	limitedTokenLauncherUsage       = "limited-token-launcher -- command [argument ...]"
 	interactiveWindowStationDesktop = `winsta0\default`
