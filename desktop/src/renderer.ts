@@ -13,6 +13,7 @@ import type {
 } from './types';
 import {
   chooseSelectedTunnel,
+  createSingleFlight,
   formatBitRate,
   formatBytes,
   formatFECRecovery,
@@ -40,7 +41,6 @@ const pending = new Map<string, TunnelAction>();
 
 let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
-let refreshInFlight = false;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
@@ -299,23 +299,30 @@ function render(snapshot: DesktopSnapshot): void {
   document.body.dataset.ready = 'true';
 }
 
-async function refresh(showErrors = true): Promise<boolean> {
-  if (refreshInFlight) {
-    return false;
-  }
-  refreshInFlight = true;
+const refreshSnapshot = createSingleFlight(async (): Promise<void> => {
   byId('refresh').classList.add('spinning');
   try {
     render(await window.wgQuic.snapshot());
-    return true;
-  } catch (error) {
-    if (showErrors) {
-      showToast(errorMessage(error), 'error');
-    }
-    return false;
   } finally {
-    refreshInFlight = false;
     byId('refresh').classList.remove('spinning');
+  }
+});
+
+interface RefreshResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function refresh(showErrors = true): Promise<RefreshResult> {
+  try {
+    await refreshSnapshot();
+    return { ok: true };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (showErrors) {
+      showToast(message, 'error');
+    }
+    return { ok: false, error: message };
   }
 }
 
@@ -433,8 +440,11 @@ document.addEventListener('visibilitychange', () => {
 async function start(): Promise<void> {
   const smoke = await desktopSmokeSettings();
   smokeMode = smoke.mode;
-  if (!(await refresh())) {
-    throw new Error('desktop could not load its native backend snapshot');
+  const initialRefresh = await refresh();
+  if (!initialRefresh.ok) {
+    throw new Error(
+      initialRefresh.error || 'desktop could not load its native backend snapshot',
+    );
   }
   if (smoke.mode !== 'none') {
     const backend = current?.backend;

@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { TunnelView } from './types';
 import {
   chooseSelectedTunnel,
+  createSingleFlight,
   formatBitRate,
   formatBytes,
   formatFECRecovery,
@@ -53,4 +54,49 @@ test('management errors add privilege guidance only when relevant', () => {
     managementErrorMessage('administrator approval was canceled'),
     'administrator approval was canceled',
   );
+});
+
+test('single-flight callers share an active refresh and allow the next one', async () => {
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const run = createSingleFlight(
+    () =>
+      new Promise<number>((resolve) => {
+        calls += 1;
+        release = () => resolve(calls);
+      }),
+  );
+
+  const first = run();
+  const overlapping = run();
+  assert.strictEqual(overlapping, first);
+  assert.equal(calls, 1);
+  release?.();
+  assert.equal(await first, 1);
+  assert.equal(await overlapping, 1);
+
+  const next = run();
+  assert.equal(calls, 2);
+  release?.();
+  assert.equal(await next, 2);
+});
+
+test('single-flight callers share failures and retry after settlement', async () => {
+  const expected = new Error('snapshot failed');
+  let calls = 0;
+  const run = createSingleFlight(async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw expected;
+    }
+    return 'recovered';
+  });
+
+  const first = run();
+  const overlapping = run();
+  assert.strictEqual(overlapping, first);
+  await assert.rejects(first, expected);
+  await assert.rejects(overlapping, expected);
+  assert.equal(await run(), 'recovered');
+  assert.equal(calls, 2);
 });

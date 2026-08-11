@@ -97,3 +97,21 @@ export function managementErrorMessage(message: string): string {
   }
   return message;
 }
+
+export function createSingleFlight<T>(
+  operation: () => Promise<T>,
+): () => Promise<T> {
+  let inFlight: Promise<T> | undefined;
+  return () => {
+    if (inFlight) {
+      return inFlight;
+    }
+    const current = operation().finally(() => {
+      if (inFlight === current) {
+        inFlight = undefined;
+      }
+    });
+    inFlight = current;
+    return current;
+  };
+}
