@@ -106,7 +106,7 @@ function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
 
 function stateDescription(tunnel: TunnelView): string {
   if (!tunnel.running) {
-    return tunnel.statusDetail || 'The tunnel service is not running.';
+    return 'The tunnel is configured and ready to activate.';
   }
   const sessions = tunnel.status?.stats.active_sessions || 0;
   if (sessions === 0) {
@@ -195,6 +195,7 @@ function renderDetail(tunnel?: TunnelView): void {
 
   const toggle = byId<HTMLButtonElement>('toggle-tunnel');
   toggle.disabled = Boolean(action) || !backendSupported;
+  toggle.setAttribute('aria-busy', String(Boolean(action)));
   toggle.textContent = action
     ? tunnelStateLabel(state)
     : tunnel.running
@@ -203,6 +204,14 @@ function renderDetail(tunnel?: TunnelView): void {
   toggle.className = `button ${tunnel.running ? 'danger' : 'primary'}`;
   toggle.dataset.name = tunnel.name;
   toggle.dataset.action = tunnel.running ? 'down' : 'up';
+
+  const diagnostics = byId<HTMLDetailsElement>('status-diagnostics');
+  const hasDiagnostics = Boolean(tunnel.statusDetail && !action);
+  diagnostics.classList.toggle('hidden', !hasDiagnostics);
+  if (!hasDiagnostics) {
+    diagnostics.open = false;
+  }
+  setText('status-diagnostics-copy', tunnel.statusDetail || '');
 
   const check = byId<HTMLButtonElement>('check-tunnel');
   check.disabled = Boolean(action);
@@ -505,9 +514,9 @@ async function start(): Promise<void> {
     const tunnel = stopped.tunnels.find(
       (candidate) => candidate.name === smoke.name,
     );
-    if (!tunnel || tunnel.running) {
+    if (!tunnel || tunnel.running || tunnel.statusDetail) {
       throw new Error(
-        `desktop did not observe the stopped tunnel: ${JSON.stringify(tunnel)}`,
+        `desktop did not observe a clean inactive tunnel: ${JSON.stringify(tunnel)}`,
       );
     }
     await completeDesktopSmoke(

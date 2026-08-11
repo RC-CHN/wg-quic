@@ -153,6 +153,10 @@ dd {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 34px;
   padding: 0 13px;
   border-radius: 7px;
@@ -193,6 +197,22 @@ dd {
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+.button[aria-busy="true"]::before {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: "";
+  animation: button-spin 0.7s linear infinite;
+}
+
+@keyframes button-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .notice {
@@ -546,7 +566,7 @@ dd {
   background: rgba(69, 219, 136, 0.045);
 }
 
-.status-strip > div {
+.status-strip > div:first-child {
   min-width: 96px;
 }
 
@@ -560,6 +580,40 @@ dd {
 .status-strip p {
   color: #748078;
   font-size: 9px;
+}
+
+.status-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.status-diagnostics {
+  margin-top: 6px;
+  color: #7d8792;
+  font-size: 8px;
+}
+
+.status-diagnostics summary {
+  width: max-content;
+  color: #8f99a5;
+  cursor: pointer;
+  user-select: none;
+}
+
+.status-diagnostics pre {
+  max-height: 88px;
+  margin: 7px 0 0;
+  padding: 8px 9px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #8d98a4;
+  font-family: var(--mono);
+  font-size: 7px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .detail-grid {
@@ -784,6 +838,7 @@ footer {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.38);
   font-size: 9px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .toast.error {

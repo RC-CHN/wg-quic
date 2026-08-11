@@ -118,7 +118,13 @@
                 <span class="section-label">STATUS</span>
                 <strong id="detail-state">Inactive</strong>
               </div>
-              <p id="detail-state-copy">The tunnel service is not running.</p>
+              <div class="status-copy">
+                <p id="detail-state-copy">The tunnel is configured and ready to activate.</p>
+                <details class="status-diagnostics hidden" id="status-diagnostics">
+                  <summary>Runtime diagnostics</summary>
+                  <pre id="status-diagnostics-copy"></pre>
+                </details>
+              </div>
             </section>
 
             <div class="detail-grid">

@@ -478,7 +478,23 @@ fn parse_status(output: &str, expected_interface: &str) -> Result<Value, String>
 }
 
 fn is_inactive_status_error(error: &str) -> bool {
-    error.contains(INACTIVE_STATUS_MARKER)
+    if error.contains(INACTIVE_STATUS_MARKER) {
+        return true;
+    }
+
+    // Compatibility for older bundled cores that returned the two native
+    // Windows missing-pipe errors without the stable marker. New cores
+    // normalize these at the transport boundary; keeping this narrow fallback
+    // prevents an upgraded desktop from exposing raw device and pipe paths
+    // while the native commands are being replaced.
+    let lower = error.to_ascii_lowercase();
+    lower.contains(r"\\.\pipe\wg-quic-")
+        && lower.contains("-status:")
+        && lower
+            .matches("the system cannot find the file specified")
+            .count()
+            >= 2
+        && !lower.contains("access is denied")
 }
 
 fn run_privileged(
@@ -788,12 +804,18 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_only_the_stable_inactive_status_marker() {
+    fn recognizes_inactive_status_errors_without_hiding_access_failures() {
         assert!(is_inactive_status_error(
             r#"wg-quic show office failed: wg-quic: interface is inactive: \"office\""#
         ));
+        assert!(is_inactive_status_error(
+            r#"wg-quic show wg0 --json failed with exit code 1: wg-quic: \\.\pipe\wg-quic-wg0: open \\.\pipe\wg-quic-wg0: The system cannot find the file specified. open \\.\pipe\wg-quic-wg0-status: The system cannot find the file specified."#
+        ));
         assert!(!is_inactive_status_error(
             "wg-quic show office failed: access is denied"
+        ));
+        assert!(!is_inactive_status_error(
+            r#"open \\.\pipe\wg-quic-wg0: Access is denied. open \\.\pipe\wg-quic-wg0-status: The system cannot find the file specified. The system cannot find the file specified."#
         ));
     }
 
