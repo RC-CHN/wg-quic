@@ -176,40 +176,46 @@ func TestWindowsHandleRenameWithOpenDescendantIsAtomic(t *testing.T) {
 	t.Logf("Windows refused parent rename while descendant denied share-delete: %v", err)
 }
 
-func TestWindowsSecurityOpenCoexistsWithPinnedDirectoryLease(
+func TestWindowsSecurityHandlesCoexistWithoutDeleteAccess(
 	t *testing.T,
 ) {
 	directory := filepath.Join(t.TempDir(), "secure")
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pinned, err := openWindowsDirectoryNoFollow(
-		directory,
-		windows.FILE_READ_ATTRIBUTES,
-	)
+	first, err := openWindowsDirectoryForSecurity(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(pinned)
+	defer windows.CloseHandle(first)
 
-	security, err := openWindowsDirectoryForSecurity(directory)
+	second, err := openWindowsDirectoryForSecurity(directory)
 	if err != nil {
-		t.Fatalf("open directory security while its lease is pinned: %v", err)
+		t.Fatalf("open a second directory security lease: %v", err)
 	}
-	defer windows.CloseHandle(security)
+	defer windows.CloseHandle(second)
 
-	isolation, err := openWindowsDirectoryForIsolation(directory)
+	firstIsolation, err := openWindowsDirectoryForIsolation(directory)
+	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("open directory for first isolation lease: %v", err)
+	}
+	defer windows.CloseHandle(firstIsolation)
+
+	secondIsolation, err := openWindowsDirectoryForIsolation(directory)
 	if err == nil {
-		windows.CloseHandle(isolation)
+		windows.CloseHandle(secondIsolation)
 		if windows.NewLazySystemDLL("ntdll.dll").
 			NewProc("wine_get_version").Find() == nil {
 			t.Log("Wine does not enforce native directory share-delete leases")
 			return
 		}
-		t.Fatal("DELETE access unexpectedly bypassed the pinned directory lease")
+		t.Fatal("two DELETE-capable directory leases unexpectedly coexisted")
 	}
 	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-		t.Fatalf("open pinned directory for isolation: %v", err)
+		t.Fatalf("open directory for second isolation lease: %v", err)
 	}
 }
 
