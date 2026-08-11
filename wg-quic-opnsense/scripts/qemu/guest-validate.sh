@@ -118,6 +118,14 @@ echo "== plugin service start =="
 configctl wireguardquic configure
 configctl wireguardquic status
 test -S /var/run/wg-quic/quic0.sock
+test -S /var/run/wg-quic/quic0.sock.status
+test "$(stat -f '%Lp' /var/run/wg-quic/quic0.sock)" = "600"
+test "$(stat -f '%Lp' /var/run/wg-quic/quic0.sock.status)" = "666"
+su -m nobody -c '/usr/local/sbin/wg-quic show quic0 --json' \
+    > /tmp/wg-quic-unprivileged-status.json
+jq -e '.interface == "quic0" and .state == "up"' \
+    /tmp/wg-quic-unprivileged-status.json >/dev/null
+rm -f /tmp/wg-quic-unprivileged-status.json
 if /usr/bin/wg show all dump | grep -q '^quic0'; then
     echo "quic0 leaked into the standard WireGuard UAPI namespace" >&2
     exit 1
@@ -135,6 +143,7 @@ while [ ! -S /var/run/wg-quic/quic1.sock ] && [ "${attempt}" -lt 150 ]; do
     attempt=$((attempt + 1))
 done
 test -S /var/run/wg-quic/quic1.sock
+test -S /var/run/wg-quic/quic1.sock.status
 ifconfig quic1
 
 echo "== userspace handshake =="
@@ -228,20 +237,53 @@ curl -skb "${cookie_jar}" https://127.0.0.1/ui/wireguardquic/status \
     -o /tmp/wg-quic-ui-status.html
 grep -q 'grid-wireguardquic-status' /tmp/wg-quic-ui-status.html
 grep -q 'id="type_filter"' /tmp/wg-quic-ui-status.html
+curl -skb "${cookie_jar}" https://127.0.0.1/ui/wireguardquic/log \
+    -o /tmp/wg-quic-ui-log.html
+grep -q 'id="grid-log"' /tmp/wg-quic-ui-log.html
+grep -q "let s_filter_val = 'Notice'" /tmp/wg-quic-ui-log.html
+curl -skf -u "${api_key}:${api_secret}" \
+    -X POST \
+    --data 'rowCount=20&current=1&severity[]=Notice' \
+    https://127.0.0.1/api/diagnostics/log/core/wireguardquic \
+    -o /tmp/wg-quic-api-log.json
+grep -q 'wg-quic QEMU WebUI log routing probe' /tmp/wg-quic-api-log.json
 /usr/local/bin/php "${mount_dir}/api-credentials.php" remove
 rm -f /tmp/wg-quic-api-*.json \
     "${login_page}" "${login_result}" "${cookie_jar}" \
-    /tmp/wg-quic-ui-general.html /tmp/wg-quic-ui-status.html
+    /tmp/wg-quic-ui-general.html /tmp/wg-quic-ui-status.html \
+    /tmp/wg-quic-ui-log.html
 
 echo "== uninstall cleanup =="
-configctl wireguardquic configure
+quic1_pid=$(cat /var/run/wg-quic/quic1.pid)
+kill -KILL "${quic1_pid}"
+attempt=0
+while kill -0 "${quic1_pid}" >/dev/null 2>&1 && [ "${attempt}" -lt 50 ]; do
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+if kill -0 "${quic1_pid}" >/dev/null 2>&1; then
+    echo "quic1 supervisor did not terminate" >&2
+    exit 1
+fi
+rm -f /var/run/wg-quic/quic1.pid
+/bin/timeout 30 configctl wireguardquic configure
 test ! -e /var/run/wg-quic/quic1.sock
+test ! -e /var/run/wg-quic/quic1.sock.status
 test ! -e /var/run/wg-quic/quic1.pid
+if ifconfig quic1 >/dev/null 2>&1; then
+    echo "quic1 survived supervisor termination" >&2
+    exit 1
+fi
+if pgrep -f '/usr/local/sbin/wg-quic run .* --name quic1' >/dev/null 2>&1; then
+    echo "orphaned quic1 data-plane process survived supervisor termination" >&2
+    exit 1
+fi
 configctl wireguardquic status
 pkg delete -y os-wg-quic
 test ! -e /usr/local/sbin/wg-quic
 test ! -e /usr/local/sbin/wg-quic-quick
 test ! -e /var/run/wg-quic/quic0.sock
+test ! -e /var/run/wg-quic/quic0.sock.status
 test ! -e /var/run/wg-quic/quic0.pid
 test ! -e /var/run/wg-quic
 test ! -e /usr/local/etc/wg-quic/quic0.conf

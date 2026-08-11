@@ -30,6 +30,24 @@ function wireguardquic_socket($interface)
     return WG_QUIC_RUN_DIR . '/' . $interface . '.sock';
 }
 
+function wireguardquic_status_socket($interface)
+{
+    return wireguardquic_socket($interface) . '.status';
+}
+
+function wireguardquic_runtime_interfaces()
+{
+    $interfaces = [];
+    foreach (['quic*.pid', 'quic*.sock', 'quic*.sock.status'] as $pattern) {
+        foreach (glob(WG_QUIC_RUN_DIR . '/' . $pattern) ?: [] as $path) {
+            if (preg_match('/^(quic[0-9]{1,3})\.(?:pid|sock(?:\.status)?)$/', basename($path), $matches)) {
+                $interfaces[$matches[1]] = true;
+            }
+        }
+    }
+    return array_keys($interfaces);
+}
+
 function wireguardquic_pid($interface)
 {
     $pidfile = wireguardquic_pidfile($interface);
@@ -55,12 +73,11 @@ function wireguardquic_stop_interface($interface)
 
     @unlink(wireguardquic_pidfile($interface));
     @unlink(wireguardquic_socket($interface));
+    @unlink(wireguardquic_status_socket($interface));
     if (does_interface_exist($interface)) {
         legacy_interface_destroy($interface);
     }
-    if (count(glob(WG_QUIC_RUN_DIR . '/quic*.pid') ?: []) === 0) {
-        @rmdir(WG_QUIC_RUN_DIR);
-    }
+    @rmdir(WG_QUIC_RUN_DIR);
     syslog(LOG_NOTICE, "wg-quic interface {$interface} stopped");
 }
 
@@ -129,6 +146,7 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
         }
         @unlink(wireguardquic_pidfile($interface));
         @unlink(wireguardquic_socket($interface));
+        @unlink(wireguardquic_status_socket($interface));
         $result = mwexecf(
             '/usr/sbin/daemon -f -S -p %s -T wg-quic %s run %s --name %s',
             [
@@ -144,12 +162,20 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
     }
 
     for ($attempt = 0; $attempt < 150; $attempt++) {
-        if (does_interface_exist($interface) && file_exists(wireguardquic_socket($interface))) {
+        if (
+            does_interface_exist($interface) &&
+            file_exists(wireguardquic_socket($interface)) &&
+            file_exists(wireguardquic_status_socket($interface))
+        ) {
             break;
         }
         usleep(100000);
     }
-    if (!does_interface_exist($interface) || !file_exists(wireguardquic_socket($interface))) {
+    if (
+        !does_interface_exist($interface) ||
+        !file_exists(wireguardquic_socket($interface)) ||
+        !file_exists(wireguardquic_status_socket($interface))
+    ) {
         wireguardquic_stop_interface($interface);
         throw new RuntimeException("wg-quic did not create {$interface}");
     }
@@ -174,15 +200,12 @@ function wireguardquic_servers($uuid = null)
 
 function wireguardquic_stop_stale($keep = [])
 {
-    foreach (glob(WG_QUIC_RUN_DIR . '/quic*.pid') ?: [] as $pidfile) {
-        $interface = basename($pidfile, '.pid');
-        if (preg_match('/^quic[0-9]{1,3}$/', $interface) && !in_array($interface, $keep)) {
+    foreach (wireguardquic_runtime_interfaces() as $interface) {
+        if (!in_array($interface, $keep)) {
             wireguardquic_stop_interface($interface);
         }
     }
-    if (count(glob(WG_QUIC_RUN_DIR . '/quic*.pid') ?: []) === 0) {
-        @rmdir(WG_QUIC_RUN_DIR);
-    }
+    @rmdir(WG_QUIC_RUN_DIR);
 }
 
 openlog('wg-quic', LOG_ODELAY, LOG_AUTH);

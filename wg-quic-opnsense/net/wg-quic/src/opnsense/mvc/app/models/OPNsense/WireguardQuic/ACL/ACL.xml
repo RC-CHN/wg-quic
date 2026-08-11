@@ -21,7 +21,7 @@
     <page-wireguardquic-logs>
         <name>VPN: wg-quic: Log</name>
         <patterns>
-            <pattern>ui/diagnostics/log/core/wireguardquic/*</pattern>
+            <pattern>ui/wireguardquic/log*</pattern>
             <pattern>api/diagnostics/log/core/wireguardquic/*</pattern>
         </patterns>
     </page-wireguardquic-logs>
