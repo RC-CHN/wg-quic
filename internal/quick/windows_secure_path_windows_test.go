@@ -176,6 +176,43 @@ func TestWindowsHandleRenameWithOpenDescendantIsAtomic(t *testing.T) {
 	t.Logf("Windows refused parent rename while descendant denied share-delete: %v", err)
 }
 
+func TestWindowsSecurityOpenCoexistsWithPinnedDirectoryLease(
+	t *testing.T,
+) {
+	directory := filepath.Join(t.TempDir(), "secure")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := openWindowsDirectoryNoFollow(
+		directory,
+		windows.FILE_READ_ATTRIBUTES,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(pinned)
+
+	security, err := openWindowsDirectoryForSecurity(directory)
+	if err != nil {
+		t.Fatalf("open directory security while its lease is pinned: %v", err)
+	}
+	defer windows.CloseHandle(security)
+
+	isolation, err := openWindowsDirectoryForIsolation(directory)
+	if err == nil {
+		windows.CloseHandle(isolation)
+		if windows.NewLazySystemDLL("ntdll.dll").
+			NewProc("wine_get_version").Find() == nil {
+			t.Log("Wine does not enforce native directory share-delete leases")
+			return
+		}
+		t.Fatal("DELETE access unexpectedly bypassed the pinned directory lease")
+	}
+	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+		t.Fatalf("open pinned directory for isolation: %v", err)
+	}
+}
+
 func TestWindowsLegacyRootMigrationQuarantinesAndCopiesOnlyHookFreeConfigs(
 	t *testing.T,
 ) {

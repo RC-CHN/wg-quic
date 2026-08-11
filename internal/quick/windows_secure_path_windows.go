@@ -258,7 +258,7 @@ func ensureWindowsSecureProductRoot(
 	var legacyRoot windows.Handle
 	err = withWindowsFileSecurityPrivileges(func() error {
 		var openErr error
-		legacyRoot, openErr = openWindowsDirectoryForSecurity(root)
+		legacyRoot, openErr = openWindowsDirectoryForIsolation(root)
 		if openErr != nil {
 			return fmt.Errorf("open legacy ProgramData root for isolation: %w", openErr)
 		}
@@ -704,6 +704,14 @@ func openWindowsDirectoryNoFollow(
 }
 
 func openWindowsDirectoryForSecurity(path string) (windows.Handle, error) {
+	const desiredAccess = windows.FILE_READ_ATTRIBUTES |
+		windows.READ_CONTROL |
+		windows.WRITE_DAC |
+		windows.WRITE_OWNER
+	return openWindowsDirectoryNoFollow(path, desiredAccess)
+}
+
+func openWindowsDirectoryForIsolation(path string) (windows.Handle, error) {
 	const desiredAccess = windows.FILE_READ_ATTRIBUTES |
 		windows.READ_CONTROL |
 		windows.WRITE_DAC |
