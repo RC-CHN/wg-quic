@@ -19,6 +19,7 @@ on:
       - "cmd/**"
       - "internal/**"
       - "tests/windows/**"
+      - "tests/linux/**"
       - "third_party/**"
       - "desktop/**"
   pull_request:
@@ -30,6 +31,7 @@ on:
       - "cmd/**"
       - "internal/**"
       - "tests/windows/**"
+      - "tests/linux/**"
       - "third_party/**"
       - "desktop/**"
   workflow_dispatch:
@@ -39,11 +41,12 @@ permissions:
 
 jobs:
   package:
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04
             artifact: linux
           - runner: windows-latest
             artifact: windows
@@ -58,79 +61,103 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            wget
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
-      - name: Verify WiX Toolset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $candle = Get-Command candle.exe -ErrorAction Stop
-          $light = Get-Command light.exe -ErrorAction Stop
-          $wixVersion = (
-            Get-Item -LiteralPath $candle.Source
-          ).VersionInfo.ProductVersion
-          if ($wixVersion -notmatch '^3\.14\.') {
-            throw "expected WiX 3.14, found $wixVersion at $($candle.Source)"
-          }
-          Write-Host "WiX $wixVersion"
-          Write-Host "candle=$($candle.Source)"
-          Write-Host "light=$($light.Source)"
       - name: Audit desktop dependencies
         working-directory: desktop
         run: npm audit
       - name: Check TypeScript
         working-directory: desktop
         run: npm run check
-      - name: Test desktop state and platform behavior
+      - name: Test desktop frontend and release behavior
         working-directory: desktop
         run: npm test
+      - name: Prepare bundled native commands
+        working-directory: desktop
+        run: npm run native
+      - name: Test Tauri backend
+        working-directory: desktop
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Create desktop distributable
         working-directory: desktop
         run: npm run make
       - name: Smoke bundled wg-quic commands
         working-directory: desktop
         run: npm run smoke:native
-      - name: Privileged Wintun and Windows service lifecycle
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tests/windows/privileged-lifecycle.ps1 -BinDirectory ./desktop/resources/bin
-      - name: Smoke packaged desktop app
-        if: runner.os != 'Linux'
-        working-directory: desktop
-        run: npm run smoke:app
       - name: Install and exercise Windows desktop lifecycle
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $installer = Get-ChildItem `
-            ./desktop/out/make/wix/x64/*.msi |
+            ./desktop/src-tauri/target/release/bundle/msi/*.msi |
             Select-Object -First 1
           if ($null -eq $installer) {
-            throw "missing WiX MSI"
+            throw "missing Tauri WiX MSI"
           }
           ./tests/windows/desktop-installed-lifecycle.ps1 `
             -Installer $installer.FullName
+      - name: Privileged Wintun and Windows service lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/windows/privileged-lifecycle.ps1 -BinDirectory ./desktop/resources/bin
       - name: Install Linux desktop package
         if: runner.os == 'Linux'
         working-directory: desktop
-        run: sudo apt-get install --no-install-recommends --yes ./out/make/deb/x64/*.deb
+        run: sudo apt-get install --no-install-recommends --yes ./src-tauri/target/release/bundle/deb/*.deb
+      - name: Exercise installed Linux service lifecycle
+        if: runner.os == 'Linux'
+        run: |
+          sudo modprobe tun
+          ./tests/linux/desktop-installed-lifecycle.sh
       - name: Smoke packaged desktop app
         if: runner.os == 'Linux'
         working-directory: desktop
         env:
           WG_QUIC_DESKTOP_EXECUTABLE: /usr/bin/wg-quic-desktop
-        run: xvfb-run --auto-servernum npm run smoke:app
+        run: dbus-run-session -- xvfb-run --auto-servernum npm run smoke:app
+      - name: Remove Linux desktop package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package_path=$(find \
+            ./desktop/src-tauri/target/release/bundle/deb \
+            -maxdepth 1 -type f -name '*.deb' -print -quit)
+          package_name=$(dpkg-deb -f "$package_path" Package)
+          sudo dpkg --remove "$package_name"
+          test ! -e /usr/bin/wg-quic-desktop
+          test ! -e /usr/lib/wg-quic
+          test ! -e /lib/systemd/system/wg-quic@.service
+          ! systemctl cat wg-quic@.service >/dev/null 2>&1
       - name: Collect versioned release installers
         if: inputs.release
         working-directory: desktop
         run: node scripts/collect-release.mjs ${{ matrix.artifact }}
       - name: Upload desktop distributable
-        if: ${{ !inputs.release }}
+        if: ${{ always() && !inputs.release }}
         uses: actions/upload-artifact@v7
         with:
           name: wg-quic-desktop-${{ matrix.artifact }}
-          path: desktop/out/make/**
+          path: desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
           retention-days: 14
       - name: Upload desktop release installers
