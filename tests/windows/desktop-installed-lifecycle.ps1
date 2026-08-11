@@ -119,6 +119,7 @@ $desktopProcess = $null
 $trayProcess = $null
 $secondDesktopProcess = $null
 $desktopIpcProbeProcess = $null
+$filteredProcess = $null
 $quick = $null
 $core = $null
 $installedWintun = $null
@@ -130,8 +131,6 @@ $standardUserName = "wgqdesk$PID"
 $standardUserCreated = $false
 $filteredAdminUserName = "wgqadmin$PID"
 $filteredAdminUserCreated = $false
-$filteredAdminTaskName = "wg-quic-filtered-admin-$PID"
-$filteredAdminTaskRegistered = $false
 $standardUserRoot = Join-Path $env:PUBLIC "wg-quic-ci-$PID"
 $filteredDesktopTunnelName = "wgqmedium$PID"
 $filteredDesktopServiceName = "wg-quic-quick@$filteredDesktopTunnelName"
@@ -1289,48 +1288,32 @@ catch {
     $taskPowerShell = Join-Path $env:SystemRoot (
         "System32\WindowsPowerShell\v1.0\powershell.exe"
     )
-    $taskCommand = (
-        "$taskPowerShell -NoLogo -NoProfile -NonInteractive " +
-        "-ExecutionPolicy Bypass -File `"$filteredAdminScript`""
-    )
     $limitedTaskExitCode = 0
     if (-not $usesSyntheticLimitedToken) {
-        $taskStartTime = [DateTime]::Now.AddMinutes(5).ToString("HH:mm")
-        $taskCreateArguments = @(
-            "/Create",
-            "/TN", $filteredAdminTaskName,
-            "/TR", $taskCommand,
-            "/SC", "ONCE",
-            "/ST", $taskStartTime,
-            "/RU", "$env:COMPUTERNAME\$filteredAdminUserName",
-            "/RP", $passwordText,
-            "/RL", "LIMITED",
-            "/F"
+        # Task Scheduler password logons can return the full Administrator
+        # token even with /RL LIMITED. CreateProcessWithLogonW, used by
+        # Start-Process -Credential, performs a normal interactive logon and
+        # gives an asInvoker process the real UAC-filtered linked token.
+        $filteredCredential = [Management.Automation.PSCredential]::new(
+            "$env:COMPUTERNAME\$filteredAdminUserName",
+            $securePassword
         )
-        $taskScheduler = Join-Path $env:SystemRoot "System32\schtasks.exe"
-        $taskCreateOutput = @(& $taskScheduler @taskCreateArguments 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw (
-                "filtered-admin scheduled task registration failed`n" +
-                ($taskCreateOutput | Out-String)
-            )
-        }
-        $filteredAdminTaskRegistered = $true
-        Invoke-Native -FilePath $taskScheduler `
-            -Arguments @("/Run", "/TN", $filteredAdminTaskName) | Out-Null
-        Wait-For -Description "the filtered-admin broker lifecycle" `
-            -TimeoutSeconds 390 -Condition {
-                Test-Path -LiteralPath $filteredAdminResult -PathType Leaf
-            }
-        Wait-For -Description "the filtered-admin scheduled task exit" `
-            -TimeoutSeconds 30 -Condition {
-                (Get-ScheduledTask -TaskName $filteredAdminTaskName `
-                    -ErrorAction Stop).State -ne "Running"
-            }
-        $limitedTaskExitCode = (
-            Get-ScheduledTaskInfo -TaskName $filteredAdminTaskName `
-                -ErrorAction Stop
-        ).LastTaskResult
+        $filteredProcess = Start-Process -FilePath $taskPowerShell `
+            -ArgumentList @(
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", "`"$filteredAdminScript`""
+            ) `
+            -Credential $filteredCredential `
+            -LoadUserProfile `
+            -WorkingDirectory $standardUserRoot `
+            -PassThru
+        $limitedTaskExitCode = Wait-ProcessExit `
+            -Process $filteredProcess `
+            -Description "the filtered-admin broker lifecycle" `
+            -TimeoutSeconds 390
     }
     else {
         # A hosted runner has no split UAC token. CreateRestrictedToken with
@@ -1431,11 +1414,6 @@ catch {
             "runtime cleanup left unexpected directories: " +
             ($remainingRuntimeDirectories.FullName -join ", ")
         )
-    }
-    if ($filteredAdminTaskRegistered) {
-        Unregister-ScheduledTask -TaskName $filteredAdminTaskName `
-            -Confirm:$false -ErrorAction Stop
-        $filteredAdminTaskRegistered = $false
     }
     $limitedCoverage = if ($usesSyntheticLimitedToken) {
         "a synthetic kernel LUA token in the current session"
@@ -1581,19 +1559,12 @@ finally {
     Remove-Item Env:WG_QUIC_ELEVATED_EXE `
         -ErrorAction SilentlyContinue
 
-    if ($filteredAdminTaskRegistered) {
-        Stop-ScheduledTask -TaskName $filteredAdminTaskName `
-            -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $filteredAdminTaskName `
-            -Confirm:$false -ErrorAction SilentlyContinue
-        $filteredAdminTaskRegistered = $false
-    }
-
     foreach ($candidateProcess in @(
         $desktopProcess,
         $trayProcess,
         $secondDesktopProcess,
-        $desktopIpcProbeProcess
+        $desktopIpcProbeProcess,
+        $filteredProcess
     )) {
         if ($null -eq $candidateProcess) {
             continue
