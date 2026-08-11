@@ -48,7 +48,7 @@ jobs:
         include:
           - runner: ubuntu-22.04
             artifact: linux
-          - runner: windows-2022
+          - runner: windows-2025
             artifact: windows
     runs-on: ${{ matrix.runner }}
     steps:
@@ -68,6 +68,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          $enableLUA = (Get-ItemProperty -LiteralPath `
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
+            -Name EnableLUA -ErrorAction Stop).EnableLUA
+          if ([int] $enableLUA -ne 1) {
+            throw "installed filtered-Administrator lifecycle requires EnableLUA=1"
+          }
           go test -count=1 `
             ./internal/quick `
             ./tests/windows/desktop-ipc-probe `

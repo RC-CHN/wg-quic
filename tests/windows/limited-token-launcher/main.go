@@ -16,7 +16,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -25,10 +24,6 @@ const (
 	tokenElevationTypeLimited       = 3
 	limitedTokenLauncherUsage       = "limited-token-launcher -- command [argument ...]"
 	interactiveWindowStationDesktop = `winsta0\default`
-)
-
-var errLUALimitedTokenUnavailable = errors.New(
-	"this UAC-disabled Windows host cannot create a limited LUA token",
 )
 
 var createRestrictedToken = windows.NewLazySystemDLL(
@@ -144,35 +139,16 @@ func verifyLUARestrictedToken(token windows.Token) (uint32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("inspect restricted token elevation type: %w", err)
 	}
+	if elevationType != tokenElevationTypeLimited {
+		return 0, fmt.Errorf(
+			"CreateRestrictedToken returned elevation type %d, want limited (%d)",
+			elevationType,
+			tokenElevationTypeLimited,
+		)
+	}
 	enabled, exactDenyOnly, err := administratorGroupState(token)
 	if err != nil {
 		return 0, fmt.Errorf("inspect restricted token groups: %w", err)
-	}
-	elevated := token.IsElevated()
-	if elevationType != tokenElevationTypeLimited {
-		uacEnabled, uacErr := launcherUACEnabled()
-		if uacErr != nil {
-			return 0, fmt.Errorf(
-				"inspect UAC policy after unexpected token elevation type: %w",
-				uacErr,
-			)
-		}
-		if elevationType == tokenElevationTypeDefault &&
-			!uacEnabled && !enabled && exactDenyOnly && !elevated {
-			return 0, fmt.Errorf(
-				"%w: CreateRestrictedToken returned elevation type default",
-				errLUALimitedTokenUnavailable,
-			)
-		}
-		return 0, fmt.Errorf(
-			"CreateRestrictedToken returned elevation type %d, want limited (%d); Administrator enabled=%v exact_deny_only=%v elevated=%v UAC_enabled=%v",
-			elevationType,
-			tokenElevationTypeLimited,
-			enabled,
-			exactDenyOnly,
-			elevated,
-			uacEnabled,
-		)
 	}
 	if enabled || !exactDenyOnly {
 		return 0, fmt.Errorf(
@@ -181,7 +157,7 @@ func verifyLUARestrictedToken(token windows.Token) (uint32, error) {
 			exactDenyOnly,
 		)
 	}
-	if elevated {
+	if token.IsElevated() {
 		return 0, errors.New("restricted token still reports UAC elevation")
 	}
 
@@ -203,23 +179,6 @@ func verifyLUARestrictedToken(token windows.Token) (uint32, error) {
 		)
 	}
 	return tokenSession, nil
-}
-
-func launcherUACEnabled() (bool, error) {
-	key, err := registry.OpenKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		registry.QUERY_VALUE,
-	)
-	if err != nil {
-		return false, err
-	}
-	defer key.Close()
-	enableLUA, _, err := key.GetIntegerValue("EnableLUA")
-	if err != nil {
-		return false, err
-	}
-	return enableLUA != 0, nil
 }
 
 func administratorGroupState(token windows.Token) (

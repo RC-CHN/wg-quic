@@ -82,11 +82,11 @@ Together they cover installation, UI-driven import, the persistent management
 broker from a UAC-filtered Administrator token, standard-user rejection, the
 one-operation UAC fallback, a real LocalSystem tunnel service, Wintun, network
 policy, unprivileged status, teardown, and uninstall. The Windows job also
-installs v0.2.0 first and upgrades it while a tunnel remains active. Because
-GitHub-hosted Windows disables UAC, its real Tauri/WebView lifecycle runs under
-a kernel-created `LUA_TOKEN` in the runner's existing session; the fixture
-fails unless that token is limited, non-elevated, and carries the
-Administrators SID only for deny checks.
+installs v0.2.0 first and upgrades it while a tunnel remains active. It requires
+UAC to be enabled, creates a temporary local Administrator, and runs the real
+Tauri/WebView lifecycle from that account at `LIMITED` run level. The fixture
+fails unless the resulting token is non-elevated and the broker accepts the
+linked Administrator identity without a prompt.
 
 ## Privileges and platform boundary
 

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -36,6 +35,15 @@ func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
 	if !enabled {
 		t.Skip("integration assertion requires an elevated Administrator test token")
 	}
+	sourceElevationType, err := launcherTokenElevationType(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceElevationType == tokenElevationTypeDefault {
+		t.Skip(
+			"elevated source token has no linked UAC token; installed lifecycle uses a real limited Administrator logon",
+		)
+	}
 
 	limited, err := createLUARestrictedToken(source)
 	if err != nil {
@@ -43,9 +51,6 @@ func TestCreateLUARestrictedTokenAndLaunch(t *testing.T) {
 	}
 	defer limited.Close()
 	if _, err := verifyLUARestrictedToken(limited); err != nil {
-		if errors.Is(err, errLUALimitedTokenUnavailable) {
-			t.Skipf("host cannot synthesize a genuine UAC-limited token: %v", err)
-		}
 		t.Fatal(err)
 	}
 
