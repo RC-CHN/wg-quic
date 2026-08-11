@@ -84,7 +84,17 @@ func fieldValue(status, name string) (int64, error) {
 	return 0, fmt.Errorf("%s was not present in device status", name)
 }
 
-func run(configPath string) error {
+func holdAfterSuccess(hold time.Duration, sleep func(time.Duration)) error {
+	if hold < 0 {
+		return errors.New("hold duration must not be negative")
+	}
+	if hold > 0 {
+		sleep(hold)
+	}
+	return nil
+}
+
+func run(configPath string, hold time.Duration) error {
 	cfg, err := config.ParseFile(configPath)
 	if err != nil {
 		return err
@@ -220,16 +230,23 @@ func run(configPath string) error {
 		txBytes,
 		rxBytes,
 	)
-	return nil
+	if hold > 0 {
+		fmt.Printf("HOST INTEROP HOLDING: keeping the peer online for %s\n", hold)
+	}
+	return holdAfterSuccess(hold, time.Sleep)
 }
 
 func main() {
 	configPath := flag.String("config", "", "path to the Linux wg-quic profile")
+	hold := flag.Duration("hold", 0, "keep the validated peer online for this duration")
 	flag.Parse()
 	if *configPath == "" {
 		log.Fatal("-config is required")
 	}
-	if err := run(*configPath); err != nil {
+	if *hold < 0 {
+		log.Fatal("-hold must not be negative")
+	}
+	if err := run(*configPath, *hold); err != nil {
 		log.Fatal(err)
 	}
 }

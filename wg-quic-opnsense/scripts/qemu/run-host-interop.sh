@@ -10,7 +10,15 @@ quick="${state_dir}/tools/wg-quic-quick"
 netstack_client="${state_dir}/tools/wg-quic-netstack-client"
 config="${state_dir}/host-interop.conf"
 log="${state_dir}/host-interop.log"
+: "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS:=0}"
 pid=
+
+case "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}" in
+    ''|*[!0-9]*)
+        echo "WG_QUIC_HOST_INTEROP_HOLD_SECONDS must be a non-negative integer" >&2
+        exit 2
+        ;;
+esac
 
 cleanup()
 {
@@ -48,6 +56,12 @@ if sudo -n true >/dev/null 2>&1; then
          and .stats.wg_rx_bytes > 0' >/dev/null
 
     echo "HOST INTEROP PASSED: Linux quichost <-> OPNsense quic0"
+    if [ "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}" -gt 0 ]; then
+        echo "HOST INTEROP HOLDING: keeping the peer online for ${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}s"
+        sleep "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}"
+    fi
 else
-    "${netstack_client}" -config "${config}"
+    "${netstack_client}" \
+        -config "${config}" \
+        -hold "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}s"
 fi

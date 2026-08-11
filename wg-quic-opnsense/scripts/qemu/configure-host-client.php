@@ -35,6 +35,7 @@ foreach (
         'guestPublicKey',
         'clientPublicKey',
         'guestAddress',
+        'guestTunnelAddress',
         'clientAddress',
     ] as $required
 ) {
@@ -61,7 +62,7 @@ if ($serverStage) {
     $server->pubkey->setValue($payload['guestPublicKey']);
     $server->privkey->setValue($payload['guestPrivateKey']);
     $server->port->setValue('52820');
-    $server->tunneladdress->setValue($payload['guestAddress'] . '/32');
+    $server->tunneladdress->setValue($payload['guestTunnelAddress']);
     $server->mtu->setValue('1420');
     $server->disableroutes->setValue('0');
     $server->peers->setValue($peerUuid);

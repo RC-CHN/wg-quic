@@ -2,18 +2,56 @@
 
 """
 Exercise the complete WebUI peer-generator workflow against a disposable
-OPNsense VM. The provision phase stores the generated peer and writes only the
-client-side values needed by the local wg-quic harness. The verify phase
-checks the resulting online state in Status and the Dashboard widget.
+OPNsense VM. The provision phase stores the generated peer and writes the
+generated wg-quick-compatible client profile for the local wg-quic harness.
+The verify phase checks the resulting online state in Status and the Dashboard
+widget.
 """
 
 import argparse
 import base64
+import ipaddress
 import json
 import os
 import time
 import urllib.request
 from pathlib import Path
+
+
+PASSWORD_ENV = "WG_QUIC_OPNSENSE_PASSWORD"
+
+
+def ipv4_address(value):
+    address = ipaddress.ip_address(value)
+    if address.version != 4:
+        raise argparse.ArgumentTypeError("the browser fixture currently requires IPv4")
+    return str(address)
+
+
+def ensure_private_directory(path):
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+
+
+def write_private_bytes(path, content):
+    path = Path(path)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = None
+            output.write(content)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def write_generated_config(path, content):
+    content = content.rstrip() + "\n"
+    if not content.startswith("[Interface]\n") or "\n[Peer]\n" not in content:
+        raise RuntimeError("Peer generator did not return a wg-quick configuration")
+    write_private_bytes(path, content.encode())
 
 
 class Browser:
@@ -101,7 +139,8 @@ class Browser:
 
     def screenshot(self, path):
         encoded = self.request("GET", self.prefix + "/screenshot")
-        Path(path).write_bytes(base64.b64decode(encoded))
+        ensure_private_directory(Path(path).parent)
+        write_private_bytes(path, base64.b64decode(encoded))
 
     def login(self, username, password):
         self.navigate("/")
@@ -147,18 +186,20 @@ def provision(browser, arguments):
         };
         setValue('configbuilder.name', arguments[0]);
         setValue('configbuilder.endpoint', arguments[1]);
+        setValue('configbuilder.tunneladdress', arguments[2] + '/32');
         setValue('configbuilder.keepalive', '1');
         """,
-        [arguments.peer_name, arguments.endpoint],
+        [arguments.peer_name, arguments.endpoint, arguments.guest_address],
     )
     browser.wait(
         """
         const output = document.getElementById('configbuilder.output').value;
         return output.includes('Endpoint = ' + arguments[0]) &&
+            output.includes('AllowedIPs = ' + arguments[1] + '/32') &&
             output.includes('PrivateKey = ');
         """,
         "generated configuration did not update",
-        arguments=[arguments.endpoint],
+        arguments=[arguments.endpoint, arguments.guest_address],
     )
     values = browser.execute(
         """
@@ -177,6 +218,7 @@ def provision(browser, arguments):
         "clientPrivateKey",
         "clientPublicKey",
         "clientAddress",
+        "config",
     )):
         raise RuntimeError("Peer generator returned an incomplete client configuration")
 
@@ -214,21 +256,8 @@ def provision(browser, arguments):
     )
     time.sleep(3)
 
-    payload = {
-        "guestPrivateKey": "",
-        "guestPublicKey": values["guestPublicKey"],
-        "clientPrivateKey": values["clientPrivateKey"],
-        "clientPublicKey": values["clientPublicKey"],
-        "guestAddress": arguments.guest_address,
-        "clientAddress": values["clientAddress"],
-        "endpoint": arguments.endpoint,
-    }
     arguments.config.parent.mkdir(parents=True, exist_ok=True)
-    arguments.config.write_text(
-        json.dumps(payload, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    os.chmod(arguments.config, 0o600)
+    write_generated_config(arguments.config, values["config"])
     print(f"WEBUI PROVISION PASSED: {arguments.peer_name} -> {arguments.config}")
 
 
@@ -328,31 +357,94 @@ def verify(browser, arguments):
     if widget is None or "text-success" not in widget["html"]:
         raise RuntimeError(f"generated peer is not online in Dashboard: {widget}")
     browser.screenshot(arguments.output_dir / "webui-client-dashboard.png")
-    print(f"WEBUI VERIFY PASSED: {arguments.peer_name} is online with traffic")
+
+    browser.navigate("/ui/wireguardquic/log")
+    browser.wait(
+        """
+        const grid = document.getElementById('grid-log');
+        return grid && Array.from(grid.querySelectorAll('.tabulator-row, tr'))
+            .some(row => row.innerText.includes('wg-quic'));
+        """,
+        "wg-quic lifecycle records did not appear in Log File",
+        timeout=45,
+    )
+    log_row = browser.execute(
+        """
+        const grid = document.getElementById('grid-log');
+        const row = grid
+            ? Array.from(grid.querySelectorAll('.tabulator-row, tr'))
+                .find(item => item.innerText.includes('wg-quic'))
+            : null;
+        return row ? row.innerText : null;
+        """
+    )
+    if not log_row:
+        raise RuntimeError("wg-quic Log File contained no visible lifecycle record")
+    browser.screenshot(arguments.output_dir / "webui-client-log.png")
+    print(
+        f"WEBUI VERIFY PASSED: {arguments.peer_name} is online with traffic and logs"
+    )
 
 
-def parse_arguments():
+def resolve_password(arguments, environ):
+    if arguments.password_file is not None:
+        password = arguments.password_file.read_text(encoding="utf-8").rstrip("\r\n")
+    elif PASSWORD_ENV in environ:
+        password = environ[PASSWORD_ENV]
+    elif arguments.password is not None:
+        password = arguments.password
+    else:
+        raise RuntimeError(
+            f"set {PASSWORD_ENV} or pass --password-file for WebUI authentication"
+        )
+    if password == "":
+        raise RuntimeError("the WebUI password must not be empty")
+    return password
+
+
+def parse_arguments(argv=None, environ=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("provision", "verify"))
     parser.add_argument("--driver-url", default="http://127.0.0.1:4444")
-    parser.add_argument("--base-url", default="https://127.0.0.1:8447")
+    parser.add_argument("--base-url", default="https://127.0.0.1:10443")
     parser.add_argument("--username", default="root")
-    parser.add_argument("--password", default="opnsense")
+    password_source = parser.add_mutually_exclusive_group()
+    password_source.add_argument(
+        "--password-file",
+        type=Path,
+        help="read the WebUI password from a file",
+    )
+    password_source.add_argument(
+        "--password",
+        help="legacy option; prefer --password-file or WG_QUIC_OPNSENSE_PASSWORD",
+    )
     parser.add_argument("--peer-name", default="webui-local-client")
-    parser.add_argument("--endpoint", default="127.0.0.1:51820")
-    parser.add_argument("--guest-address", default="10.66.0.1")
+    parser.add_argument("--endpoint", default="127.0.0.1:52820")
+    parser.add_argument(
+        "--guest-address",
+        default="10.77.0.1",
+        type=ipv4_address,
+        help="single IPv4 address exposed through the generated profile",
+    )
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(".qemu/webui-client.json"),
+        default=Path(".qemu/webui-client.conf"),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path(".qemu/ui-shots"),
     )
-    arguments = parser.parse_args()
-    arguments.output_dir.mkdir(parents=True, exist_ok=True)
+    arguments = parser.parse_args(argv)
+    try:
+        arguments.password = resolve_password(
+            arguments,
+            os.environ if environ is None else environ,
+        )
+    except (OSError, RuntimeError) as error:
+        parser.error(str(error))
+    ensure_private_directory(arguments.output_dir)
     return arguments
 
 

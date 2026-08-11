@@ -38,12 +38,14 @@ jq -n \
     --arg guestPublicKey "${guest_public}" \
     --arg clientPublicKey "${client_public}" \
     --arg guestAddress "10.77.0.1" \
+    --arg guestTunnelAddress "10.77.0.1/24" \
     --arg clientAddress "10.77.0.2" \
     '{
         guestPrivateKey: $guestPrivateKey,
         guestPublicKey: $guestPublicKey,
         clientPublicKey: $clientPublicKey,
         guestAddress: $guestAddress,
+        guestTunnelAddress: $guestTunnelAddress,
         clientAddress: $clientAddress
     }' > "${share_dir}/host-interop.json"
 
