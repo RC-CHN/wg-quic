@@ -2,11 +2,50 @@ package armorbind
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/fec"
 )
+
+func TestWGQ1WireGoldenVector(t *testing.T) {
+	packet := goldenHex(t, "010203040506070809")
+	frames, err := fragmentPacketSized(packet, 0x0102030405060708, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 3 {
+		t.Fatalf("fragment count = %d, want 3", len(frames))
+	}
+
+	// WGQ1 v1, packet ID 0x0102030405060708, fragment 2 of 3,
+	// total datagram length 9, followed by the final three payload bytes.
+	want := goldenHex(t, "574751310101020304050607080002000300000009070809")
+	if !bytes.Equal(frames[2], want) {
+		t.Fatalf("WGQ1 wire bytes = %x, want %x", frames[2], want)
+	}
+
+	got, err := parseFragment(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.packetID != 0x0102030405060708 || got.index != 2 || got.count != 3 || got.total != 9 {
+		t.Fatalf("parsed WGQ1 header = %#v", got)
+	}
+	if !bytes.Equal(got.data, goldenHex(t, "070809")) {
+		t.Fatalf("parsed WGQ1 payload = %x", got.data)
+	}
+}
+
+func goldenHex(t testing.TB, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
+}
 
 func TestFragmentReassembly(t *testing.T) {
 	packet := make([]byte, 4097)

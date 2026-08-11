@@ -2,6 +2,7 @@ package obfs
 
 import (
 	"bytes"
+	"encoding/hex"
 	"net"
 	"net/netip"
 	"syscall"
@@ -19,6 +20,58 @@ type quicUDPCapabilities interface {
 }
 
 var _ quicUDPCapabilities = (*SalamanderConn)(nil)
+
+func TestSalamanderWireGoldenVector(t *testing.T) {
+	privateA := goldenHex(t, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	publicA := goldenHex(t, "8f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f")
+	privateB := goldenHex(t, "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
+	publicB := goldenHex(t, "358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254")
+	psk := goldenHex(t, "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf")
+	wantKey := goldenHex(t, "a5432c4f3449673fc9be625ff0881346cbf1b4172ba6378661e84a9ab2a34ecc")
+
+	keyA, err := DeriveWireGuardKey(privateA, publicB, psk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := DeriveWireGuardKey(privateB, publicA, psk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(keyA[:], wantKey) || keyB != keyA {
+		t.Fatalf("Salamander derived keys = %x / %x, want %x", keyA, keyB, wantKey)
+	}
+
+	salt := goldenHex(t, "0102030405060708")
+	wantHint := goldenHex(t, "f71ea486b3282427")
+	wantStream := goldenHex(t, "a0d422732a082a7e9f143eb0dc1cd157eb3619b074ec6a6e3cdc14686d25fe8f")
+	if got := packetHint(keyA, salt); !bytes.Equal(got[:], wantHint) {
+		t.Fatalf("Salamander packet hint = %x, want %x", got, wantHint)
+	}
+	if got := packetStream(keyA, salt); !bytes.Equal(got[:], wantStream) {
+		t.Fatalf("Salamander packet stream = %x, want %x", got, wantStream)
+	}
+
+	plain := goldenHex(t, "c000000001080102030405060708")
+	encoded := goldenHex(t, "0102030405060708f71ea486b328242760d422732b002b7c9c103bb6db14")
+	output := make([]byte, len(plain))
+	connection := &SalamanderConn{keys: []Key{keyA}}
+	n, selected, ok := connection.decode(encoded, output)
+	if !ok || n != len(plain) || selected != keyA {
+		t.Fatalf("decode golden packet: ok=%v n=%d key=%x", ok, n, selected)
+	}
+	if !bytes.Equal(output, plain) {
+		t.Fatalf("decoded Salamander payload = %x, want %x", output, plain)
+	}
+}
+
+func goldenHex(t testing.TB, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
+}
 
 func TestWireGuardKeyDerivationIsSymmetric(t *testing.T) {
 	privateA := bytes.Repeat([]byte{0x11}, 32)

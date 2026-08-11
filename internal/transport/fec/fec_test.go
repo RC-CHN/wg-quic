@@ -2,9 +2,90 @@ package fec
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 	"time"
 )
+
+func TestWGQFWireGoldenVectors(t *testing.T) {
+	t.Run("data", func(t *testing.T) {
+		packet := packet{
+			kind:    KindData,
+			epoch:   0x1234,
+			groupID: 0x0102030405060708,
+			index:   2,
+			payload: goldenHex(t, "0016574751310101020304050607080000000100000001aa"),
+		}
+		// WGQF v1 data packet. The payload starts with a two-byte source-frame
+		// length (22), followed by a complete one-byte-payload WGQ1 frame.
+		want := goldenHex(t, "5747514601001234010203040506070800020000000000180016574751310101020304050607080000000100000001aa")
+		got := marshalPacket(packet)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("WGQF data wire bytes = %x, want %x", got, want)
+		}
+
+		parsed, handled, err := parsePacket(want)
+		if err != nil || !handled {
+			t.Fatalf("parse golden data: handled=%v err=%v", handled, err)
+		}
+		if parsed.kind != KindData || parsed.epoch != 0x1234 || parsed.groupID != 0x0102030405060708 ||
+			parsed.index != 2 || parsed.k != 0 || parsed.r != 0 {
+			t.Fatalf("parsed WGQF data header = %#v", parsed)
+		}
+		if !bytes.Equal(parsed.payload, goldenHex(t, "0016574751310101020304050607080000000100000001aa")) {
+			t.Fatalf("parsed WGQF data payload = %x", parsed.payload)
+		}
+
+		result, err := NewDecoder().Handle(time.Unix(0, 0), want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantFrame := goldenHex(t, "574751310101020304050607080000000100000001aa")
+		if !result.Handled || len(result.Frames) != 1 || !bytes.Equal(result.Frames[0], wantFrame) {
+			t.Fatalf("decoded WGQF data frames = %x", result.Frames)
+		}
+	})
+
+	t.Run("feedback", func(t *testing.T) {
+		feedback := Feedback{
+			Epoch: 0xabcd, GroupID: 0x1020304050607080,
+			Missing: 3, Total: 8, Recovered: 2,
+		}
+		// WGQF v1 feedback carries missing/total/recovered in the common
+		// index/k/r fields and has no payload.
+		want := goldenHex(t, "574751460103abcd10203040506070800003000800020000")
+		got := MarshalFeedback(feedback)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("WGQF feedback wire bytes = %x, want %x", got, want)
+		}
+
+		parsed, handled, err := parsePacket(want)
+		if err != nil || !handled {
+			t.Fatalf("parse golden feedback: handled=%v err=%v", handled, err)
+		}
+		if parsed.kind != KindFeedback || parsed.epoch != feedback.Epoch || parsed.groupID != feedback.GroupID ||
+			parsed.index != feedback.Missing || parsed.k != feedback.Total || parsed.r != feedback.Recovered || len(parsed.payload) != 0 {
+			t.Fatalf("parsed WGQF feedback header = %#v", parsed)
+		}
+
+		result, err := NewDecoder().Handle(time.Unix(0, 0), want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Handled || result.ObservedFeedback == nil || *result.ObservedFeedback != feedback {
+			t.Fatalf("decoded WGQF feedback = %#v", result.ObservedFeedback)
+		}
+	})
+}
+
+func goldenHex(t testing.TB, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
+}
 
 func TestSystematicDeliveryAndRecovery(t *testing.T) {
 	controller := NewController()

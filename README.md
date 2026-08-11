@@ -78,10 +78,10 @@ combinations, and supports asymmetric custom links, built-in
 LAN/Wi-Fi/cellular/satellite profiles, runtime link changes, outer-path
 baselines, per-interval controller sampling, protocol signature drop/police
 controls, and FEC/QUIC/CPU/wire counters. See
-[`tests/benchmark/README.md`](tests/benchmark/README.md). The product goals,
-success metrics, current limitations, and candidate transport changes for
-degraded links are recorded in
-[`docs/DEGRADED-LINK-DESIGN.md`](docs/DEGRADED-LINK-DESIGN.md).
+[`tests/benchmark/README.md`](tests/benchmark/README.md). The implemented wire
+format, versioning, security boundaries, local adaptive policy, product goals,
+and current limitations are recorded in
+[`docs/WG-QUIC-PROTOCOL.md`](docs/WG-QUIC-PROTOCOL.md).
 
 The container test leaves the host route table and DNS untouched. It creates
 isolated privileged nodes with separate Linux network namespaces and real TUN
