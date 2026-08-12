@@ -41,14 +41,20 @@ type fakeRouteLeaser struct {
 }
 
 type fakeRouteLease struct {
-	parent        *fakeRouteLeaser
-	address       netip.Addr
-	released      bool
-	releaseCalls  int
-	releaseErrors []error
-	refreshCalls  int
-	refreshResult bool
-	refreshError  error
+	parent           *fakeRouteLeaser
+	address          netip.Addr
+	released         bool
+	releaseCalls     int
+	releaseErrors    []error
+	refreshCalls     int
+	refreshResult    bool
+	refreshError     error
+	refreshResponses []fakeRouteRefresh
+}
+
+type fakeRouteRefresh struct {
+	changed bool
+	err     error
 }
 
 func (l *fakeRouteLeaser) AcquireEndpointRoute(_ context.Context, address netip.Addr) (RouteLease, error) {
@@ -77,6 +83,11 @@ func (l *fakeRouteLease) Refresh(context.Context) (bool, error) {
 	l.parent.mu.Lock()
 	defer l.parent.mu.Unlock()
 	l.refreshCalls++
+	if len(l.refreshResponses) != 0 {
+		response := l.refreshResponses[0]
+		l.refreshResponses = l.refreshResponses[1:]
+		return response.changed, response.err
+	}
 	return l.refreshResult, l.refreshError
 }
 
@@ -94,11 +105,12 @@ func (l *fakeRouteLease) Release(context.Context) error {
 }
 
 type fakeCoreControl struct {
-	mu          sync.Mutex
-	updates     []PeerUpdate
-	waitError   map[netip.AddrPort]error
-	activated   bool
-	redialPeers []string
+	mu           sync.Mutex
+	updates      []PeerUpdate
+	waitError    map[netip.AddrPort]error
+	activated    bool
+	redialPeers  []string
+	redialErrors []error
 }
 
 func (c *fakeCoreControl) SetPeerEndpoint(_ context.Context, update PeerUpdate) error {
@@ -116,8 +128,13 @@ func (c *fakeCoreControl) WaitPeerReady(_ context.Context, update PeerUpdate) er
 
 func (c *fakeCoreControl) RedialPeer(_ context.Context, publicKey string) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.redialPeers = append(c.redialPeers, publicKey)
-	c.mu.Unlock()
+	if len(c.redialErrors) != 0 {
+		err := c.redialErrors[0]
+		c.redialErrors = c.redialErrors[1:]
+		return err
+	}
 	return nil
 }
 
@@ -422,7 +439,7 @@ func TestSupervisorRedialsPeerAfterOuterRouteChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes.changes <- struct{}{}
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		core.mu.Lock()
 		redialed := slices.Contains(core.redialPeers, "peer")
@@ -452,5 +469,140 @@ func TestSupervisorRedialsPeerAfterOuterRouteChanges(t *testing.T) {
 	}
 	if err := supervisor.Close(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSupervisorRetriesTransientRouteRefreshAfterNetworkChange(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.10")
+	resolver := &fakeResolver{responses: map[string][]Resolution{
+		"peer.example": {{Addresses: []netip.Addr{address}, RefreshAfter: time.Hour}},
+	}}
+	routes := &fakeRouteLeaser{changes: make(chan struct{}, 1)}
+	core := &fakeCoreControl{}
+	supervisor := testSupervisor(t, resolver, routes, core, "peer.example:443")
+	supervisor.options.NetworkDebounce = time.Millisecond
+	supervisor.options.RetryMin = time.Millisecond
+	supervisor.options.RetryMax = time.Millisecond
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	routes.leases[0].refreshResponses = []fakeRouteRefresh{
+		{err: errors.New("new default route is not ready")},
+		{changed: true},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	routes.changes <- struct{}{}
+	waitForSupervisorCondition(t, "route refresh retry", func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.redialPeers) == 1
+	})
+	routes.mu.Lock()
+	refreshCalls := routes.leases[0].refreshCalls
+	routes.mu.Unlock()
+	if refreshCalls != 2 {
+		t.Fatalf("route refresh calls = %d, want initial failure plus retry", refreshCalls)
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorRetriesPendingRedialWithoutAnotherRouteChange(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.10")
+	resolver := &fakeResolver{responses: map[string][]Resolution{}}
+	routes := &fakeRouteLeaser{changes: make(chan struct{}, 1)}
+	core := &fakeCoreControl{redialErrors: []error{
+		errors.New("core is still activating"),
+	}}
+	supervisor := testSupervisor(t, resolver, routes, core, address.String()+":443")
+	supervisor.options.NetworkDebounce = time.Millisecond
+	supervisor.options.RetryMin = time.Millisecond
+	supervisor.options.RetryMax = time.Millisecond
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	routes.leases[0].refreshResponses = []fakeRouteRefresh{{changed: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	routes.changes <- struct{}{}
+	waitForSupervisorCondition(t, "pending transport redial retry", func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.redialPeers) == 2
+	})
+	routes.mu.Lock()
+	refreshCalls := routes.leases[0].refreshCalls
+	routes.mu.Unlock()
+	if refreshCalls != 2 {
+		t.Fatalf("route refresh calls = %d, want retry after redial failure", refreshCalls)
+	}
+	supervisor.opMu.Lock()
+	pending := supervisor.peers["peer"].routeRedialPending
+	supervisor.opMu.Unlock()
+	if pending {
+		t.Fatal("successful retry retained pending route redial state")
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorNewNetworkEventInterruptsRouteRetryBackoff(t *testing.T) {
+	address := netip.MustParseAddr("192.0.2.10")
+	resolver := &fakeResolver{responses: map[string][]Resolution{}}
+	routes := &fakeRouteLeaser{changes: make(chan struct{}, 1)}
+	core := &fakeCoreControl{}
+	supervisor := testSupervisor(t, resolver, routes, core, address.String()+":443")
+	supervisor.options.NetworkDebounce = time.Millisecond
+	supervisor.options.RetryMin = time.Hour
+	supervisor.options.RetryMax = time.Hour
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	routes.leases[0].refreshResponses = []fakeRouteRefresh{
+		{err: errors.New("default route disappeared")},
+		{changed: true},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	routes.changes <- struct{}{}
+	waitForSupervisorCondition(t, "first failed route refresh", func() bool {
+		routes.mu.Lock()
+		defer routes.mu.Unlock()
+		return routes.leases[0].refreshCalls == 1
+	})
+
+	// The one-hour retry timer must be interrupted by the notification that
+	// the replacement interface and default route are now ready.
+	routes.changes <- struct{}{}
+	waitForSupervisorCondition(t, "network event to interrupt route backoff", func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.redialPeers) == 1
+	})
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForSupervisorCondition(t *testing.T, description string, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for !ready() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

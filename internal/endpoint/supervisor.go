@@ -42,15 +42,16 @@ type Supervisor struct {
 }
 
 type peerState struct {
-	spec         PeerSpec
-	host         string
-	port         uint16
-	address      netip.Addr
-	dynamic      bool
-	active       netip.AddrPort
-	generation   uint64
-	lease        RouteLease
-	refreshAfter time.Duration
+	spec               PeerSpec
+	host               string
+	port               uint16
+	address            netip.Addr
+	dynamic            bool
+	active             netip.AddrPort
+	generation         uint64
+	lease              RouteLease
+	routeRedialPending bool
+	refreshAfter       time.Duration
 }
 
 func NewSupervisor(
@@ -379,12 +380,16 @@ func (s *Supervisor) RefreshRoutes(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("refresh peer outer route: %w", err))
 			continue
 		}
-		if !changed {
+		if changed {
+			state.routeRedialPending = true
+		}
+		if !state.routeRedialPending {
 			continue
 		}
 		if err := s.core.RedialPeer(ctx, publicKey); err != nil {
 			errs = append(errs, fmt.Errorf("redial peer after outer route change: %w", err))
 		} else {
+			state.routeRedialPending = false
 			s.options.Logf(
 				"peer %s outer route changed; transport redial requested",
 				peerIdentifier(publicKey),
@@ -468,35 +473,86 @@ func (s *Supervisor) routeChangeLoop(ctx context.Context) {
 			}
 		}
 
-		timer := time.NewTimer(s.options.NetworkDebounce)
-	debounce:
+		if !s.debounceNetworkChanges(ctx, changes) {
+			return
+		}
+		failures := 0
 		for {
+			err := s.reconcileNetworkChange(ctx)
+			if err == nil || ctx.Err() != nil {
+				break
+			}
+			failures++
+			s.options.Logf(
+				"reconcile peer paths after network change (attempt %d): %v",
+				failures,
+				err,
+			)
+			delay := exponentialBackoff(
+				s.options.RetryMin,
+				s.options.RetryMax,
+				failures-1,
+			)
+			timer := time.NewTimer(s.options.Jitter(delay))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return
 			case _, ok := <-changes:
-				if !ok {
-					timer.Stop()
-					return
-				}
 				if !timer.Stop() {
 					<-timer.C
 				}
-				timer.Reset(s.options.NetworkDebounce)
+				if !ok {
+					return
+				}
+				if !s.debounceNetworkChanges(ctx, changes) {
+					return
+				}
+				failures = 0
 			case <-timer.C:
-				break debounce
-			}
-		}
-		if err := s.RefreshRoutes(ctx); err != nil && ctx.Err() == nil {
-			s.options.Logf("refresh endpoint routes after network change: %v", err)
-		}
-		for _, publicKey := range s.dynamicPeerKeys() {
-			if err := s.RefreshPeer(ctx, publicKey); err != nil && ctx.Err() == nil {
-				s.options.Logf("re-resolve peer endpoint after network change: %v", err)
 			}
 		}
 	}
+}
+
+// debounceNetworkChanges waits until the route notification stream has been
+// quiet for NetworkDebounce. One notification has already been consumed by
+// the caller.
+func (s *Supervisor) debounceNetworkChanges(
+	ctx context.Context,
+	changes <-chan struct{},
+) bool {
+	timer := time.NewTimer(s.options.NetworkDebounce)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-changes:
+			if !ok {
+				return false
+			}
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(s.options.NetworkDebounce)
+		case <-timer.C:
+			return true
+		}
+	}
+}
+
+func (s *Supervisor) reconcileNetworkChange(ctx context.Context) error {
+	var errs []error
+	if err := s.RefreshRoutes(ctx); err != nil {
+		errs = append(errs, err)
+	}
+	for _, publicKey := range s.dynamicPeerKeys() {
+		if err := s.RefreshPeer(ctx, publicKey); err != nil {
+			errs = append(errs, fmt.Errorf("re-resolve peer endpoint: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Supervisor) dynamicPeerKeys() []string {
