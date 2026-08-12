@@ -774,8 +774,10 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		select {
 		case queue <- packet:
 		case <-state.ctx.Done():
+			quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 			return net.ErrClosed
 		default:
+			quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 			b.stats.queueDrops.Add(1)
 			b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
 			return errors.New("wg-quic send queue is full")

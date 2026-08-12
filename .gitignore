@@ -10,3 +10,4 @@
 /tests/benchmark/.generated/
 /tests/benchmark/results/
 .rcoder/
+bind.test
