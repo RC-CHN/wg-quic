@@ -1,15 +1,39 @@
 package armorbind
 
 import (
+	"context"
 	"net/netip"
 	"sync"
+	"time"
 )
 
 type Endpoint struct {
-	owner   *Bind
-	addr    netip.AddrPort
-	mu      sync.Mutex
-	session *session
+	owner    *Bind
+	addr     netip.AddrPort
+	mu       sync.Mutex
+	session  *session
+	fallback *Endpoint
+
+	configured          bool
+	activated           bool
+	retired             bool
+	reconnectScheduled  bool
+	reconnectCancel     context.CancelFunc
+	reconnectGeneration uint64
+	consecutiveFailures uint32
+	reconnectAttempts   uint64
+	reconnectFailures   uint64
+	nextReconnect       time.Time
+}
+
+func (e *Endpoint) cancelReconnectLocked() {
+	if e.reconnectCancel != nil {
+		e.reconnectCancel()
+	}
+	e.reconnectGeneration++
+	e.reconnectScheduled = false
+	e.reconnectCancel = nil
+	e.nextReconnect = time.Time{}
 }
 
 func (e *Endpoint) ClearSrc()           {}

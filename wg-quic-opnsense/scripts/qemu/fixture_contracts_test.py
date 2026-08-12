@@ -105,6 +105,25 @@ class FixtureContractsTest(unittest.TestCase):
         self.assertEqual(classify("idle", 600, 0, now=1000), "stale")
         self.assertEqual(classify("idle", 0, 900, now=1000), "online")
 
+    def test_status_exposes_automatic_reconnect_progress(self):
+        show = self.read("net/wg-quic/src/opnsense/scripts/wg-quic/show.py")
+        controller = self.read(
+            "net/wg-quic/src/opnsense/mvc/app/controllers/OPNsense/"
+            "WireguardQuic/Api/ServiceController.php"
+        )
+        view = self.read(
+            "net/wg-quic/src/opnsense/mvc/app/views/OPNsense/"
+            "WireguardQuic/status.volt"
+        )
+
+        self.assertIn('"reconnect_attempts",', show)
+        self.assertIn('"reconnect_failures",', show)
+        self.assertIn('peer.get("next_reconnect", 0)', show)
+        self.assertIn("'next-reconnect'", controller)
+        self.assertIn('data-column-id="reconnect-attempts"', view)
+        self.assertIn('data-column-id="reconnect-failures"', view)
+        self.assertIn("row['next-reconnect-epoch']", view)
+
     def test_activity_preserves_direction_and_old_core_fallback(self):
         derive = STATUS_HELPER.derive_activity
 

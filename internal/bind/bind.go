@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"sync"
@@ -25,6 +26,10 @@ type Config struct {
 	HandshakeTimeout time.Duration
 	MaxIdleTimeout   time.Duration
 	KeepAlivePeriod  time.Duration
+	ReconnectMin     time.Duration
+	ReconnectMax     time.Duration
+	ReconnectStable  time.Duration
+	ReconnectJitter  func(time.Duration) time.Duration
 	CongestionMode   string
 	FECMode          string
 	FECDataShards    int
@@ -41,8 +46,17 @@ func DefaultConfig() Config {
 		HandshakeTimeout: 4 * time.Second,
 		MaxIdleTimeout:   15 * time.Second,
 		KeepAlivePeriod:  5 * time.Second,
+		ReconnectMin:     250 * time.Millisecond,
+		ReconnectMax:     30 * time.Second,
+		ReconnectStable:  10 * time.Second,
+		ReconnectJitter: func(value time.Duration) time.Duration {
+			return value * time.Duration(900+rand.IntN(201)) / 1000
+		},
 		CongestionMode:   "model",
-		FECMode:          "auto", FECDataShards: fec.DefaultDataShards, FECFlushDeadline: 2 * time.Millisecond, ObfsMode: "none",
+		FECMode:          "auto",
+		FECDataShards:    fec.DefaultDataShards,
+		FECFlushDeadline: 2 * time.Millisecond,
+		ObfsMode:         "none",
 	}
 }
 
@@ -65,21 +79,38 @@ type runState struct {
 	mu        sync.Mutex
 	sessions  map[uint64]*session
 	endpoints map[netip.AddrPort]*Endpoint
+	closing   bool
 
 	reassembly *reassembler
 	wg         sync.WaitGroup
 }
 
+func (s *runState) startWorker(worker func()) bool {
+	s.mu.Lock()
+	if s.closing || s.ctx.Err() != nil {
+		s.mu.Unlock()
+		return false
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		worker()
+	}()
+	return true
+}
+
 type Bind struct {
-	cfg          Config
-	mu           sync.Mutex
-	state        *runState
-	nextPacket   atomic.Uint64
-	nextSession  atomic.Uint64
-	mark         atomic.Uint32
-	stats        bindStats
-	obfsResolved map[netip.AddrPort]obfs.Key
-	obfsDynamic  map[netip.AddrPort]endpointKeyLease
+	cfg             Config
+	mu              sync.Mutex
+	state           *runState
+	sessionRestored func(netip.AddrPort)
+	nextPacket      atomic.Uint64
+	nextSession     atomic.Uint64
+	mark            atomic.Uint32
+	stats           bindStats
+	obfsResolved    map[netip.AddrPort]obfs.Key
+	obfsDynamic     map[netip.AddrPort]endpointKeyLease
 }
 
 type endpointKeyLease struct {
@@ -109,10 +140,17 @@ type bindStats struct {
 
 type EndpointSessionState string
 
+type EndpointReconnectStatus struct {
+	Attempts      uint64
+	Failures      uint64
+	NextReconnect int64
+}
+
 const (
-	EndpointSessionIdle        EndpointSessionState = "idle"
-	EndpointSessionDialing     EndpointSessionState = "dialing"
-	EndpointSessionEstablished EndpointSessionState = "established"
+	EndpointSessionIdle         EndpointSessionState = "idle"
+	EndpointSessionDialing      EndpointSessionState = "dialing"
+	EndpointSessionReconnecting EndpointSessionState = "reconnecting"
+	EndpointSessionEstablished  EndpointSessionState = "established"
 )
 
 func New(cfg Config) *Bind {
@@ -128,6 +166,18 @@ func New(cfg Config) *Bind {
 	}
 	if cfg.KeepAlivePeriod <= 0 {
 		cfg.KeepAlivePeriod = defaults.KeepAlivePeriod
+	}
+	if cfg.ReconnectMin <= 0 {
+		cfg.ReconnectMin = defaults.ReconnectMin
+	}
+	if cfg.ReconnectMax < cfg.ReconnectMin {
+		cfg.ReconnectMax = defaults.ReconnectMax
+	}
+	if cfg.ReconnectStable <= 0 {
+		cfg.ReconnectStable = defaults.ReconnectStable
+	}
+	if cfg.ReconnectJitter == nil {
+		cfg.ReconnectJitter = defaults.ReconnectJitter
 	}
 	if cfg.CongestionMode == "" || cfg.CongestionMode == "auto" {
 		cfg.CongestionMode = defaults.CongestionMode
@@ -161,6 +211,14 @@ func (b *Bind) eventf(format string, args ...any) {
 	if b.cfg.Eventf != nil {
 		b.cfg.Eventf(format, args...)
 	}
+}
+
+// SetSessionRestored installs the upper-layer hook run after an automatic
+// QUIC reconnect succeeds. It must be configured before Open.
+func (b *Bind) SetSessionRestored(callback func(netip.AddrPort)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sessionRestored = callback
 }
 
 func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
@@ -207,12 +265,13 @@ func (b *Bind) Close() error {
 	if state == nil {
 		return nil
 	}
-	state.cancel()
 	state.mu.Lock()
+	state.closing = true
 	for _, sess := range state.sessions {
 		sess.cancel()
 	}
 	state.mu.Unlock()
+	state.cancel()
 	carrierErr := state.carrier.Close()
 	state.wg.Wait()
 	stats := b.Stats()
@@ -342,6 +401,7 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 		return EndpointSessionIdle
 	}
 	state.mu.Lock()
+	configuredEndpoint := state.endpoints[endpoint]
 	sessions := make([]*session, 0, 1)
 	for _, candidate := range state.sessions {
 		remote := candidate.endpoint.addr
@@ -364,6 +424,40 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 		}
 		result = EndpointSessionDialing
 	}
+	if result == EndpointSessionIdle && configuredEndpoint != nil {
+		configuredEndpoint.mu.Lock()
+		reconnecting := configuredEndpoint.reconnectScheduled
+		configuredEndpoint.mu.Unlock()
+		if reconnecting {
+			return EndpointSessionReconnecting
+		}
+	}
+	return result
+}
+
+func (b *Bind) EndpointReconnectStatus(endpoint netip.AddrPort) EndpointReconnectStatus {
+	endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return EndpointReconnectStatus{}
+	}
+	state.mu.Lock()
+	ep := state.endpoints[endpoint]
+	state.mu.Unlock()
+	if ep == nil {
+		return EndpointReconnectStatus{}
+	}
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+	result := EndpointReconnectStatus{
+		Attempts: ep.reconnectAttempts,
+		Failures: ep.reconnectFailures,
+	}
+	if !ep.nextReconnect.IsZero() {
+		result.NextReconnect = ep.nextReconnect.Unix()
+	}
 	return result
 }
 
@@ -373,8 +467,9 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		return nil, fmt.Errorf("endpoint must be a numeric IP address: %w", err)
 	}
 	ep := &Endpoint{
-		owner: b,
-		addr:  addrPort,
+		owner:      b,
+		addr:       addrPort,
+		configured: true,
 	}
 	b.mu.Lock()
 	_, associated := b.obfsResolved[ep.addr]
@@ -384,6 +479,10 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		state.mu.Lock()
 		if existing := state.endpoints[ep.addr]; existing != nil {
 			ep = existing
+			ep.mu.Lock()
+			ep.configured = true
+			ep.retired = false
+			ep.mu.Unlock()
 		} else {
 			state.endpoints[ep.addr] = ep
 		}
@@ -458,11 +557,23 @@ func (b *Bind) RetireEndpoint(endpoint netip.AddrPort) {
 	ep := state.endpoints[endpoint]
 	delete(state.endpoints, endpoint)
 	state.mu.Unlock()
-	retireEndpointSession(ep)
+	if ep == nil {
+		return
+	}
+	ep.mu.Lock()
+	ep.retired = true
+	ep.activated = false
+	ep.cancelReconnectLocked()
+	session := ep.session
+	ep.session = nil
+	ep.mu.Unlock()
+	if session != nil {
+		session.cancel()
+	}
 }
 
 // RedialEndpoint closes the current configured session while retaining the
-// endpoint object. The next WireGuard send creates a fresh QUIC session.
+// endpoint object and immediately starts a fresh QUIC session.
 func (b *Bind) RedialEndpoint(endpoint netip.AddrPort) {
 	b.mu.Lock()
 	state := b.state
@@ -473,19 +584,154 @@ func (b *Bind) RedialEndpoint(endpoint netip.AddrPort) {
 	state.mu.Lock()
 	ep := state.endpoints[endpoint]
 	state.mu.Unlock()
-	retireEndpointSession(ep)
-}
-
-func retireEndpointSession(endpoint *Endpoint) {
-	if endpoint == nil {
+	if ep == nil {
 		return
 	}
-	endpoint.mu.Lock()
-	session := endpoint.session
-	endpoint.session = nil
-	endpoint.mu.Unlock()
+	ep.mu.Lock()
+	ep.cancelReconnectLocked()
+	session := ep.session
+	ep.session = nil
+	ep.mu.Unlock()
 	if session != nil {
 		session.cancel()
+	}
+	b.scheduleEndpointReconnect(state, ep, true)
+}
+
+func (b *Bind) scheduleEndpointReconnect(
+	state *runState,
+	ep *Endpoint,
+	immediate bool,
+) {
+	ep.mu.Lock()
+	if !ep.configured || !ep.activated || ep.retired ||
+		ep.session != nil || state.ctx.Err() != nil {
+		ep.mu.Unlock()
+		return
+	}
+	if ep.reconnectScheduled {
+		if !immediate {
+			ep.mu.Unlock()
+			return
+		}
+		ep.cancelReconnectLocked()
+	}
+	delay := time.Duration(0)
+	if !immediate && ep.consecutiveFailures > 0 {
+		delay = reconnectBackoff(
+			state.cfg.ReconnectMin,
+			state.cfg.ReconnectMax,
+			ep.consecutiveFailures-1,
+		)
+		delay = state.cfg.ReconnectJitter(delay)
+		if delay < 0 {
+			delay = 0
+		}
+	}
+	ctx, cancel := context.WithCancel(state.ctx)
+	ep.reconnectGeneration++
+	generation := ep.reconnectGeneration
+	ep.reconnectScheduled = true
+	ep.reconnectCancel = cancel
+	if delay > 0 {
+		ep.nextReconnect = time.Now().Add(delay)
+	} else {
+		ep.nextReconnect = time.Time{}
+	}
+	remote := ep.addr
+	ep.mu.Unlock()
+
+	started := state.startWorker(func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+
+		ep.mu.Lock()
+		if ep.reconnectGeneration != generation || !ep.reconnectScheduled {
+			ep.mu.Unlock()
+			return
+		}
+		ep.reconnectScheduled = false
+		ep.reconnectCancel = nil
+		ep.nextReconnect = time.Time{}
+		eligible := ep.configured && ep.activated && !ep.retired && ep.session == nil
+		ep.mu.Unlock()
+		if !eligible || state.ctx.Err() != nil {
+			return
+		}
+		if b.hasEstablishedSession(state, remote) {
+			return
+		}
+		if _, err := b.sessionForEndpoint(state, ep, true); err != nil && state.ctx.Err() == nil {
+			b.debugf("start maintained QUIC session: remote=%s error=%v", remote, err)
+		}
+	})
+	if started {
+		b.debugf("scheduled QUIC reconnect: remote=%s delay=%s", remote, delay)
+		return
+	}
+	ep.mu.Lock()
+	if ep.reconnectGeneration == generation {
+		ep.cancelReconnectLocked()
+	}
+	ep.mu.Unlock()
+}
+
+func reconnectBackoff(minimum, maximum time.Duration, exponent uint32) time.Duration {
+	value := minimum
+	for range exponent {
+		if value >= maximum/2 {
+			return maximum
+		}
+		value *= 2
+	}
+	return min(value, maximum)
+}
+
+func (b *Bind) hasEstablishedSession(state *runState, remote netip.AddrPort) bool {
+	state.mu.Lock()
+	sessions := make([]*session, 0, 1)
+	for _, candidate := range state.sessions {
+		if candidate.endpoint.addr == remote &&
+			!candidate.closed.Load() && candidate.ctx.Err() == nil {
+			sessions = append(sessions, candidate)
+		}
+	}
+	state.mu.Unlock()
+	for _, candidate := range sessions {
+		candidate.mu.Lock()
+		established := candidate.conn != nil
+		candidate.mu.Unlock()
+		if established {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bind) suspendConfiguredReconnect(state *runState, remote netip.AddrPort) {
+	state.mu.Lock()
+	ep := state.endpoints[remote]
+	state.mu.Unlock()
+	if ep == nil {
+		return
+	}
+	ep.mu.Lock()
+	ep.consecutiveFailures = 0
+	ep.cancelReconnectLocked()
+	ep.mu.Unlock()
+}
+
+func (b *Bind) resumeConfiguredReconnect(state *runState, remote netip.AddrPort) {
+	state.mu.Lock()
+	ep := state.endpoints[remote]
+	state.mu.Unlock()
+	if ep != nil {
+		b.scheduleEndpointReconnect(state, ep, true)
 	}
 }
 
@@ -500,7 +746,10 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 	if state == nil {
 		return net.ErrClosed
 	}
-	sess := b.sessionForEndpoint(state, ep)
+	sess, err := b.sessionForEndpoint(state, ep, false)
+	if err != nil {
+		return err
+	}
 	for _, buf := range bufs {
 		if len(buf) == 0 || len(buf) > maxDatagramSize {
 			return fmt.Errorf("invalid WireGuard datagram size %d", len(buf))
@@ -585,48 +834,93 @@ func (b *Bind) acceptLoop(state *runState) {
 		// side just selected. A connection-scoped endpoint also makes WireGuard
 		// replies use the exact authenticated path that delivered the packet.
 		ep := &Endpoint{owner: b, addr: remote}
-		sess := b.newSession(state, ep)
+		state.mu.Lock()
+		if state.closing || state.ctx.Err() != nil {
+			state.mu.Unlock()
+			qconn.CloseWithError("")
+			return
+		}
+		ep.fallback = state.endpoints[remote]
+		ep.mu.Lock()
+		sess := b.newSessionLocked(state, ep, false)
 		ep.session = sess
-		sess.setConn(qconn)
-		b.eventf("accepted QUIC session: session=%d remote=%s", sess.id, remote)
+		ep.mu.Unlock()
 		state.wg.Add(1)
+		state.mu.Unlock()
+		sess.setConn(qconn)
+		b.suspendConfiguredReconnect(state, remote)
+		b.eventf("accepted QUIC session: session=%d remote=%s", sess.id, remote)
 		go func() { defer state.wg.Done(); b.runSession(sess) }()
 	}
 }
 
-func (b *Bind) sessionForEndpoint(state *runState, ep *Endpoint) *session {
+func (b *Bind) sessionForEndpoint(
+	state *runState,
+	ep *Endpoint,
+	reconnectAttempt bool,
+) (*session, error) {
 	state.mu.Lock()
+	if state.closing || state.ctx.Err() != nil {
+		state.mu.Unlock()
+		return nil, net.ErrClosed
+	}
+	ep.mu.Lock()
+	if ep.session != nil && ep.session.state == state && !ep.session.closed.Load() {
+		sess := ep.session
+		ep.mu.Unlock()
+		state.mu.Unlock()
+		return sess, nil
+	}
+	if !ep.configured {
+		fallback := ep.fallback
+		ep.mu.Unlock()
+		state.mu.Unlock()
+		if fallback != nil {
+			return b.sessionForEndpoint(state, fallback, reconnectAttempt)
+		}
+		return nil, errors.New("cannot dial a connection-scoped peer endpoint")
+	}
+	if ep.retired {
+		ep.mu.Unlock()
+		state.mu.Unlock()
+		return nil, errors.New("cannot dial a retired peer endpoint")
+	}
 	if state.endpoints[ep.addr] == nil {
 		state.endpoints[ep.addr] = ep
 	}
-	state.mu.Unlock()
-	ep.mu.Lock()
-	defer ep.mu.Unlock()
-	if ep.session != nil && ep.session.state == state && !ep.session.closed.Load() {
-		return ep.session
-	}
-	sess := b.newSession(state, ep)
+	ep.activated = true
+	ep.cancelReconnectLocked()
+	sess := b.newSessionLocked(state, ep, reconnectAttempt)
 	ep.session = sess
+	if reconnectAttempt {
+		ep.reconnectAttempts++
+	}
 	state.wg.Add(1)
+	ep.mu.Unlock()
+	state.mu.Unlock()
 	go b.dialSession(sess)
-	return sess
+	return sess, nil
 }
 
-func (b *Bind) newSession(state *runState, ep *Endpoint) *session {
+// newSessionLocked constructs and registers a session while state.mu is held.
+// Callers use the state -> endpoint lock order shared with ParseEndpoint.
+func (b *Bind) newSessionLocked(
+	state *runState,
+	ep *Endpoint,
+	reconnectAttempt bool,
+) *session {
 	ctx, cancel := context.WithCancel(state.ctx)
 	sess := &session{
 		id: b.nextSession.Add(1), state: state, endpoint: ep, ctx: ctx, cancel: cancel,
 		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
 		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
-		control:  make(chan []byte, 64),
+		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
 		sess.fecEncoder = fec.NewEncoder(state.cfg.FECDataShards, fec.NewController())
 	}
-	state.mu.Lock()
 	state.sessions[sess.id] = sess
-	state.mu.Unlock()
 	b.stats.activeSessions.Add(1)
 	return sess
 }
@@ -638,13 +932,49 @@ func (b *Bind) dialSession(sess *session) {
 	defer cancel()
 	qconn, err := sess.state.carrier.Dial(ctx, sess.endpoint.addr)
 	if err != nil {
-		b.eventf("QUIC dial failed: session=%d remote=%s error=%v", sess.id, sess.endpoint.addr, err)
+		sess.endpoint.mu.Lock()
+		attempt := sess.endpoint.reconnectAttempts
+		if sess.endpoint.configured && sess.endpoint.session == sess {
+			sess.endpoint.consecutiveFailures++
+			if sess.reconnectAttempt {
+				sess.endpoint.reconnectFailures++
+			}
+		}
+		sess.endpoint.mu.Unlock()
+		if !sess.reconnectAttempt {
+			b.eventf(
+				"QUIC dial failed: session=%d remote=%s error=%v",
+				sess.id, sess.endpoint.addr, err,
+			)
+		} else if reportReconnectAttempt(attempt) {
+			b.eventf(
+				"QUIC reconnect failed: session=%d remote=%s attempt=%d error=%v",
+				sess.id, sess.endpoint.addr, attempt, err,
+			)
+		} else {
+			b.debugf(
+				"QUIC reconnect failed: session=%d remote=%s attempt=%d error=%v",
+				sess.id, sess.endpoint.addr, attempt, err,
+			)
+		}
 		sess.close()
 		return
 	}
 	sess.setConn(qconn)
 	b.eventf("QUIC session established: session=%d remote=%s", sess.id, sess.endpoint.addr)
+	if sess.reconnectAttempt {
+		b.mu.Lock()
+		restored := b.sessionRestored
+		b.mu.Unlock()
+		if restored != nil {
+			restored(sess.endpoint.addr)
+		}
+	}
 	b.runSession(sess)
+}
+
+func reportReconnectAttempt(attempt uint64) bool {
+	return attempt != 0 && attempt&(attempt-1) == 0
 }
 
 func (b *Bind) runSession(sess *session) {
@@ -668,9 +998,11 @@ type session struct {
 	control             chan []byte
 	mu                  sync.Mutex
 	conn                *quiccarrier.Connection
+	establishedAt       time.Time
 	readyOnce           sync.Once
 	closeOnce           sync.Once
 	closed              atomic.Bool
+	reconnectAttempt    bool
 	fecEncoder          *fec.Encoder
 	fecDecoder          *fec.Decoder
 	fecPathSampleFrames uint32
@@ -679,7 +1011,13 @@ type session struct {
 func (s *session) setConn(qconn *quiccarrier.Connection) {
 	s.mu.Lock()
 	s.conn = qconn
+	s.establishedAt = time.Now()
 	s.mu.Unlock()
+	s.endpoint.mu.Lock()
+	if s.endpoint.configured {
+		s.endpoint.nextReconnect = time.Time{}
+	}
+	s.endpoint.mu.Unlock()
 	s.readyOnce.Do(func() { close(s.ready) })
 }
 
@@ -688,6 +1026,7 @@ func (s *session) close() {
 		s.closed.Store(true)
 		s.cancel()
 		s.mu.Lock()
+		establishedAt := s.establishedAt
 		if s.conn != nil {
 			s.conn.CloseWithError("")
 		}
@@ -697,11 +1036,32 @@ func (s *session) close() {
 		s.state.mu.Unlock()
 		s.endpoint.owner.stats.activeSessions.Add(^uint64(0))
 		s.endpoint.mu.Lock()
-		if s.endpoint.session == s {
+		configured := s.endpoint.configured
+		current := s.endpoint.session == s
+		if current {
 			s.endpoint.session = nil
+			if configured && !establishedAt.IsZero() {
+				if time.Since(establishedAt) < s.state.cfg.ReconnectStable {
+					s.endpoint.consecutiveFailures++
+					if s.reconnectAttempt {
+						s.endpoint.reconnectFailures++
+					}
+				} else {
+					s.endpoint.consecutiveFailures = 0
+				}
+			}
 		}
 		s.endpoint.mu.Unlock()
-		s.endpoint.owner.eventf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
+		if !s.reconnectAttempt || !establishedAt.IsZero() {
+			s.endpoint.owner.eventf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
+		} else {
+			s.endpoint.owner.debugf("failed QUIC reconnect closed: session=%d remote=%s", s.id, s.endpoint.addr)
+		}
+		if configured {
+			s.endpoint.owner.scheduleEndpointReconnect(s.state, s.endpoint, false)
+		} else {
+			s.endpoint.owner.resumeConfiguredReconnect(s.state, s.endpoint.addr)
+		}
 	})
 }
 

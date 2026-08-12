@@ -82,6 +82,19 @@ func Show(name string, jsonOutput bool) error {
 				fmt.Printf("    endpoint: %s\n", peer.Endpoint)
 			}
 			fmt.Printf("    session: %s\n", peer.Session)
+			if peer.ReconnectAttempts != 0 || peer.ReconnectFailures != 0 {
+				fmt.Printf(
+					"    reconnect: %d attempts, %d failures\n",
+					peer.ReconnectAttempts,
+					peer.ReconnectFailures,
+				)
+			}
+			if peer.NextReconnect != 0 {
+				fmt.Printf(
+					"    next reconnect: %s\n",
+					time.Unix(peer.NextReconnect, 0).Format(time.RFC3339),
+				)
+			}
 			if peer.LatestHandshake != 0 {
 				fmt.Printf(
 					"    latest handshake: %s\n",

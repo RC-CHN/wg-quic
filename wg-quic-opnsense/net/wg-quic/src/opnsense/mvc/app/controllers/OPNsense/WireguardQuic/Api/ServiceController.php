@@ -56,7 +56,7 @@ class ServiceController extends ApiMutableServiceControllerBase
             $record['name'] = $descriptions[
                 $record['if'] . '-' . ($record['public-key'] ?? '')
             ] ?? '';
-            foreach (['latest-handshake', 'last-rx', 'last-tx', 'last-activity'] as $timestamp) {
+            foreach (['latest-handshake', 'last-rx', 'last-tx', 'last-activity', 'next-reconnect'] as $timestamp) {
                 if (!empty($record[$timestamp])) {
                     $record[$timestamp . '-age'] = max(0, time() - (int)$record[$timestamp]);
                     $record[$timestamp . '-epoch'] = date(

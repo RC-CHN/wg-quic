@@ -211,6 +211,8 @@ jq -e '
     | (.endpoint | length) > 0
         and (."last-activity-epoch" | length) > 0
         and (."latest-handshake-epoch" | length) > 0
+        and (."reconnect-attempts" | type == "number")
+        and (."reconnect-failures" | type == "number")
 ' /tmp/wg-quic-api-show.json >/dev/null
 curl -skf -u "${api_key}:${api_secret}" \
     "${api_url}/service/version" -o /tmp/wg-quic-api-version.json

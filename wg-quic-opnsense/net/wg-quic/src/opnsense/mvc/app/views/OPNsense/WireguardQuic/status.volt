@@ -30,6 +30,12 @@ $(document).ready(function() {
                         ? row['last-activity-epoch'] + ' (' + direction + ')'
                         : row['last-activity-epoch'];
                 },
+                session: function(column, row) {
+                    if (row.session === 'reconnecting' && row['next-reconnect-epoch']) {
+                        return row.session + ' (' + row['next-reconnect-epoch'] + ')';
+                    }
+                    return row.session || '';
+                },
                 status: function(column, row) {
                     if (row.type === 'interface' && row.status === 'up') {
                         return '<span class="fa fa-check-circle fa-fw text-success" data-toggle="tooltip" title="{{ lang._('Online') }}"></span>';
@@ -84,7 +90,9 @@ $(document).ready(function() {
                 <th data-column-id="name" data-type="string">{{ lang._('Name') }}</th>
                 <th data-column-id="endpoint" data-type="string">{{ lang._('Port / Current endpoint') }}</th>
                 <th data-column-id="allowed-ips" data-type="string">{{ lang._('Allowed IPs') }}</th>
-                <th data-column-id="session" data-type="string">{{ lang._('QUIC Session') }}</th>
+                <th data-column-id="session" data-formatter="session" data-type="string">{{ lang._('QUIC Session') }}</th>
+                <th data-column-id="reconnect-attempts" data-type="numeric">{{ lang._('Reconnect attempts') }}</th>
+                <th data-column-id="reconnect-failures" data-type="numeric">{{ lang._('Reconnect failures') }}</th>
                 <th data-column-id="last-activity-epoch" data-formatter="activity" data-type="string">{{ lang._('Last activity') }}</th>
                 <th data-column-id="latest-handshake-epoch" data-formatter="epoch" data-type="string">{{ lang._('Latest handshake') }}</th>
                 <th data-column-id="transfer-tx" data-formatter="bytes" data-type="numeric">{{ lang._('Sent') }}</th>

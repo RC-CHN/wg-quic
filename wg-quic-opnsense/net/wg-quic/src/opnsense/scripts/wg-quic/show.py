@@ -66,6 +66,9 @@ def configured_records():
                 "last-tx": 0,
                 "last-activity": 0,
                 "last-activity-direction": "",
+                "reconnect-attempts": 0,
+                "reconnect-failures": 0,
+                "next-reconnect": 0,
                 "transfer-rx": 0,
                 "transfer-tx": 0,
                 "persistent-keepalive": text(client, "keepalive"),
@@ -174,6 +177,15 @@ for interface, records in sorted(configured.items()):
         peer_record["last-tx"] = last_tx
         peer_record["last-activity"] = last_activity
         peer_record["last-activity-direction"] = last_direction
+        peer_record["reconnect-attempts"] = peer.get(
+            "reconnect_attempts",
+            0,
+        )
+        peer_record["reconnect-failures"] = peer.get(
+            "reconnect_failures",
+            0,
+        )
+        peer_record["next-reconnect"] = peer.get("next_reconnect", 0)
         peer_record["transfer-tx"] = peer.get("transfer_tx", 0)
         peer_record["transfer-rx"] = peer.get("transfer_rx", 0)
         peer_record["peer-status"] = classify_peer_status(

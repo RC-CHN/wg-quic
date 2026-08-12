@@ -148,10 +148,40 @@ $compose exec -T a iptables -t nat -D POSTROUTING \
 $compose exec -T a ip address delete 172.29.0.22/24 dev eth0
 wait_ping a 10.77.0.2 "" "tunnel did not migrate back to its original outer address"
 
-# A peer process disappearing destroys all QUIC state. WireGuard's retry
-# traffic must cause ArmorBind to establish a fresh session without restarting
-# the surviving peer.
+# A peer process disappearing destroys QUIC and WireGuard state. Neither side
+# has PersistentKeepalive in this fixture. Require the surviving side to
+# restore QUIC and proactively complete a newer WireGuard handshake while no
+# inner traffic is being generated.
+before_restart_status=$($compose exec -T a wg-quic show wg0 --json)
+before_restart_attempts=$(echo "$before_restart_status" |
+	sed -n 's/.*"reconnect_attempts": \([0-9][0-9]*\).*/\1/p')
+before_restart_handshake=$(echo "$before_restart_status" |
+	sed -n 's/.*"latest_handshake": \([0-9][0-9]*\).*/\1/p')
+: "${before_restart_attempts:=0}"
+: "${before_restart_handshake:=0}"
 $compose restart b
+attempt=0
+while :; do
+	after_restart_status=$($compose exec -T a wg-quic show wg0 --json)
+	after_restart_session=$(echo "$after_restart_status" |
+		sed -n 's/.*"session": "\([^"]*\)".*/\1/p')
+	after_restart_attempts=$(echo "$after_restart_status" |
+		sed -n 's/.*"reconnect_attempts": \([0-9][0-9]*\).*/\1/p')
+	after_restart_handshake=$(echo "$after_restart_status" |
+		sed -n 's/.*"latest_handshake": \([0-9][0-9]*\).*/\1/p')
+	: "${after_restart_attempts:=0}"
+	: "${after_restart_handshake:=0}"
+	if [ "$after_restart_session" = established ] &&
+		[ "$after_restart_attempts" -gt "$before_restart_attempts" ] &&
+		[ "$after_restart_handshake" -gt "$before_restart_handshake" ]; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	if [ "$attempt" -ge 45 ]; then
+		fail_with_logs "tunnel did not autonomously recover while idle after peer restart"
+	fi
+	sleep 1
+done
 wait_ping a 10.77.0.2 "" "tunnel did not recover after peer process restart"
 wait_ping a fd00:77::2 6 "IPv6 tunnel did not recover after peer process restart"
 $compose exec -T b ping -c 3 -W 2 10.77.0.1

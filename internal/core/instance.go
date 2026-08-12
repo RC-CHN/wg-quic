@@ -128,6 +128,7 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 		peers:       make(map[string]*peerRuntime, len(cfg.Peers)),
 		peerOrder:   make([]string, 0, len(cfg.Peers)),
 	}
+	bind.SetSessionRestored(instance.restorePeersAfterTransportReconnect)
 	for _, peer := range cfg.Peers {
 		runtime := &peerRuntime{
 			status: control.PeerStatus{PublicKey: peer.PublicKey},
@@ -320,6 +321,10 @@ func (i *Instance) status() control.Status {
 		peer.Session = string(armorbind.EndpointSessionIdle)
 		if endpoint, err := peerendpoint.ParseNumeric(peer.Endpoint); err == nil {
 			peer.Session = string(i.bind.EndpointSessionState(endpoint))
+			reconnect := i.bind.EndpointReconnectStatus(endpoint)
+			peer.ReconnectAttempts = reconnect.Attempts
+			peer.ReconnectFailures = reconnect.Failures
+			peer.NextReconnect = reconnect.NextReconnect
 		}
 		peers = append(peers, peer)
 	}
@@ -445,4 +450,38 @@ func (i *Instance) redialPeer(publicKey string) error {
 	}
 	i.bind.RedialEndpoint(endpoint)
 	return nil
+}
+
+func (i *Instance) restorePeersAfterTransportReconnect(endpoint netip.AddrPort) {
+	i.endpointMu.RLock()
+	publicKeys := make([]string, 0, 1)
+	for _, publicKey := range i.peerOrder {
+		peer := i.peers[publicKey]
+		configured, err := peerendpoint.ParseNumeric(peer.status.Endpoint)
+		if err == nil && configured == endpoint {
+			publicKeys = append(publicKeys, publicKey)
+		}
+	}
+	i.endpointMu.RUnlock()
+
+	for _, publicKey := range publicKeys {
+		// An authenticated packet received on a simultaneously accepted QUIC
+		// connection may have taught WireGuard a connection-scoped endpoint.
+		// Restore the maintained endpoint before probing the fresh transport.
+		if err := wgdevice.SetPeerEndpoint(i.device, publicKey, endpoint); err != nil {
+			log.Printf(
+				"wg-quic transport %s: restore peer endpoint after reconnect: %v",
+				i.name,
+				err,
+			)
+			continue
+		}
+		if err := wgdevice.ProbePeer(i.device, publicKey); err != nil {
+			log.Printf(
+				"wg-quic transport %s: probe peer after reconnect: %v",
+				i.name,
+				err,
+			)
+		}
+	}
 }
