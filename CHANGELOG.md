@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v0.2.3 - 2026-08-12
+
+Windows custom-install trust and MSI hardening release.
+
+- Accepted per-machine Windows installations outside Program Files only when
+  the LocalSystem manager, fixed `bin\wg-quic.exe` child, and their containing
+  directories have trusted owners, non-writable ACLs, no reparse points, and
+  single-link executable identities pinned during runtime staging.
+- Secured custom MSI installation roots and `bin` directories before service
+  startup with protected, inheritable SDDL: LocalSystem and Administrators
+  retain full access while ordinary users receive read and execute access.
+- Preserved the stricter portable-executable boundary and surfaced the
+  validation reason for each rejected core candidate instead of returning only
+  a generic trusted-core lookup error.
+- Added a native Windows installed-MSI lifecycle rooted at a custom system-drive
+  path containing spaces, covering ACLs, the LocalSystem broker, desktop
+  import/check/up/down, Wintun, routes, DNS, upgrade, uninstall, and cleanup.
+
 ## v0.2.2 - 2026-08-11
 
 Windows install-once privilege and service-recovery release.

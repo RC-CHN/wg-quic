@@ -1,6 +1,6 @@
 [package]
 name = "wg-quic-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "Desktop shell for wg-quic-quick"
 authors = ["RC-CHN"]
 edition = "2021"

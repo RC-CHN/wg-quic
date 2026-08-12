@@ -9,7 +9,7 @@ source_dir="${WG_QUIC_SOURCE_DIR:-${monorepo_dir}}"
 output_dir="${project_dir}/net/wg-quic/src/sbin"
 core_output_file="${output_dir}/wg-quic"
 quick_output_file="${output_dir}/wg-quic-quick"
-version="${WG_QUIC_VERSION:-0.2.2-opnsense}"
+version="${WG_QUIC_VERSION:-0.2.3-opnsense}"
 
 : "${GOCACHE:=/tmp/wg-quic-go-build-cache}"
 : "${GOMODCACHE:=$(go env GOMODCACHE)}"

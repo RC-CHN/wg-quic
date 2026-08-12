@@ -208,9 +208,9 @@ Windows archives include the matching official Wintun DLL and its license.
 To build and validate the same six archives locally:
 
 ```sh
-make release-artifacts VERSION=0.2.2
+make release-artifacts VERSION=0.2.3
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.2.2-linux-amd64.tar.gz linux amd64 0.2.2
+  dist/wg-quic-v0.2.3-linux-amd64.tar.gz linux amd64 0.2.3
 ```
 
 The implementation and tests are under active development. See the local

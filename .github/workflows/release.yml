@@ -9,7 +9,7 @@ on:
       version:
         description: Release version to validate without publishing
         required: true
-        default: "0.2.2"
+        default: "0.2.3"
 
 permissions:
   contents: read
