@@ -22,7 +22,19 @@ test('management service fragment uses the broker executable and escapes its abs
   const fragment = renderManagementServiceFragment(source);
 
   assert.match(fragment, /<DirectoryRef Id="INSTALLDIR">/);
+  assert.match(
+    fragment,
+    /<Directory Id="WgQuicSecuredBinDirectory" Name="bin" \/>/,
+  );
   assert.match(fragment, /<Component Id="WgQuicManagementService"/);
+  assert.match(
+    fragment,
+    /<CreateFolder>\s*<PermissionEx Id="WgQuicInstallRootPermissions" Sddl="O:SYG:SYD:PAI\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;GRGX;;;BU\)" \/>\s*<\/CreateFolder>/,
+  );
+  assert.match(
+    fragment,
+    /<CreateFolder Directory="WgQuicSecuredBinDirectory">\s*<PermissionEx Id="WgQuicInstallBinPermissions" Sddl="O:SYG:SYD:PAI\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;GRGX;;;BU\)" \/>\s*<\/CreateFolder>/,
+  );
   assert.match(
     fragment,
     /Source="[^"]*wg-quic &amp; &quot;&lt;tools&gt;[^"]*"/,
