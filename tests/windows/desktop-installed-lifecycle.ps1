@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string] $Installer
+    [string] $Installer,
+    [string] $InstallRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,7 +92,16 @@ if (-not $principal.IsInRole(
 }
 
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
-$installRoot = Join-Path $env:ProgramFiles "wg-quic"
+$defaultInstallRoot = Join-Path $env:ProgramFiles "wg-quic"
+$installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
+    $defaultInstallRoot
+}
+else {
+    if (-not [IO.Path]::IsPathRooted($InstallRoot)) {
+        throw "the requested install root must be absolute: $InstallRoot"
+    }
+    [IO.Path]::GetFullPath($InstallRoot)
+}
 $managerServiceName = "wg-quic-manager"
 $manager = Join-Path $installRoot "wg-quic-manager.exe"
 $fixtureRoot = Join-Path $env:TEMP "wg-quic-desktop-install-$PID"
@@ -154,6 +164,7 @@ try {
         -ArgumentList @(
             "/i",
             "`"$installerPath`"",
+            "INSTALLDIR=`"$installRoot`"",
             "/qn",
             "/norestart",
             "/l*v",
@@ -236,10 +247,17 @@ try {
     )
 
     $unsafeSids = @("S-1-5-32-545", "S-1-5-11", "S-1-1-0")
-    foreach ($protectedExecutable in @($desktop, $quick, $manager)) {
-        $executableAcl = Get-Acl -LiteralPath $protectedExecutable
+    $installedBin = Split-Path -Parent $quick
+    foreach ($protectedInstallObject in @(
+        $installRoot,
+        $installedBin,
+        $desktop,
+        $quick,
+        $manager
+    )) {
+        $installObjectAcl = Get-Acl -LiteralPath $protectedInstallObject
         $unsafeRule = @(
-            $executableAcl.GetAccessRules(
+            $installObjectAcl.GetAccessRules(
                 $true,
                 $true,
                 [Security.Principal.SecurityIdentifier]
@@ -256,10 +274,10 @@ try {
             }
         )
         if ($unsafeRule.Count -ne 0) {
-            throw "$protectedExecutable is writable by unelevated users"
+            throw "$protectedInstallObject is writable by unelevated users"
         }
     }
-    Write-Host "installed executable ACLs are protected"
+    Write-Host "installed directory and executable ACLs are protected"
 
     $administratorBrokerStatus = $null
     Wait-For -Description "the Administrator management broker status" `

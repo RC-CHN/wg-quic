@@ -161,8 +161,22 @@ jobs:
           if ($null -eq $installer) {
             throw "missing Tauri WiX MSI"
           }
-          ./tests/windows/desktop-installed-lifecycle.ps1 `
-            -Installer $installer.FullName
+          $customInstallRoot = Join-Path $env:SystemDrive (
+            "wg-quic CI custom install " +
+            "${{ github.run_id }}-${{ github.run_attempt }}"
+          )
+          if (Test-Path -LiteralPath $customInstallRoot) {
+            throw "custom install fixture already exists: $customInstallRoot"
+          }
+          try {
+            ./tests/windows/desktop-installed-lifecycle.ps1 `
+              -Installer $installer.FullName `
+              -InstallRoot $customInstallRoot
+          }
+          finally {
+            Remove-Item -LiteralPath $customInstallRoot -Recurse -Force `
+              -ErrorAction SilentlyContinue
+          }
       - name: Privileged Wintun and Windows service lifecycle
         if: runner.os == 'Windows'
         shell: pwsh
