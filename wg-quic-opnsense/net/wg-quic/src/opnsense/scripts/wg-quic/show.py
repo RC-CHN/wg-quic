@@ -4,9 +4,10 @@
 
 import json
 import subprocess
-import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from wg_quic_status import classify_peer_status, derive_activity
 
 
 WG_QUIC = "/usr/local/sbin/wg-quic"
@@ -61,6 +62,10 @@ def configured_records():
                 "endpoint": endpoint(host, port),
                 "allowed-ips": text(client, "tunneladdress"),
                 "latest-handshake": 0,
+                "last-rx": 0,
+                "last-tx": 0,
+                "last-activity": 0,
+                "last-activity-direction": "",
                 "transfer-rx": 0,
                 "transfer-tx": 0,
                 "persistent-keepalive": text(client, "keepalive"),
@@ -160,21 +165,22 @@ for interface, records in sorted(configured.items()):
         peer = runtime_peers.get(peer_record["public-key"], {})
         session = peer.get("session", "idle")
         latest_handshake = peer.get("latest_handshake", 0)
+        last_rx = peer.get("last_rx", 0)
+        last_tx = peer.get("last_tx", 0)
+        last_activity, last_direction = derive_activity(peer)
         peer_record["session"] = session
         peer_record["latest-handshake"] = latest_handshake
+        peer_record["last-rx"] = last_rx
+        peer_record["last-tx"] = last_tx
+        peer_record["last-activity"] = last_activity
+        peer_record["last-activity-direction"] = last_direction
         peer_record["transfer-tx"] = peer.get("transfer_tx", 0)
         peer_record["transfer-rx"] = peer.get("transfer_rx", 0)
-        if session == "established":
-            peer_record["peer-status"] = "online"
-        elif session == "dialing":
-            peer_record["peer-status"] = "stale"
-        elif latest_handshake:
-            age = max(0, int(time.time()) - int(latest_handshake))
-            peer_record["peer-status"] = (
-                "online" if age <= 300 else "stale"
-            )
-        else:
-            peer_record["peer-status"] = "offline"
+        peer_record["peer-status"] = classify_peer_status(
+            session,
+            last_rx,
+            latest_handshake,
+        )
         if peer.get("endpoint"):
             peer_record["endpoint"] = peer["endpoint"]
         if (

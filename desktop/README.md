@@ -10,7 +10,7 @@ implementation.
 | Validate | `wg-quic-quick check NAME` |
 | Start | `wg-quic-quick up NAME` |
 | Stop | `wg-quic-quick down NAME` |
-| Runtime status | `wg-quic show NAME --json` |
+| Runtime status | `wg-quic-quick show NAME --json` |
 
 The webview receives only fixed Tauri commands for those operations. Native
 processes are started with argument arrays; neither the frontend nor the Rust

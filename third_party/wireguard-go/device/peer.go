@@ -24,6 +24,8 @@ type Peer struct {
 	txBytes           atomic.Uint64  // bytes send to peer (endpoint)
 	rxBytes           atomic.Uint64  // bytes received from peer
 	lastHandshakeNano atomic.Int64   // nano seconds since epoch
+	lastRxUnix        atomic.Int64   // latest authenticated receive, seconds since epoch
+	lastTxUnix        atomic.Int64   // latest successful authenticated send, seconds since epoch
 
 	endpoint struct {
 		sync.Mutex
@@ -140,6 +142,7 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 			totalLen += uint64(len(b))
 		}
 		peer.txBytes.Add(totalLen)
+		peer.lastTxUnix.Store(time.Now().Unix())
 	}
 	return err
 }

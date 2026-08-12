@@ -308,6 +308,12 @@ func (i *Instance) status() control.Status {
 				peer.Endpoint = runtime.Endpoint
 			}
 			peer.LatestHandshake = runtime.LatestHandshake
+			peer.LastRx = runtime.LastRx
+			peer.LastTx = runtime.LastTx
+			peer.LastActivity, peer.LastDirection = latestPeerActivity(
+				runtime.LastRx,
+				runtime.LastTx,
+			)
 			peer.TransferRx = runtime.TransferRx
 			peer.TransferTx = runtime.TransferTx
 		}
@@ -323,6 +329,16 @@ func (i *Instance) status() control.Status {
 		Carrier: i.cfg.Transport.Carrier, FECMode: i.cfg.Transport.FEC,
 		ObfsMode: i.cfg.Transport.Obfs, Peers: peers, Stats: i.Stats(),
 	}
+}
+
+func latestPeerActivity(lastRx, lastTx int64) (int64, string) {
+	if lastRx == 0 && lastTx == 0 {
+		return 0, ""
+	}
+	if lastRx >= lastTx {
+		return lastRx, "received"
+	}
+	return lastTx, "sent"
 }
 
 func addRuntimeStats(stats *telemetry.Stats) {

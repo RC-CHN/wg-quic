@@ -115,6 +115,12 @@ fi
 grep -Eq '"interface"[[:space:]]*:[[:space:]]*"'"$tunnel_name"'"' \
     <<<"$status"
 grep -Eq '"state"[[:space:]]*:[[:space:]]*"up"' <<<"$status"
+quick_status=$($quick show "$tunnel_name" --json)
+grep -Eq '"interface"[[:space:]]*:[[:space:]]*"'"$tunnel_name"'"' \
+    <<<"$quick_status"
+grep -Eq '"state"[[:space:]]*:[[:space:]]*"up"' <<<"$quick_status"
+grep -Eq '"endpoint"[[:space:]]*:[[:space:]]*"192\.0\.2\.[0-9]+:62000"' \
+    <<<"$quick_status"
 [[ $(stat -c '%a' "$primary_socket") == 600 ]]
 [[ $(stat -c '%a' "$status_socket") == 666 ]]
 [[ $(stat -c '%a' "$(dirname -- "$primary_socket")") == 755 ]]

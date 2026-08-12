@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/RC-CHN/wg-quic/internal/app"
 	"github.com/RC-CHN/wg-quic/internal/quick"
 )
 
@@ -92,6 +93,12 @@ func run(args []string) error {
 		}
 		fmt.Println("configuration is valid for wg-quic-quick")
 		return nil
+	case "show":
+		name, jsonOutput, err := app.ParseShowArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		return app.Show(name, jsonOutput)
 	case "up":
 		if len(args) != 2 {
 			return usage()
@@ -231,6 +238,7 @@ func usage() error {
   wg-quic-quick run INTERFACE|CONFIG [--name INTERFACE]
   wg-quic-quick debug INTERFACE|CONFIG [--name INTERFACE]
   wg-quic-quick check INTERFACE|CONFIG
+  wg-quic-quick show [INTERFACE] [--json]
   wg-quic-quick up INTERFACE
   wg-quic-quick down INTERFACE [--repair]
   wg-quic-quick version`)

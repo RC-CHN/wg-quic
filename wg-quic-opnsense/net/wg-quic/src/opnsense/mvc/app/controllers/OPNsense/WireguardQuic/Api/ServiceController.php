@@ -56,20 +56,25 @@ class ServiceController extends ApiMutableServiceControllerBase
             $record['name'] = $descriptions[
                 $record['if'] . '-' . ($record['public-key'] ?? '')
             ] ?? '';
-            if (!empty($record['latest-handshake'])) {
-                $record['latest-handshake-age'] = time() - (int)$record['latest-handshake'];
-                $record['latest-handshake-epoch'] = date('Y-m-d H:i:s', (int)$record['latest-handshake']);
-            } else {
-                $record['latest-handshake-age'] = null;
-                $record['latest-handshake-epoch'] = null;
+            foreach (['latest-handshake', 'last-rx', 'last-tx', 'last-activity'] as $timestamp) {
+                if (!empty($record[$timestamp])) {
+                    $record[$timestamp . '-age'] = max(0, time() - (int)$record[$timestamp]);
+                    $record[$timestamp . '-epoch'] = date(
+                        'Y-m-d H:i:s',
+                        (int)$record[$timestamp]
+                    );
+                } else {
+                    $record[$timestamp . '-age'] = null;
+                    $record[$timestamp . '-epoch'] = null;
+                }
             }
 
             if (
                 $record['type'] === 'peer'
                 && in_array($record['peer-status'] ?? '', ['online', 'stale', 'offline'])
             ) {
-                // wg-quic combines current QUIC session state with each
-                // peer's WireGuard handshake timestamp.
+                // The backend has already classified authenticated activity;
+                // keep that result distinct from the QUIC transport session.
             } elseif ($record['type'] === 'peer' && !is_null($record['latest-handshake-age'])) {
                 $record['peer-status'] = $record['latest-handshake-age'] <= 300
                     ? 'online'

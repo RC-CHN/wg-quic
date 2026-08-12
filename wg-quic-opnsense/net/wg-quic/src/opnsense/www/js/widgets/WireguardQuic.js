@@ -53,6 +53,10 @@ export default class WireguardQuic extends BaseTableWidget {
                 if: row.if,
                 name: row.name,
                 allowedIps: row['allowed-ips'] || this.translations.notavailable,
+                endpoint: row.endpoint || this.translations.notavailable,
+                lastActivity: row['last-activity-epoch']
+                    ? `${row['last-activity-epoch']} (${this.activityDirection(row)})`
+                    : this.translations.notavailable,
                 rx: row['transfer-rx']
                     ? this._formatBytes(row['transfer-rx'])
                     : this.translations.notavailable,
@@ -114,6 +118,8 @@ export default class WireguardQuic extends BaseTableWidget {
                 </div>`;
             const detail = `
                 <div><span>${tunnel.allowedIps}</span></div>
+                <div><span>${this.translations.endpoint}: ${tunnel.endpoint}</span></div>
+                <div><span>${this.translations.lastactivity}: ${tunnel.lastActivity}</span></div>
                 <div>
                     <span>${tunnel.session}</span>
                     <div style="padding-bottom: 10px;">
@@ -131,5 +137,15 @@ export default class WireguardQuic extends BaseTableWidget {
             );
         });
         $('.wg-quic-interface').tooltip({container: 'body'});
+    }
+
+    activityDirection(row) {
+        if (row['last-activity-direction'] === 'received') {
+            return this.translations.received;
+        }
+        if (row['last-activity-direction'] === 'sent') {
+            return this.translations.sent;
+        }
+        return this.translations.unknown;
     }
 }

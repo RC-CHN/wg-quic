@@ -116,6 +116,8 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 
 			sendf("last_handshake_time_sec=%d", secs)
 			sendf("last_handshake_time_nsec=%d", nano)
+			sendf("last_authenticated_rx_time_sec=%d", peer.lastRxUnix.Load())
+			sendf("last_authenticated_tx_time_sec=%d", peer.lastTxUnix.Load())
 			sendf("tx_bytes=%d", peer.txBytes.Load())
 			sendf("rx_bytes=%d", peer.rxBytes.Load())
 			sendf("persistent_keepalive_interval=%d", peer.persistentKeepaliveInterval.Load())

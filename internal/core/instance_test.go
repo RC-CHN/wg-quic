@@ -90,6 +90,33 @@ func TestInstanceLifecycleNeedsOnlyDeviceHost(t *testing.T) {
 	}
 }
 
+func TestLatestPeerActivityPreservesDirection(t *testing.T) {
+	for _, test := range []struct {
+		lastRx        int64
+		lastTx        int64
+		wantTimestamp int64
+		wantDirection string
+	}{
+		{lastRx: 0, lastTx: 0},
+		{lastRx: 10, lastTx: 9, wantTimestamp: 10, wantDirection: "received"},
+		{lastRx: 10, lastTx: 10, wantTimestamp: 10, wantDirection: "received"},
+		{lastRx: 9, lastTx: 10, wantTimestamp: 10, wantDirection: "sent"},
+	} {
+		gotTimestamp, gotDirection := latestPeerActivity(test.lastRx, test.lastTx)
+		if gotTimestamp != test.wantTimestamp || gotDirection != test.wantDirection {
+			t.Fatalf(
+				"latestPeerActivity(%d, %d) = (%d, %q), want (%d, %q)",
+				test.lastRx,
+				test.lastTx,
+				gotTimestamp,
+				gotDirection,
+				test.wantTimestamp,
+				test.wantDirection,
+			)
+		}
+	}
+}
+
 func TestInstancePreparedStateDefersNetworkActivation(t *testing.T) {
 	host := &testDeviceHost{
 		tunnel:      tuntest.NewChannelTUN(),

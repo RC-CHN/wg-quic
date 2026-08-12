@@ -13,6 +13,7 @@ import base64
 import ipaddress
 import json
 import os
+import re
 import time
 import urllib.request
 from pathlib import Path
@@ -335,6 +336,13 @@ def verify(browser, arguments):
         )
     if "B" not in status["text"]:
         raise RuntimeError(f"generated peer has no visible transfer counters: {status}")
+    if not re.search(r"(?:\d{1,3}\.){3}\d{1,3}:\d+", status["text"]):
+        raise RuntimeError(f"generated peer has no current endpoint: {status}")
+    if not re.search(r"\((?:received|sent)\)", status["text"]) or not re.search(
+        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+        status["text"],
+    ):
+        raise RuntimeError(f"generated peer has no recent activity time: {status}")
     browser.screenshot(arguments.output_dir / "webui-client-status.png")
 
     browser.navigate("/ui/core/dashboard")
@@ -356,6 +364,13 @@ def verify(browser, arguments):
     )
     if widget is None or "text-success" not in widget["html"]:
         raise RuntimeError(f"generated peer is not online in Dashboard: {widget}")
+    for label in ("Current endpoint", "Last activity"):
+        if label not in widget["text"]:
+            raise RuntimeError(
+                f"Dashboard is missing {label!r} for generated peer: {widget}"
+            )
+    if not re.search(r"\((?:received|sent)\)", widget["text"]):
+        raise RuntimeError(f"Dashboard is missing activity direction: {widget}")
     browser.screenshot(arguments.output_dir / "webui-client-dashboard.png")
 
     browser.navigate("/ui/wireguardquic/log")

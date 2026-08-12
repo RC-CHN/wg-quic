@@ -161,6 +161,7 @@ func (peer *Peer) timersAnyAuthenticatedPacketSent() {
 
 /* Should be called after any type of authenticated packet is received -- keepalive, data, or handshake. */
 func (peer *Peer) timersAnyAuthenticatedPacketReceived() {
+	peer.lastRxUnix.Store(time.Now().Unix())
 	if peer.timersActive() {
 		peer.timers.newHandshake.Del()
 	}

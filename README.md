@@ -98,7 +98,7 @@ interfaces are isolated from OPNsense's built-in WireGuard integration.
 
 The Windows and Linux desktop shell lives in
 [`desktop/`](desktop/README.md). It is a constrained Tauri webview over the
-existing `wg-quic-quick check/up/down` and `wg-quic show --json` commands;
+existing `wg-quic-quick check/up/down/show` command boundary;
 there is no separate desktop tunnel implementation or configuration model.
 
 Check a configuration without changing the host:
@@ -117,9 +117,14 @@ For service-managed Linux installations:
 
 ```sh
 sudo wg-quic-quick up wg0
-wg-quic show wg0
+wg-quic-quick show wg0
 sudo wg-quic-quick down wg0
 ```
+
+`wg-quic show` remains available as the lower-level equivalent. Both `show`
+commands expose the current numeric peer endpoint, QUIC session state, latest
+WireGuard handshake, authenticated receive/send activity, and transfer totals;
+add `--json` for the shared structured status schema.
 
 `wg-quic run` is the deliberately lower-level core entry point. It creates and
 starts the userspace device but does not assign addresses, install routes,

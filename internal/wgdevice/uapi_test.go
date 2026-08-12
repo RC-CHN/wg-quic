@@ -20,6 +20,8 @@ func TestParsePeerStatusesReturnsOnlyRuntimePeerState(t *testing.T) {
 		"endpoint=[2001:db8::10]:443",
 		"last_handshake_time_sec=1785922000",
 		"last_handshake_time_nsec=123",
+		"last_authenticated_rx_time_sec=1785922001",
+		"last_authenticated_tx_time_sec=1785922002",
 		"tx_bytes=4567",
 		"rx_bytes=8910",
 		"persistent_keepalive_interval=25",
@@ -41,6 +43,8 @@ func TestParsePeerStatusesReturnsOnlyRuntimePeerState(t *testing.T) {
 	}
 	if status.Endpoint != "[2001:db8::10]:443" ||
 		status.LatestHandshake != 1785922000 ||
+		status.LastRx != 1785922001 ||
+		status.LastTx != 1785922002 ||
 		status.TransferTx != 4567 ||
 		status.TransferRx != 8910 {
 		t.Fatalf("peer status = %#v", status)

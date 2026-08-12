@@ -320,6 +320,22 @@ PersistentKeepalive = 1
     if ([int] $status.listen_port -ne $listenPort) {
         throw "runtime listen port $($status.listen_port), expected $listenPort"
     }
+    $quickStatus = (Invoke-Native -FilePath $quick -Arguments @(
+        "show", $TunnelName, "--json"
+    )) | ConvertFrom-Json
+    if (
+        $quickStatus.interface -ne $status.interface -or
+        $quickStatus.state -ne $status.state -or
+        [int] $quickStatus.listen_port -ne [int] $status.listen_port
+    ) {
+        throw (
+            "wg-quic-quick show disagrees with wg-quic show: " +
+            ($quickStatus | ConvertTo-Json -Depth 8)
+        )
+    }
+    if ($quickStatus.peers[0].endpoint -ne "${endpointAddress}:$endpointPort") {
+        throw "wg-quic-quick show returned the wrong current endpoint"
+    }
 
     $discoveredStatuses = @(
         (Invoke-Native -FilePath $core -Arguments @("show", "--json")) |

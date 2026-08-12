@@ -15,6 +15,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -201,6 +202,26 @@ func TestTwoDevicePing(t *testing.T) {
 	t.Run("ping 1.0.0.2", func(t *testing.T) {
 		pair.Send(t, Pong, nil)
 	})
+}
+
+func TestPeerActivityTimestampsFollowAuthenticatedTraffic(t *testing.T) {
+	goroutineLeakCheck(t)
+	pair := genTestPair(t, false)
+	pair.Send(t, Ping, nil)
+	for index := range pair {
+		status, err := pair[index].dev.IpcGet()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{
+			"last_authenticated_rx_time_sec",
+			"last_authenticated_tx_time_sec",
+		} {
+			if !strings.Contains(status, key+"=") || strings.Contains(status, key+"=0\n") {
+				t.Fatalf("device %d has no %s after authenticated traffic:\n%s", index, key, status)
+			}
+		}
+	}
 }
 
 func TestUpDown(t *testing.T) {

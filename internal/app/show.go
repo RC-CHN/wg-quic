@@ -88,6 +88,25 @@ func Show(name string, jsonOutput bool) error {
 					time.Unix(peer.LatestHandshake, 0).Format(time.RFC3339),
 				)
 			}
+			if peer.LastActivity != 0 {
+				fmt.Printf(
+					"    last activity: %s (%s)\n",
+					time.Unix(peer.LastActivity, 0).Format(time.RFC3339),
+					peer.LastDirection,
+				)
+			}
+			if peer.LastRx != 0 {
+				fmt.Printf(
+					"    last authenticated receive: %s\n",
+					time.Unix(peer.LastRx, 0).Format(time.RFC3339),
+				)
+			}
+			if peer.LastTx != 0 {
+				fmt.Printf(
+					"    last successful send: %s\n",
+					time.Unix(peer.LastTx, 0).Format(time.RFC3339),
+				)
+			}
 			fmt.Printf(
 				"    transfer: tx %d bytes, rx %d bytes\n",
 				peer.TransferTx,

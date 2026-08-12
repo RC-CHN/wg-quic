@@ -161,6 +161,16 @@ while [ "${attempt}" -lt 30 ]; do
 done
 test "${session0}" = established
 test "${session1}" = established
+/usr/local/sbin/wg-quic-quick show quic0 --json \
+    > /tmp/wg-quic-quick-status.json
+jq -e '
+    .interface == "quic0"
+    and .peers[0].last_rx > 0
+    and .peers[0].last_tx > 0
+    and .peers[0].last_activity > 0
+    and (.peers[0].last_activity_direction == "received"
+        or .peers[0].last_activity_direction == "sent")
+' /tmp/wg-quic-quick-status.json >/dev/null
 /usr/local/sbin/wg-quic show quic0
 /usr/local/sbin/wg-quic show quic1
 configctl wireguardquic show
@@ -195,6 +205,13 @@ grep -q '"status":"running"' /tmp/wg-quic-api-status.json
 curl -skf -u "${api_key}:${api_secret}" \
     "${api_url}/service/show" -o /tmp/wg-quic-api-show.json
 grep -q '"peer-status":"online"' /tmp/wg-quic-api-show.json
+jq -e '
+    .rows[]
+    | select(.type == "peer")
+    | (.endpoint | length) > 0
+        and (."last-activity-epoch" | length) > 0
+        and (."latest-handshake-epoch" | length) > 0
+' /tmp/wg-quic-api-show.json >/dev/null
 curl -skf -u "${api_key}:${api_secret}" \
     "${api_url}/service/version" -o /tmp/wg-quic-api-version.json
 grep -q '"status":"ok"' /tmp/wg-quic-api-version.json

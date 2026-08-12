@@ -158,6 +158,25 @@ $compose exec -T b ping -c 3 -W 2 10.77.0.1
 
 status=$($compose exec -T a wg-quic show wg0 --json)
 echo "$status"
+quick_status=$($compose exec -T a wg-quic-quick show wg0 --json)
+echo "$quick_status"
+if ! echo "$quick_status" | grep -Eq '"endpoint": "[^"]+:[0-9]+"'; then
+	echo "wg-quic-quick status did not expose the current peer endpoint" >&2
+	exit 1
+fi
+for field in last_rx last_tx last_activity; do
+	value=$(echo "$quick_status" |
+		sed -n 's/.*"'"$field"'": \([0-9][0-9]*\).*/\1/p')
+	if [ -z "$value" ] || [ "$value" -eq 0 ]; then
+		echo "wg-quic-quick status did not expose nonzero $field" >&2
+		exit 1
+	fi
+done
+if ! echo "$quick_status" |
+	grep -Eq '"last_activity_direction": "(received|sent)"'; then
+	echo "wg-quic-quick status did not expose the activity direction" >&2
+	exit 1
+fi
 obfs=$(echo "$status" | sed -n 's/.*"obfs_mode": "\([^"]*\)".*/\1/p')
 if [ "$obfs" != "salamander" ]; then
 	echo "standard WireGuard config did not enable key-derived Salamander obfuscation" >&2

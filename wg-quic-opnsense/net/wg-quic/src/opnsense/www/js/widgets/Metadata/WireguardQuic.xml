@@ -14,6 +14,11 @@
             <stale>Stale</stale>
             <offline>Offline</offline>
             <notavailable>N/A</notavailable>
+            <endpoint>Current endpoint</endpoint>
+            <lastactivity>Last activity</lastactivity>
+            <received>received</received>
+            <sent>sent</sent>
+            <unknown>unknown</unknown>
         </translations>
     </WireguardQuic>
 </metadata>

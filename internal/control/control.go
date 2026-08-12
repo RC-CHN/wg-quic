@@ -31,6 +31,10 @@ type PeerStatus struct {
 	Generation      uint64 `json:"generation"`
 	Session         string `json:"session"`
 	LatestHandshake int64  `json:"latest_handshake,omitempty"`
+	LastRx          int64  `json:"last_rx,omitempty"`
+	LastTx          int64  `json:"last_tx,omitempty"`
+	LastActivity    int64  `json:"last_activity,omitempty"`
+	LastDirection   string `json:"last_activity_direction,omitempty"`
 	TransferRx      uint64 `json:"transfer_rx,omitempty"`
 	TransferTx      uint64 `json:"transfer_tx,omitempty"`
 }

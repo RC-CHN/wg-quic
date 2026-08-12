@@ -18,6 +18,8 @@ type PeerStatus struct {
 	PublicKey       string
 	Endpoint        string
 	LatestHandshake int64
+	LastRx          int64
+	LastTx          int64
 	TransferRx      uint64
 	TransferTx      uint64
 }
@@ -97,6 +99,18 @@ func parsePeerStatuses(uapi string) (map[string]PeerStatus, error) {
 				return nil, fmt.Errorf("parse WireGuard peer handshake time: %w", err)
 			}
 			current.LatestHandshake = seconds
+		case "last_authenticated_rx_time_sec":
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("parse WireGuard peer receive time: %w", err)
+			}
+			current.LastRx = seconds
+		case "last_authenticated_tx_time_sec":
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("parse WireGuard peer transmit time: %w", err)
+			}
+			current.LastTx = seconds
 		case "rx_bytes":
 			bytes, err := strconv.ParseUint(value, 10, 64)
 			if err != nil {
