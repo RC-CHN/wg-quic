@@ -11,6 +11,7 @@ share_dir="${state_dir}/shared"
 core="${tools_dir}/wg-quic"
 quick="${tools_dir}/wg-quic-quick"
 netstack_client="${tools_dir}/wg-quic-netstack-client"
+: "${WG_QUIC_HOST_INTEROP_ENDPOINT:=127.0.0.1:52820}"
 
 : "${GOCACHE:=/tmp/wg-quic-host-interop-build-cache}"
 : "${GOMODCACHE:=$(go env GOMODCACHE)}"
@@ -62,9 +63,8 @@ jq -n \
     printf '\n%s\n' '[Peer]'
     printf '%s\n' '# wg-quic: peer.fec-latency = balanced'
     printf 'PublicKey = %s\n' "${guest_public}"
-    printf '%s\n' 'Endpoint = 127.0.0.1:52820'
+    printf 'Endpoint = %s\n' "${WG_QUIC_HOST_INTEROP_ENDPOINT}"
     printf '%s\n' 'AllowedIPs = 10.77.0.1/32'
-    printf '%s\n' 'PersistentKeepalive = 1'
 } > "${state_dir}/host-interop.conf"
 
 chmod 0600 "${share_dir}/host-interop.json" "${state_dir}/host-interop.conf"

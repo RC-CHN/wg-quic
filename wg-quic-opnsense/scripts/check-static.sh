@@ -16,6 +16,8 @@ find "${plugin_dir}" -name '*.py' -type f -print0 |
 env PYTHONPYCACHEPREFIX=/tmp/wg-quic-pycache \
     python3 -m py_compile "${project_dir}/scripts/qemu/browser-connect.py"
 env PYTHONPYCACHEPREFIX=/tmp/wg-quic-pycache \
+    python3 -m py_compile "${project_dir}/scripts/qemu/outer_rebind_bridge.py"
+env PYTHONPYCACHEPREFIX=/tmp/wg-quic-pycache \
     python3 -m unittest discover \
         -s "${project_dir}/scripts/qemu" \
         -p '*_test.py'
@@ -49,9 +51,11 @@ shellcheck "${project_dir}/scripts/collect-artifacts.sh"
 shellcheck "${project_dir}/scripts/verify-artifacts.sh"
 shellcheck "${project_dir}/scripts/verify-package.sh"
 shellcheck "${project_dir}/scripts/qemu/guest-validate.sh"
+shellcheck "${project_dir}/scripts/qemu/guest-outer-rebind.sh"
 shellcheck "${project_dir}/scripts/qemu/prepare-host-interop.sh"
 shellcheck "${project_dir}/scripts/qemu/prepare-shared.sh"
 shellcheck "${project_dir}/scripts/qemu/run-host-interop.sh"
+shellcheck "${project_dir}/scripts/qemu/run-outer-rebind.sh"
 shellcheck "${project_dir}/scripts/qemu/run_host_interop_test.sh"
 
 test ! -e "${project_dir}/cmd"

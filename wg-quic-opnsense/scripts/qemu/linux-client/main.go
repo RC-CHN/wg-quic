@@ -10,11 +10,13 @@ import (
 	"math/rand/v2"
 	"net/netip"
 	"os"
+	"sync/atomic"
 	"time"
 
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	"github.com/RC-CHN/wg-quic/internal/wgdevice"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun/netstack"
 	"golang.org/x/net/icmp"
@@ -94,7 +96,88 @@ func holdAfterSuccess(hold time.Duration, sleep func(time.Duration)) error {
 	return nil
 }
 
-func run(configPath string, hold time.Duration) error {
+type runOptions struct {
+	hold                       time.Duration
+	recheckAfter               time.Duration
+	requireAutonomousReconnect bool
+	recoveryTimeout            time.Duration
+}
+
+type peerStatus struct {
+	handshake int64
+	txBytes   int64
+	rxBytes   int64
+}
+
+func readPeerStatus(wireguard *device.Device) (peerStatus, error) {
+	status, err := wireguard.IpcGet()
+	if err != nil {
+		return peerStatus{}, err
+	}
+	result := peerStatus{}
+	result.handshake, err = fieldValue(status, "last_handshake_time_sec")
+	if err != nil {
+		return peerStatus{}, err
+	}
+	result.txBytes, err = fieldValue(status, "tx_bytes")
+	if err != nil {
+		return peerStatus{}, err
+	}
+	result.rxBytes, err = fieldValue(status, "rx_bytes")
+	if err != nil {
+		return peerStatus{}, err
+	}
+	return result, nil
+}
+
+func ping(network *netstack.Net, address string) (time.Duration, error) {
+	socket, err := network.Dial("ping4", address)
+	if err != nil {
+		return 0, err
+	}
+	defer socket.Close()
+
+	echo := icmp.Echo{
+		ID:   os.Getpid() & 0xffff,
+		Seq:  rand.IntN(1 << 16),
+		Data: []byte("wg-quic Linux host to OPNsense interoperability"),
+	}
+	request, err := (&icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Body: &echo,
+	}).Marshal(nil)
+	if err != nil {
+		return 0, err
+	}
+
+	buffer := make([]byte, 1500)
+	for attempt := 0; attempt < 5; attempt++ {
+		started := time.Now()
+		if _, err := socket.Write(request); err != nil {
+			return 0, err
+		}
+		if err := socket.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			return 0, err
+		}
+		size, readErr := socket.Read(buffer)
+		if readErr != nil {
+			continue
+		}
+		reply, err := icmp.ParseMessage(1, buffer[:size])
+		if err != nil {
+			return 0, err
+		}
+		replyEcho, ok := reply.Body.(*icmp.Echo)
+		if !ok || reply.Type != ipv4.ICMPTypeEchoReply ||
+			replyEcho.Seq != echo.Seq || !bytes.Equal(replyEcho.Data, echo.Data) {
+			return 0, fmt.Errorf("unexpected ICMP reply: %#v", reply)
+		}
+		return time.Since(started), nil
+	}
+	return 0, errors.New("no ICMP reply was received")
+}
+
+func run(configPath string, options runOptions) error {
 	cfg, err := config.ParseFile(configPath)
 	if err != nil {
 		return err
@@ -107,6 +190,19 @@ func run(configPath string, hold time.Duration) error {
 		return err
 	}
 	bind := armorbind.New(bindConfig)
+	var activeDevice atomic.Pointer[device.Device]
+	var restoredSessions atomic.Uint64
+	bind.SetSessionRestored(func(netip.AddrPort) {
+		wireguard := activeDevice.Load()
+		if wireguard == nil {
+			return
+		}
+		if err := wgdevice.ProbePeer(wireguard, cfg.Peers[0].PublicKey); err != nil {
+			log.Printf("probe peer after automatic reconnect: %v", err)
+			return
+		}
+		restoredSessions.Add(1)
+	})
 	if len(bindConfig.ObfsKeys) == 1 {
 		release, err := bind.AcquireEndpointKey(endpoint, bindConfig.ObfsKeys[0])
 		if err != nil {
@@ -128,6 +224,7 @@ func run(configPath string, hold time.Duration) error {
 		bind,
 		device.NewLogger(device.LogLevelError, "wg-quic-netstack: "),
 	)
+	activeDevice.Store(wireguard)
 	defer wireguard.Close()
 
 	uapi, err := cfg.UAPI()
@@ -142,80 +239,29 @@ func run(configPath string, hold time.Duration) error {
 	}
 
 	pingAddress := cfg.Peers[0].AllowedIPs[0].Addr().String()
-	socket, err := network.Dial("ping4", pingAddress)
+	latency, err := ping(network, pingAddress)
 	if err != nil {
-		return err
-	}
-	defer socket.Close()
-
-	echo := icmp.Echo{
-		ID:   os.Getpid() & 0xffff,
-		Seq:  rand.IntN(1 << 16),
-		Data: []byte("wg-quic Linux host to OPNsense interoperability"),
-	}
-	request, err := (&icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
-		Body: &echo,
-	}).Marshal(nil)
-	if err != nil {
-		return err
-	}
-
-	buffer := make([]byte, 1500)
-	var latency time.Duration
-	var reply *icmp.Message
-	for attempt := 0; attempt < 5; attempt++ {
-		started := time.Now()
-		if _, err := socket.Write(request); err != nil {
-			return err
-		}
-		if err := socket.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			return err
-		}
-		size, readErr := socket.Read(buffer)
-		if readErr != nil {
-			continue
-		}
-		reply, err = icmp.ParseMessage(1, buffer[:size])
-		if err != nil {
-			return err
-		}
-		latency = time.Since(started)
-		break
-	}
-	if reply == nil {
 		status, _ := wireguard.IpcGet()
 		handshake, _ := fieldValue(status, "last_handshake_time_sec")
 		txBytes, _ := fieldValue(status, "tx_bytes")
 		rxBytes, _ := fieldValue(status, "rx_bytes")
 		return fmt.Errorf(
-			"no ICMP reply was received: handshake=%d tx=%d rx=%d transport=%+v",
+			"initial ICMP failed: %w: handshake=%d tx=%d rx=%d transport=%+v",
+			err,
 			handshake,
 			txBytes,
 			rxBytes,
 			bind.Stats(),
 		)
 	}
-	replyEcho, ok := reply.Body.(*icmp.Echo)
-	if !ok || reply.Type != ipv4.ICMPTypeEchoReply ||
-		replyEcho.Seq != echo.Seq || !bytes.Equal(replyEcho.Data, echo.Data) {
-		return fmt.Errorf("unexpected ICMP reply: %#v", reply)
-	}
-
-	status, err := wireguard.IpcGet()
-	if err != nil {
-		return err
-	}
-	handshake, handshakeErr := fieldValue(status, "last_handshake_time_sec")
-	txBytes, txErr := fieldValue(status, "tx_bytes")
-	rxBytes, rxErr := fieldValue(status, "rx_bytes")
-	if handshakeErr != nil || txErr != nil || rxErr != nil ||
-		handshake <= 0 || txBytes <= 0 || rxBytes <= 0 {
+	initial, err := readPeerStatus(wireguard)
+	if err != nil || initial.handshake <= 0 || initial.txBytes <= 0 || initial.rxBytes <= 0 {
 		return fmt.Errorf(
-			"invalid WireGuard status: handshake=%d tx=%d rx=%d",
-			handshake,
-			txBytes,
-			rxBytes,
+			"invalid WireGuard status: handshake=%d tx=%d rx=%d: %w",
+			initial.handshake,
+			initial.txBytes,
+			initial.rxBytes,
+			err,
 		)
 	}
 	stats := bind.Stats()
@@ -227,18 +273,77 @@ func run(configPath string, hold time.Duration) error {
 		"HOST INTEROP PASSED: Linux netstack <-> OPNsense %s, ping=%s, tx=%d, rx=%d\n",
 		pingAddress,
 		latency.Round(time.Microsecond),
-		txBytes,
-		rxBytes,
+		initial.txBytes,
+		initial.rxBytes,
 	)
-	if hold > 0 {
-		fmt.Printf("HOST INTEROP HOLDING: keeping the peer online for %s\n", hold)
+
+	if options.recheckAfter > 0 {
+		time.Sleep(options.recheckAfter)
+		if options.requireAutonomousReconnect {
+			deadline := time.Now().Add(options.recoveryTimeout)
+			for {
+				current, statusErr := readPeerStatus(wireguard)
+				reconnect := bind.EndpointReconnectStatus(endpoint)
+				if statusErr == nil && reconnect.Attempts > 0 &&
+					bind.EndpointSessionState(endpoint) == armorbind.EndpointSessionEstablished &&
+					current.handshake > initial.handshake && restoredSessions.Load() > 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					return fmt.Errorf(
+						"transport did not autonomously recover while idle: state=%s attempts=%d failures=%d restored=%d handshake=%d initial_handshake=%d status_error=%v",
+						bind.EndpointSessionState(endpoint),
+						reconnect.Attempts,
+						reconnect.Failures,
+						restoredSessions.Load(),
+						current.handshake,
+						initial.handshake,
+						statusErr,
+					)
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		recheckLatency, err := ping(network, pingAddress)
+		if err != nil {
+			return fmt.Errorf("ICMP recheck failed after outer path change: %w", err)
+		}
+		current, err := readPeerStatus(wireguard)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"HOST INTEROP RECHECK PASSED: ping=%s handshake=%d reconnect_attempts=%d restored_sessions=%d tx=%d rx=%d\n",
+			recheckLatency.Round(time.Microsecond),
+			current.handshake,
+			bind.EndpointReconnectStatus(endpoint).Attempts,
+			restoredSessions.Load(),
+			current.txBytes,
+			current.rxBytes,
+		)
 	}
-	return holdAfterSuccess(hold, time.Sleep)
+
+	if options.hold > 0 {
+		fmt.Printf("HOST INTEROP HOLDING: keeping the peer online for %s\n", options.hold)
+	}
+	return holdAfterSuccess(options.hold, time.Sleep)
 }
 
 func main() {
 	configPath := flag.String("config", "", "path to the Linux wg-quic profile")
 	hold := flag.Duration("hold", 0, "keep the validated peer online for this duration")
+	recheckAfter := flag.Duration("recheck-after", 0, "stay idle, then require another tunnel ping")
+	requireAutonomousReconnect := flag.Bool(
+		"require-autonomous-reconnect",
+		false,
+		"before the recheck, require a maintained QUIC redial and a newer WireGuard handshake",
+	)
+	recoveryTimeout := flag.Duration(
+		"recovery-timeout",
+		30*time.Second,
+		"maximum additional wait for autonomous recovery",
+	)
 	flag.Parse()
 	if *configPath == "" {
 		log.Fatal("-config is required")
@@ -246,7 +351,21 @@ func main() {
 	if *hold < 0 {
 		log.Fatal("-hold must not be negative")
 	}
-	if err := run(*configPath, *hold); err != nil {
+	if *recheckAfter < 0 {
+		log.Fatal("-recheck-after must not be negative")
+	}
+	if *requireAutonomousReconnect && *recheckAfter == 0 {
+		log.Fatal("-require-autonomous-reconnect requires -recheck-after")
+	}
+	if *recoveryTimeout <= 0 {
+		log.Fatal("-recovery-timeout must be positive")
+	}
+	if err := run(*configPath, runOptions{
+		hold:                       *hold,
+		recheckAfter:               *recheckAfter,
+		requireAutonomousReconnect: *requireAutonomousReconnect,
+		recoveryTimeout:            *recoveryTimeout,
+	}); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -32,6 +32,8 @@ The disposable OPNsense guest test additionally covers:
 - supervised `quic0` startup and a second `quic1` process;
 - an actual wg-quic-to-wg-quic QUIC session on loopback;
 - optional Linux-host-to-OPNsense traffic through a QEMU UDP forward;
+- client source-address migration and idle autonomous redial through a QEMU
+  Ethernet datagram bridge, without WireGuard PersistentKeepalive;
 - isolation from `/usr/bin/wg` and the standard WireGuard UAPI;
 - authenticated General, Peer, Instance, status, version, and Dashboard APIs;
 - the `VPN > wg-quic` configuration and Status pages;
@@ -93,6 +95,61 @@ WG_QUIC_HOST_INTEROP_HOLD_SECONDS=120 \
 The hold applies to both the privileged native client and its unprivileged
 netstack fallback. The default is zero so unattended interoperability runs
 still finish immediately.
+
+### Outer source-address migration
+
+The unprivileged Ethernet bridge gives the guest a real second L2 network. It
+forwards the Linux client's local UDP socket while synthesizing selectable
+outer addresses, so OPNsense observes the source changing rather than QEMU's
+fixed user-network address. Prepare a profile without PersistentKeepalive and
+start the bridge:
+
+```sh
+WG_QUIC_HOST_INTEROP_ENDPOINT=127.0.0.1:53820 \
+  ./scripts/qemu/prepare-host-interop.sh
+
+./scripts/qemu/outer_rebind_bridge.py run \
+  --ethernet-listen 127.0.0.1:53900 \
+  --qemu-address 127.0.0.1:53901 \
+  --udp-listen 127.0.0.1:53820 \
+  --control-socket .qemu/outer-rebind.sock \
+  --source-ip 198.18.0.2 \
+  --source-ip 198.18.0.3 \
+  --source-ip 198.18.0.4
+```
+
+Attach the guest NIC with QEMU's datagram backend:
+
+```text
+-netdev dgram,id=rebind,local.type=inet,local.host=127.0.0.1,local.port=53901,remote.type=inet,remote.host=127.0.0.1,remote.port=53900
+-device virtio-net-pci,netdev=rebind,mac=52:54:00:51:00:01,csum=off,guest_csum=off,gso=off,guest_tso4=off,guest_tso6=off,guest_ufo=off
+```
+
+After installing the package, configure the disposable guest and run both
+phases from the host:
+
+```sh
+# guest
+/bin/sh /mnt/wg-quic-share/guest-outer-rebind.sh setup
+
+# host: keep each process alive while checking the guest status backend
+WG_QUIC_REBIND_PHASE=live WG_QUIC_REBIND_HOLD_SECONDS=90 \
+  ./scripts/qemu/run-outer-rebind.sh
+WG_QUIC_REBIND_PHASE=reconnect WG_QUIC_REBIND_HOLD_SECONDS=90 \
+  ./scripts/qemu/run-outer-rebind.sh
+
+# guest, during the corresponding hold
+/bin/sh /mnt/wg-quic-share/guest-outer-rebind.sh assert 198.18.0.3
+/bin/sh /mnt/wg-quic-share/guest-outer-rebind.sh assert 198.18.0.4 MIN_HANDSHAKE
+```
+
+The `live` phase changes `198.18.0.2` to `.3` on the established QUIC
+connection and requires another tunnel ping without a reconnect. The
+`reconnect` phase blackholes both directions for 20 seconds, changes `.2` to
+`.4`, and requires a reconnect attempt, the session-restored callback, a newer
+WireGuard handshake, and a successful tunnel ping before reporting success.
+The guest assertion independently requires `wg-quic-quick`, configd, and the
+WebUI status backend to expose the new endpoint as established and online.
 
 OPNsense intentionally blocks traffic on a new VPN interface until a firewall
 rule permits it. The protocol interoperability proof below temporarily
@@ -160,6 +217,8 @@ still requires an appropriate firewall rule on `wg-quic (Group)`.
 | OPNsense 26.1 QEMU | Passed |
 | OPNsense 26.7 QEMU | Passed |
 | Linux host ↔ OPNsense 26.7 | Passed |
+| Live client source change (`198.18.0.2` → `.3`) | Passed |
+| Idle redial after 20 s blackout (`198.18.0.2` → `.4`) | Passed |
 | Browser generator ↔ online Status/Dashboard/Log File | Passed |
 
 Do not treat a cross-build as FreeBSD runtime validation. The table is updated
@@ -174,6 +233,15 @@ reported 292 transmitted and 236 received WireGuard bytes before its hold
 period. Firefox then observed `browser-e2e` online with increasing transfer
 counters in both the Status page and Dashboard widget, plus wg-quic events on
 the Log File page at its default Notice severity.
+
+The outer-rebind run used the same Linux client process and no
+`PersistentKeepalive`. Live migration retained the QUIC session
+(`reconnect_attempts=0`) and OPNsense reported `198.18.0.3:52821` as
+established. A separate run dropped both directions for 20 seconds, switched
+to `198.18.0.4`, and recovered autonomously with two dial attempts, one
+session-restored callback, a newer WireGuard handshake, and a successful ICMP
+recheck. `wg-quic-quick` and `configctl wireguardquic show` both reported the
+new endpoint as established/online.
 
 Verified package artifacts:
 

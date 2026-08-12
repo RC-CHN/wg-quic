@@ -55,7 +55,23 @@ class FixtureContractsTest(unittest.TestCase):
         self.assertIn("WG_QUIC_HOST_INTEROP_HOLD_SECONDS", runner)
         self.assertIn('-hold "${WG_QUIC_HOST_INTEROP_HOLD_SECONDS}s"', runner)
         self.assertIn('flag.Duration("hold", 0,', client)
-        self.assertIn("run(*configPath, *hold)", client)
+        self.assertIn("hold:                       *hold", client)
+
+    def test_outer_rebind_fixture_is_idle_and_checks_autonomous_recovery(self):
+        prepare = self.read("scripts/qemu/prepare-host-interop.sh")
+        runner = self.read("scripts/qemu/run-outer-rebind.sh")
+        guest = self.read("scripts/qemu/guest-outer-rebind.sh")
+        client = self.read("scripts/qemu/linux-client/main.go")
+
+        self.assertNotIn("PersistentKeepalive", prepare)
+        self.assertIn("source 198.18.0.3", runner)
+        self.assertIn("drop on", runner)
+        self.assertIn("source 198.18.0.4", runner)
+        self.assertIn("-require-autonomous-reconnect", runner)
+        self.assertIn("reconnect_attempts=[1-9]", runner)
+        self.assertIn('.peers[0].endpoint == $endpoint', guest)
+        self.assertIn(".records[]", guest)
+        self.assertIn('flag.Bool(\n\t\t"require-autonomous-reconnect"', client)
 
     def test_log_page_exposes_notice_lifecycle_records(self):
         controller = self.read(
