@@ -1421,6 +1421,20 @@ func validateWindowsTrustedInstalledFile(path string) error {
 		}
 	}
 
+	handle, err := openWindowsInstalledFileForValidation(
+		path,
+		"installed executable",
+	)
+	if err != nil {
+		return err
+	}
+	return windows.CloseHandle(handle)
+}
+
+func openWindowsInstalledFileForValidation(
+	path string,
+	description string,
+) (windows.Handle, error) {
 	handle, err := openWindowsFileNoFollow(
 		path,
 		windows.GENERIC_READ|
@@ -1429,13 +1443,20 @@ func validateWindowsTrustedInstalledFile(path string) error {
 		windows.FILE_SHARE_READ,
 	)
 	if err != nil {
-		return fmt.Errorf("open installed executable %q: %w", path, err)
+		return 0, fmt.Errorf("open Windows %s %q: %w", description, path, err)
 	}
-	defer windows.CloseHandle(handle)
 	if err := inspectWindowsPathHandle(handle, path, false, true); err != nil {
-		return err
+		windows.CloseHandle(handle)
+		return 0, err
 	}
-	return verifyWindowsInstalledPathSecurity(handle, "installed executable")
+	if err := verifyWindowsInstalledPathSecurity(
+		handle,
+		description,
+	); err != nil {
+		windows.CloseHandle(handle)
+		return 0, err
+	}
+	return handle, nil
 }
 
 type windowsACLHeader struct {

@@ -3,6 +3,7 @@ package quick
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 )
@@ -36,18 +37,32 @@ func coreCommand(executable string, launch coreLaunch) (*exec.Cmd, error) {
 }
 
 func coreExecutable() (string, error) {
+	var validationErrors []error
 	current, err := os.Executable()
 	if err == nil {
 		for _, candidate := range platformCoreExecutableCandidates(current) {
-			if platformValidateCoreExecutable(current, candidate) == nil {
+			if validationErr := platformValidateCoreExecutable(
+				current,
+				candidate,
+			); validationErr == nil {
 				return candidate, nil
+			} else {
+				validationErrors = append(validationErrors, fmt.Errorf(
+					"candidate %q: %w", candidate, validationErr,
+				))
 			}
 		}
+	} else {
+		validationErrors = append(validationErrors, fmt.Errorf(
+			"resolve current wg-quic-quick executable: %w", err,
+		))
 	}
 	path, err := platformCoreExecutableFallback()
 	if err != nil {
-		return "", errors.New(
-			"cannot find a trusted wg-quic core executable next to wg-quic-quick",
+		validationErrors = append(validationErrors, err)
+		return "", fmt.Errorf(
+			"cannot find a trusted wg-quic core executable next to wg-quic-quick: %w",
+			errors.Join(validationErrors...),
 		)
 	}
 	return path, nil
