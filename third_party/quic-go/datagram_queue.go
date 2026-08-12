@@ -12,7 +12,10 @@ import (
 )
 
 const (
-	maxDatagramSendQueueLen = 32
+	// 32 datagrams is only ~340µs of buffer at gigabit rates; the wg-quic
+	// carrier's session loop blocks in Add whenever quic-go's run loop is
+	// busy packing, so give the queue enough depth to absorb that jitter.
+	maxDatagramSendQueueLen = 128
 	maxDatagramRcvQueueLen  = 128
 )
 
@@ -22,6 +25,41 @@ var datagramReceiveBufferPool = sync.Pool{
 	New: func() any {
 		return new(datagramReceiveBuffer)
 	},
+}
+
+// DatagramSendBufferSize is the capacity of pooled send buffers returned by
+// AcquireDatagramSendBuffer.
+const DatagramSendBufferSize = protocol.MaxPacketBufferSize
+
+// datagramSendBufferPool recycles buffers handed to SendDatagramOwned. The
+// packer returns each buffer once the frame has been serialized into a QUIC
+// packet. The pool stores *[]byte so recycling needs only a capacity check; a
+// capacity mismatch simply falls back to the GC.
+var datagramSendBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, DatagramSendBufferSize)
+		return &b
+	},
+}
+
+// AcquireDatagramSendBuffer returns a pooled buffer for one owned outbound
+// datagram. Callers must slice it from offset zero and pass the result to
+// SendDatagramOwned; quic-go recycles the buffer after serialization.
+func AcquireDatagramSendBuffer() []byte {
+	p := datagramSendBufferPool.Get().(*[]byte)
+	return *p
+}
+
+// releaseDatagramSendBuffer returns a buffer obtained from
+// AcquireDatagramSendBuffer to the pool. The frame retains a stale reference
+// in the sent-packet history for bookkeeping, but nothing ever reads the
+// bytes again.
+func releaseDatagramSendBuffer(data []byte) {
+	if cap(data) != DatagramSendBufferSize {
+		return
+	}
+	full := data[:DatagramSendBufferSize]
+	datagramSendBufferPool.Put(&full)
 }
 
 // ReceivedDatagram owns a DATAGRAM payload returned by ReceiveDatagramOwned.

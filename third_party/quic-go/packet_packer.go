@@ -662,6 +662,7 @@ func (p *packetPacker) composeNextPacket(
 				// Discard this frame. There's no point in retrying this in the next packet,
 				// as it's unlikely that the available packet size will increase.
 				p.datagramQueue.Pop()
+				releaseDatagramSendBuffer(f.Data)
 			}
 			// If the DATAGRAM frame was too large and the packet contained an ACK, we'll try to send it out later.
 		}
@@ -924,6 +925,9 @@ func (p *packetPacker) appendShortHeaderPacket(
 	if err != nil {
 		return shortHeaderPacket{}, err
 	}
+	// Frame payloads are now serialized into the wire buffer. Owned datagram
+	// buffers handed over via SendDatagramOwned are dead and can be recycled.
+	releaseSerializedDatagrams(pl.frames)
 	if !isMTUProbePacket {
 		if size := protocol.ByteCount(len(raw) + sealer.Overhead()); size > maxPacketSize {
 			return shortHeaderPacket{}, fmt.Errorf("PacketPacker BUG: packet too large (%d bytes, allowed %d bytes)", size, maxPacketSize)
@@ -946,6 +950,17 @@ func (p *packetPacker) appendShortHeaderPacket(
 		DestConnID:           connID,
 		IsPathMTUProbePacket: isMTUProbePacket,
 	}, nil
+}
+
+// releaseSerializedDatagrams recycles owned datagram send buffers whose frame
+// payloads have been serialized into a packet. Datagram frames are never
+// retransmitted and nothing reads their Data after this point.
+func releaseSerializedDatagrams(frames []ackhandler.Frame) {
+	for _, f := range frames {
+		if d, ok := f.Frame.(*wire.DatagramFrame); ok && d != nil {
+			releaseDatagramSendBuffer(d.Data)
+		}
+	}
 }
 
 // appendPacketPayload serializes the payload of a packet into the raw byte slice.

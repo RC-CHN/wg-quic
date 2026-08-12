@@ -63,6 +63,9 @@ func DefaultConfig() Config {
 type receivedPacket struct {
 	data []byte
 	ep   *Endpoint
+	// release returns data to its pool after the receive worker copies it
+	// out. Nil for frames owned by the FEC decoder.
+	release func([]byte)
 }
 
 type outboundPacket struct {
@@ -762,7 +765,7 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		if priorityWireGuardDatagram(buf) {
 			queue = sess.priority
 		}
-		preparedFrame := make([]byte, frameHeaderSize+len(buf))
+		preparedFrame := quiccarrier.AcquireDatagramSendBuffer(frameHeaderSize + len(buf))
 		copy(preparedFrame[frameHeaderSize:], buf)
 		packet := outboundPacket{
 			preparedFrame: preparedFrame,
@@ -798,6 +801,9 @@ func (b *Bind) receiveFunc(state *runState) conn.ReceiveFunc {
 				return fmt.Errorf("receive buffer is %d bytes, need %d", len(packets[n]), len(packet.data))
 			}
 			sizes[n] = copy(packets[n], packet.data)
+			if packet.release != nil {
+				packet.release(packet.data)
+			}
 			eps[n] = packet.ep
 			n++
 			return nil
@@ -1356,10 +1362,23 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 	}
 	s.endpoint.owner.stats.wgRxPackets.Add(1)
 	s.endpoint.owner.stats.wgRxBytes.Add(uint64(len(packet)))
+	rp := receivedPacket{data: packet, ep: endpoint}
+	if !(owned && frag.count == 1) {
+		// Everything except an owned single-fragment passthrough is a buffer
+		// this package allocated; return it to the pool once the receive
+		// worker has copied it out. Foreign capacities no-op inside release.
+		rp.release = releaseReassemblyBuffer
+	}
 	select {
-	case s.state.recv <- receivedPacket{data: packet, ep: endpoint}:
+	case s.state.recv <- rp:
 	case <-s.ctx.Done():
+		if rp.release != nil {
+			rp.release(rp.data)
+		}
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
+		if rp.release != nil {
+			rp.release(rp.data)
+		}
 	}
 }

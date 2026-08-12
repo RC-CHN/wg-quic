@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -136,6 +137,38 @@ func newReassembler() *reassembler {
 	return &reassembler{groups: make(map[reassemblyKey]*reassembly)}
 }
 
+// reassemblyBufferSize covers one full-size fragment (plus header slack), the
+// dominant receive-path allocation. Larger reassembled packets fall back to
+// fresh allocations and are simply not recycled.
+const reassemblyBufferSize = maxFragmentData + frameHeaderSize
+
+var reassemblyBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, reassemblyBufferSize)
+		return &b
+	},
+}
+
+// acquireReassemblyBuffer returns a buffer of n bytes, pooled when possible.
+// The caller must slice it from offset zero for later recycling to apply.
+func acquireReassemblyBuffer(n int) []byte {
+	if n > reassemblyBufferSize {
+		return make([]byte, n)
+	}
+	p := reassemblyBufferPool.Get().(*[]byte)
+	return (*p)[:n]
+}
+
+// releaseReassemblyBuffer returns a buffer from acquireReassemblyBuffer to
+// the pool. Buffers with a foreign capacity are left to the GC.
+func releaseReassemblyBuffer(data []byte) {
+	if cap(data) != reassemblyBufferSize {
+		return
+	}
+	full := data[:reassemblyBufferSize]
+	reassemblyBufferPool.Put(&full)
+}
+
 // add feeds one fragment into reassembly. owned reports whether the caller
 // retains f.data for the packet's whole downstream lifetime (true for FEC
 // decoder output); borrowed frames are still copied out because pooled QUIC
@@ -148,7 +181,9 @@ func (r *reassembler) add(now time.Time, sessionID uint64, f fragment, owned boo
 		if owned {
 			return f.data, nil
 		}
-		return append([]byte(nil), f.data...), nil
+		buf := acquireReassemblyBuffer(len(f.data))
+		copy(buf, f.data)
+		return buf, nil
 	}
 	for key, group := range r.groups {
 		if now.Sub(group.created) > reassemblyTTL {
@@ -175,7 +210,7 @@ func (r *reassembler) add(now time.Time, sessionID uint64, f fragment, owned boo
 	if group.seen != int(group.count) {
 		return nil, nil
 	}
-	packet := make([]byte, 0, group.total)
+	packet := acquireReassemblyBuffer(int(group.total))[:0]
 	for _, shard := range group.shards {
 		packet = append(packet, shard...)
 	}

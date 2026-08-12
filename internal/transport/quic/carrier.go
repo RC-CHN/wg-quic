@@ -23,6 +23,21 @@ import (
 )
 
 const alpn = "wg-quic/1"
+
+// DatagramSendBufferSize is the capacity of pooled datagram send buffers.
+const DatagramSendBufferSize = quicgo.DatagramSendBufferSize
+
+// AcquireDatagramSendBuffer returns a buffer of n bytes for one owned outbound
+// datagram, pooled when it fits. Buffers passed to SendDatagramOwned are
+// recycled by quic-go after the frame is serialized into a QUIC packet;
+// callers must slice the buffer from offset zero.
+func AcquireDatagramSendBuffer(n int) []byte {
+	if n > DatagramSendBufferSize {
+		return make([]byte, n)
+	}
+	return quicgo.AcquireDatagramSendBuffer()[:n]
+}
+
 const initialPacketSize = 1200
 
 type Config struct {
