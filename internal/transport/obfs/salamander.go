@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net"
 	"net/netip"
@@ -95,11 +96,13 @@ type SalamanderConn struct {
 
 	readMu        sync.Mutex
 	readBuf       []byte
+	readDigests   map[Key]*digestPair // guarded by readMu
 	batchConn     *ipv4.PacketConn
 	batchMessages []ipv4.Message
 	batchBuffers  [][]byte
 	writeMu       sync.Mutex
 	writeBuf      []byte
+	writeDigests  map[Key]*digestPair // guarded by writeMu
 }
 
 // WrapKeyedSalamander wraps a UDP socket without adding configuration secrets.
@@ -110,12 +113,14 @@ func WrapKeyedSalamander(connection *net.UDPConn, peers []PeerKey) (*SalamanderC
 		return nil, errors.New("Salamander requires a UDP connection")
 	}
 	result := &SalamanderConn{
-		UDPConn:   connection,
-		outbound:  make(map[netip.AddrPort]Key),
-		learned:   make(map[netip.AddrPort]Key),
-		readBuf:   make([]byte, maxUDPPayload),
-		writeBuf:  make([]byte, maxUDPPayload),
-		batchConn: ipv4.NewPacketConn(connection),
+		UDPConn:      connection,
+		outbound:     make(map[netip.AddrPort]Key),
+		learned:      make(map[netip.AddrPort]Key),
+		readBuf:      make([]byte, maxUDPPayload),
+		readDigests:  make(map[Key]*digestPair),
+		batchConn:    ipv4.NewPacketConn(connection),
+		writeBuf:     make([]byte, maxUDPPayload),
+		writeDigests: make(map[Key]*digestPair),
 	}
 	seen := make(map[Key]struct{}, len(peers))
 	for _, peer := range peers {
@@ -180,7 +185,7 @@ func (c *SalamanderConn) WriteToUDP(payload []byte, addr *net.UDPAddr) (int, err
 	if err != nil {
 		return 0, err
 	}
-	n, err := encode(payload, c.writeBuf, key)
+	n, err := encodeWithPair(payload, c.writeBuf, digestPairFor(&c.writeDigests, key))
 	if err != nil {
 		return 0, err
 	}
@@ -228,7 +233,7 @@ func (c *SalamanderConn) WriteMsgUDP(payload, oob []byte, addr *net.UDPAddr) (n,
 	if err != nil {
 		return 0, 0, err
 	}
-	encoded, err := encodeSegments(payload, c.writeBuf, key, int(gsoSize))
+	encoded, err := encodeSegmentsWithPair(payload, c.writeBuf, digestPairFor(&c.writeDigests, key), int(gsoSize))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -370,21 +375,26 @@ func (c *SalamanderConn) decode(packet, output []byte) (int, Key, bool) {
 	salt := packet[:SalamanderSaltSize]
 	hint := packet[SalamanderSaltSize:SalamanderHeaderSize]
 	for _, key := range c.keys {
-		expected := packetHint(key, salt)
+		pair := digestPairFor(&c.readDigests, key)
+		expected := pair.deriveHint(salt)
 		if subtle.ConstantTimeCompare(hint, expected[:]) != 1 {
 			continue
 		}
-		stream := packetStream(key, salt)
+		stream := pair.deriveStream(salt)
 		payload := packet[SalamanderHeaderSize:]
-		for i, value := range payload {
-			output[i] = value ^ stream[i%len(stream)]
-		}
+		xorWords(output, payload, &stream)
 		return len(payload), key, true
 	}
 	return 0, zero, false
 }
 
 func encode(payload, output []byte, key Key) (int, error) {
+	return encodeWithPair(payload, output, newDigestPair(key))
+}
+
+// encodeWithPair is encode with the key's digest state reused across packets.
+// It emits exactly the same wire bytes.
+func encodeWithPair(payload, output []byte, pair *digestPair) (int, error) {
 	if len(payload) == 0 || len(payload)+SalamanderHeaderSize > maxUDPPayload {
 		return 0, errors.New("invalid Salamander payload length")
 	}
@@ -395,23 +405,25 @@ func encode(payload, output []byte, key Key) (int, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return 0, err
 	}
-	hint := packetHint(key, salt)
+	hint := pair.deriveHint(salt)
 	copy(output[SalamanderSaltSize:SalamanderHeaderSize], hint[:])
-	stream := packetStream(key, salt)
-	for i, value := range payload {
-		output[SalamanderHeaderSize+i] = value ^ stream[i%len(stream)]
-	}
+	stream := pair.deriveStream(salt)
+	xorWords(output[SalamanderHeaderSize:], payload, &stream)
 	return len(payload) + SalamanderHeaderSize, nil
 }
 
 func encodeSegments(payload, output []byte, key Key, segmentSize int) (int, error) {
+	return encodeSegmentsWithPair(payload, output, newDigestPair(key), segmentSize)
+}
+
+func encodeSegmentsWithPair(payload, output []byte, pair *digestPair, segmentSize int) (int, error) {
 	if segmentSize <= 0 || segmentSize >= len(payload) {
-		return encode(payload, output, key)
+		return encodeWithPair(payload, output, pair)
 	}
 	written := 0
 	for len(payload) > 0 {
 		size := min(segmentSize, len(payload))
-		n, err := encode(payload[:size], output[written:], key)
+		n, err := encodeWithPair(payload[:size], output[written:], pair)
 		if err != nil {
 			return 0, err
 		}
@@ -419,6 +431,84 @@ func encodeSegments(payload, output []byte, key Key, segmentSize int) (int, erro
 		payload = payload[size:]
 	}
 	return written, nil
+}
+
+// digestPair caches the keyed BLAKE2b states of one obfuscation key. Reset
+// restores the keyed initial state, so per-packet derivation only hashes the
+// domain and salt instead of repeating the key schedule. A digestPair is not
+// safe for concurrent use; SalamanderConn keeps separate pairs per direction
+// under the corresponding mutex.
+type digestPair struct {
+	hint   hash.Hash
+	stream hash.Hash
+}
+
+func newDigestPair(key Key) *digestPair {
+	hintDigest, err := blake2b.New256(key[:])
+	if err != nil {
+		panic(err)
+	}
+	streamDigest, err := blake2b.New256(key[:])
+	if err != nil {
+		panic(err)
+	}
+	return &digestPair{hint: hintDigest, stream: streamDigest}
+}
+
+func (p *digestPair) deriveHint(salt []byte) [SalamanderHintSize]byte {
+	var sum [blake2b.Size256]byte
+	p.hint.Reset()
+	_, _ = p.hint.Write(hintDomain)
+	_, _ = p.hint.Write(salt)
+	p.hint.Sum(sum[:0])
+	var hint [SalamanderHintSize]byte
+	copy(hint[:], sum[:SalamanderHintSize])
+	return hint
+}
+
+func (p *digestPair) deriveStream(salt []byte) [blake2b.Size256]byte {
+	var stream [blake2b.Size256]byte
+	p.stream.Reset()
+	_, _ = p.stream.Write(streamDomain)
+	_, _ = p.stream.Write(salt)
+	p.stream.Sum(stream[:0])
+	return stream
+}
+
+// digestPairFor returns the cached digest pair for key, building it on first
+// use. The caller must hold the mutex guarding cache.
+func digestPairFor(cache *map[Key]*digestPair, key Key) *digestPair {
+	if *cache == nil {
+		*cache = make(map[Key]*digestPair)
+	}
+	pair, ok := (*cache)[key]
+	if !ok {
+		pair = newDigestPair(key)
+		(*cache)[key] = pair
+	}
+	return pair
+}
+
+// xorWords XORs src into dst with the 32-byte stream repeated. Processing
+// eight bytes per step produces exactly the same wire bytes as a per-byte
+// loop.
+func xorWords(dst, src []byte, stream *[blake2b.Size256]byte) {
+	words := [4]uint64{
+		binary.LittleEndian.Uint64(stream[0:8]),
+		binary.LittleEndian.Uint64(stream[8:16]),
+		binary.LittleEndian.Uint64(stream[16:24]),
+		binary.LittleEndian.Uint64(stream[24:32]),
+	}
+	offset := 0
+	for ; offset+blake2b.Size256 <= len(src); offset += blake2b.Size256 {
+		for i, word := range words {
+			at := offset + i*8
+			binary.LittleEndian.PutUint64(dst[at:], binary.LittleEndian.Uint64(src[at:])^word)
+		}
+	}
+	for ; offset < len(src); offset++ {
+		dst[offset] = src[offset] ^ stream[offset%blake2b.Size256]
+	}
 }
 
 func packetHint(key Key, salt []byte) [SalamanderHintSize]byte {

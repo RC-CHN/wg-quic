@@ -225,14 +225,14 @@ func listenUDP(t testing.TB) *net.UDPConn {
 }
 
 func BenchmarkSalamanderEncode(b *testing.B) {
-	key := Key{9}
+	pair := newDigestPair(Key{9})
 	payload := bytes.Repeat([]byte{0x42}, 1300)
 	output := make([]byte, EncodedLength(len(payload)))
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := encode(payload, output, key); err != nil {
+		if _, err := encodeWithPair(payload, output, pair); err != nil {
 			b.Fatal(err)
 		}
 	}
