@@ -63,11 +63,13 @@ func TestWindowsCoreRejectsWritableCustomManagerBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	const writableByUsers = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)"
-	securityErr := secureWindowsPathHandle(
-		handle,
-		writableByUsers,
-		"test user-writable custom bin directory",
-	)
+	securityErr := withWindowsFileSecurityPrivileges(func() error {
+		return secureWindowsPathHandle(
+			handle,
+			writableByUsers,
+			"test user-writable custom bin directory",
+		)
+	})
 	closeErr := windows.CloseHandle(handle)
 	if securityErr != nil || closeErr != nil {
 		t.Fatalf("make custom bin directory unsafe: %v", errors.Join(securityErr, closeErr))
