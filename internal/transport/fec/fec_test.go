@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"testing"
 	"time"
+
+	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 )
 
 func TestWGQFWireGoldenVectors(t *testing.T) {
@@ -414,8 +416,14 @@ func BenchmarkEncoderGroup(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				for range DefaultDataShards {
-					if _, err := encoder.Add(frame); err != nil {
+					packets, err := encoder.Add(frame)
+					if err != nil {
 						b.Fatal(err)
+					}
+					// Simulate quic-go recycling serialized frames so the
+					// benchmark measures the steady-state pool, not misses.
+					for _, packet := range packets {
+						quiccarrier.ReleaseDatagramSendBuffer(packet)
 					}
 				}
 			}

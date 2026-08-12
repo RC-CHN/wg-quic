@@ -3,6 +3,8 @@ package fec
 import (
 	"encoding/binary"
 	"errors"
+
+	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 )
 
 const headerSize = 24
@@ -40,7 +42,10 @@ func PacketKind(data []byte) (Kind, bool) {
 }
 
 func marshalPacket(p packet) []byte {
-	out := make([]byte, headerSize+len(p.payload))
+	// Draw from the carrier's send pool: the buffer is handed to
+	// SendDatagramOwned downstream and quic-go recycles it once the frame is
+	// serialized. Oversized packets fall back to a fresh allocation inside.
+	out := quiccarrier.AcquireDatagramSendBuffer(headerSize + len(p.payload))
 	copy(out[:4], magic[:])
 	out[4] = 1
 	out[5] = byte(p.kind)

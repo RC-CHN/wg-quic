@@ -62,6 +62,13 @@ func releaseDatagramSendBuffer(data []byte) {
 	datagramSendBufferPool.Put(&full)
 }
 
+// ReleaseDatagramSendBuffer is the exported form of releaseDatagramSendBuffer
+// for embedders whose tests and benchmarks never pass a buffer through the
+// packer.
+func ReleaseDatagramSendBuffer(data []byte) {
+	releaseDatagramSendBuffer(data)
+}
+
 // ReceivedDatagram owns a DATAGRAM payload returned by ReceiveDatagramOwned.
 // Release must be called after the payload is no longer needed. Release is
 // idempotent.

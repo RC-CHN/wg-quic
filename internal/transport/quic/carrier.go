@@ -38,6 +38,14 @@ func AcquireDatagramSendBuffer(n int) []byte {
 	return quicgo.AcquireDatagramSendBuffer()[:n]
 }
 
+// ReleaseDatagramSendBuffer returns a buffer from AcquireDatagramSendBuffer
+// to the pool. Production code never calls this (quic-go recycles after
+// serializing the frame); it exists so benchmarks and tests that do not send
+// through quic-go can still exercise the steady-state pool.
+func ReleaseDatagramSendBuffer(buf []byte) {
+	quicgo.ReleaseDatagramSendBuffer(buf)
+}
+
 const initialPacketSize = 1200
 
 type Config struct {
