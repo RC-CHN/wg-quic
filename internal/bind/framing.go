@@ -136,10 +136,17 @@ func newReassembler() *reassembler {
 	return &reassembler{groups: make(map[reassemblyKey]*reassembly)}
 }
 
-func (r *reassembler) add(now time.Time, sessionID uint64, f fragment) ([]byte, error) {
+// add feeds one fragment into reassembly. owned reports whether the caller
+// retains f.data for the packet's whole downstream lifetime (true for FEC
+// decoder output); borrowed frames are still copied out because pooled QUIC
+// datagrams are recycled after the receive callback returns.
+func (r *reassembler) add(now time.Time, sessionID uint64, f fragment, owned bool) ([]byte, error) {
 	if f.count == 1 {
 		if len(f.data) != int(f.total) {
 			return nil, errors.New("single-fragment length mismatch")
+		}
+		if owned {
+			return f.data, nil
 		}
 		return append([]byte(nil), f.data...), nil
 	}

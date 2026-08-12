@@ -864,7 +864,10 @@ func (s *session) receiveLoop() {
 		datagram quiccarrier.ReceivedDatagram
 		err      error
 	}
-	incoming := make(chan receiveResult)
+	// Buffer the handoff so a processing burst never stalls the goroutine
+	// blocked in ReceiveDatagramOwned; 64 covers a full QUIC batch with
+	// headroom without queuing unbounded datagrams.
+	incoming := make(chan receiveResult, 64)
 	go func() {
 		for {
 			datagram, err := qconn.ReceiveDatagramOwned(s.ctx)
@@ -899,11 +902,11 @@ func (s *session) receiveLoop() {
 			}
 			s.sendFECFeedback(result.SendFeedback)
 			for _, frame := range result.Frames {
-				s.deliverFrame(frame)
+				s.deliverFrame(frame, true)
 			}
 			return
 		}
-		s.deliverFrame(wirePacket)
+		s.deliverFrame(wirePacket, false)
 	}
 	expiry := time.NewTicker(fecExpiryPoll)
 	defer expiry.Stop()
@@ -944,13 +947,16 @@ func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 	}
 }
 
-func (s *session) deliverFrame(frame []byte) {
+// deliverFrame parses and reassembles one WGQ1 frame. owned reports whether
+// frame stays valid after this call returns (FEC decoder output) as opposed
+// to aliasing the pooled QUIC receive datagram.
+func (s *session) deliverFrame(frame []byte, owned bool) {
 	frag, err := parseFragment(frame)
 	if err != nil {
 		return
 	}
 	s.state.mu.Lock()
-	packet, err := s.state.reassembly.add(time.Now(), s.id, frag)
+	packet, err := s.state.reassembly.add(time.Now(), s.id, frag, owned)
 	s.state.mu.Unlock()
 	if err != nil || packet == nil {
 		return

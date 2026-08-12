@@ -114,8 +114,9 @@ func (e *Encoder) Flush() ([][]byte, error) {
 		}
 		shards := make([][]byte, k+r)
 		for i, shard := range e.data {
-			shards[i] = make([]byte, shardSize)
-			copy(shards[i], shard)
+			// Encode only reads data shards, so a shard that already matches
+			// the group size is passed through without a padding copy.
+			shards[i] = padShard(shard, shardSize)
 		}
 		for i := k; i < k+r; i++ {
 			shards[i] = make([]byte, shardSize)

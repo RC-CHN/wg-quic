@@ -66,7 +66,7 @@ func TestFragmentReassembly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err = r.add(time.Now(), 7, f)
+		got, err = r.add(time.Now(), 7, f, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,6 +133,37 @@ func TestPreparedPacketRejectsInvalidPayloadSize(t *testing.T) {
 }
 
 var benchmarkFrame []byte
+var benchmarkReassembled []byte
+
+func BenchmarkReassemblerSingleFragment(b *testing.B) {
+	payload := bytes.Repeat([]byte{0x5a}, 1312)
+	frame := make([]byte, frameHeaderSize+len(payload))
+	writeFragmentHeader(frame, 1, 0, 1, uint32(len(payload)))
+	copy(frame[frameHeaderSize:], payload)
+	fragment, err := parseFragment(frame)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, owned := range []bool{false, true} {
+		name := "copied"
+		if owned {
+			name = "owned"
+		}
+		b.Run(name, func(b *testing.B) {
+			reassembler := newReassembler()
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				packet, err := reassembler.add(time.Now(), 1, fragment, owned)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkReassembled = packet
+			}
+		})
+	}
+}
 
 func BenchmarkFrameCommonWireGuardPacket(b *testing.B) {
 	payload := bytes.Repeat([]byte{0x5a}, 1312)

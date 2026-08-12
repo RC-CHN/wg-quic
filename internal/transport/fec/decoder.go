@@ -87,7 +87,9 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 			group.data[index] = append([]byte(nil), p.payload...)
 		}
 		if !group.delivered[index] {
-			frame, err := decodeDataShard(p.payload)
+			// Decode from the stored copy: the delivered frame may outlive the
+			// pooled receive datagram that p.payload aliases.
+			frame, err := decodeDataShard(group.data[index])
 			if err != nil {
 				return result, err
 			}
@@ -188,14 +190,14 @@ func (d *Decoder) tryComplete(group *receiveGroup) ([][]byte, *Feedback, bool, e
 	shards := make([][]byte, group.k+group.r)
 	for i := 0; i < group.k; i++ {
 		if shard := group.data[i]; shard != nil {
-			shards[i] = make([]byte, shardSize)
-			copy(shards[i], shard)
+			// ReconstructData writes only missing slots, so present shards
+			// that already match the group size are passed through.
+			shards[i] = padShard(shard, shardSize)
 		}
 	}
 	for i := 0; i < group.r; i++ {
 		if shard := group.parity[i]; shard != nil {
-			shards[group.k+i] = make([]byte, shardSize)
-			copy(shards[group.k+i], shard)
+			shards[group.k+i] = padShard(shard, shardSize)
 		}
 	}
 	codec, err := cachedCodec(d.codecs, group.k, group.r, shardSize)
@@ -226,6 +228,21 @@ func (d *Decoder) tryComplete(group *receiveGroup) ([][]byte, *Feedback, bool, e
 	return frames, feedback(len(frames)), true, nil
 }
 
+// padShard returns shard ready for the Reed-Solomon codec: the slice itself
+// when it already matches shardSize, otherwise a zero-padded copy. The codecs
+// never mutate present shards, only missing slots.
+func padShard(shard []byte, shardSize int) []byte {
+	if len(shard) == shardSize {
+		return shard
+	}
+	padded := make([]byte, shardSize)
+	copy(padded, shard)
+	return padded
+}
+
+// decodeDataShard returns the framed payload as a sub-slice of shard. The
+// result stays valid as long as shard's owner retains it; callers must not
+// mutate it.
 func decodeDataShard(shard []byte) ([]byte, error) {
 	if len(shard) < 2 {
 		return nil, errors.New("reconstructed FEC shard is too short")
@@ -234,7 +251,7 @@ func decodeDataShard(shard []byte) ([]byte, error) {
 	if length == 0 || length > len(shard)-2 {
 		return nil, errors.New("invalid reconstructed FEC frame length")
 	}
-	return append([]byte(nil), shard[2:2+length]...), nil
+	return shard[2 : 2+length], nil
 }
 
 func (d *Decoder) expire(now time.Time) []Feedback {
