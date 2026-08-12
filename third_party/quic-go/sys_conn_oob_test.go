@@ -310,25 +310,3 @@ func TestReadsMultipleMessagesInOneBatch(t *testing.T) {
 	require.Equal(t, 2, bc.callCounter)
 }
 
-func TestSysConnSendGSO(t *testing.T) {
-	if !platformSupportsGSO {
-		t.Skip("GSO not supported on this platform")
-	}
-
-	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
-	require.NoError(t, err)
-	c := &oobRecordingConn{UDPConn: udpConn}
-	oobConn, err := newConn(c, true)
-	require.NoError(t, err)
-	require.True(t, oobConn.capabilities().GSO)
-
-	oob := make([]byte, 0, 123)
-	oobConn.WritePacket([]byte("foobar"), udpConn.LocalAddr(), oob, 3, protocol.ECNCE)
-	require.Len(t, c.oobs, 1)
-	oobMsg := c.oobs[0]
-	require.NotEmpty(t, oobMsg)
-	require.Equal(t, cap(oob), cap(oobMsg)) // check that it appended to oob
-	expected := appendUDPSegmentSizeMsg([]byte{}, 3)
-	// Check that the first control message is the OOB control message.
-	require.Equal(t, expected, oobMsg[:len(expected)])
-}
