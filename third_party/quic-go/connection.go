@@ -219,6 +219,9 @@ type Conn struct {
 	keepAliveInterval time.Duration
 
 	datagramQueue *datagramQueue
+	// currentDatagramRemoteAddr is set only while the serialized receive loop
+	// handles one packet's frames.
+	currentDatagramRemoteAddr net.Addr
 
 	connStateMutex sync.Mutex
 	connState      ConnectionState
@@ -1340,7 +1343,7 @@ func (c *Conn) handleShortHeaderPacket(
 			})
 		}
 	}
-	isNonProbing, pathChallenge, err := c.handleUnpackedShortHeaderPacket(destConnID, pn, data, p.ecn, p.rcvTime, log)
+	isNonProbing, pathChallenge, err := c.handleUnpackedShortHeaderPacket(destConnID, pn, data, p.ecn, p.rcvTime, log, p.remoteAddr)
 	if err != nil {
 		return false, err
 	}
@@ -1822,7 +1825,7 @@ func (c *Conn) handleUnpackedLongHeaderPacket(
 			})
 		}
 	}
-	isAckEliciting, _, _, err := c.handleFrames(packet.data, packet.hdr.DestConnectionID, packet.encryptionLevel, log, rcvTime)
+	isAckEliciting, _, _, err := c.handleFrames(packet.data, packet.hdr.DestConnectionID, packet.encryptionLevel, log, rcvTime, nil)
 	if err != nil {
 		return err
 	}
@@ -1837,12 +1840,13 @@ func (c *Conn) handleUnpackedShortHeaderPacket(
 	ecn protocol.ECN,
 	rcvTime monotime.Time,
 	log func([]qlog.Frame),
+	remoteAddr net.Addr,
 ) (isNonProbing bool, pathChallenge *wire.PathChallengeFrame, _ error) {
 	c.lastPacketReceivedTime = rcvTime
 	c.firstAckElicitingPacketAfterIdleSentTime = 0
 	c.keepAlivePingSent = false
 
-	isAckEliciting, isNonProbing, pathChallenge, err := c.handleFrames(data, destConnID, protocol.Encryption1RTT, log, rcvTime)
+	isAckEliciting, isNonProbing, pathChallenge, err := c.handleFrames(data, destConnID, protocol.Encryption1RTT, log, rcvTime, remoteAddr)
 	if err != nil {
 		return false, nil, err
 	}
@@ -1861,7 +1865,11 @@ func (c *Conn) handleFrames(
 	encLevel protocol.EncryptionLevel,
 	log func([]qlog.Frame),
 	rcvTime monotime.Time,
+	remoteAddr net.Addr,
 ) (isAckEliciting, isNonProbing bool, pathChallenge *wire.PathChallengeFrame, _ error) {
+	previousRemoteAddr := c.currentDatagramRemoteAddr
+	c.currentDatagramRemoteAddr = remoteAddr
+	defer func() { c.currentDatagramRemoteAddr = previousRemoteAddr }()
 	// Only used for tracing.
 	// If we're not tracing, this slice will always remain empty.
 	var frames []qlog.Frame
@@ -2234,7 +2242,7 @@ func (c *Conn) handleDatagramFrame(f *wire.DatagramFrame) error {
 			ErrorMessage: "DATAGRAM frame too large",
 		}
 	}
-	c.datagramQueue.HandleDatagramFrame(f)
+	c.datagramQueue.HandleDatagramFrameFrom(f, c.currentDatagramRemoteAddr)
 	return nil
 }
 

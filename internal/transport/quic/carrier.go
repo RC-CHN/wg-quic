@@ -103,7 +103,16 @@ type Connection struct {
 	conn *quicgo.Conn
 }
 
-type ReceivedDatagram = quicgo.ReceivedDatagram
+type ReceivedDatagram struct {
+	Data       []byte
+	RemoteAddr netip.AddrPort
+	owned      quicgo.ReceivedDatagram
+}
+
+func (d *ReceivedDatagram) Release() {
+	d.owned.Release()
+	d.Data = nil
+}
 
 func (c *Connection) SendDatagram(packet []byte) error {
 	return c.conn.SendDatagram(packet)
@@ -120,7 +129,20 @@ func (c *Connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 }
 
 func (c *Connection) ReceiveDatagramOwned(ctx context.Context) (ReceivedDatagram, error) {
-	return c.conn.ReceiveDatagramOwned(ctx)
+	datagram, err := c.conn.ReceiveDatagramOwned(ctx)
+	if err != nil {
+		return ReceivedDatagram{}, err
+	}
+	remote, err := addrPort(datagram.RemoteAddr)
+	if err != nil {
+		datagram.Release()
+		return ReceivedDatagram{}, err
+	}
+	return ReceivedDatagram{
+		Data:       datagram.Data,
+		RemoteAddr: remote,
+		owned:      datagram,
+	}, nil
 }
 
 func (c *Connection) CloseWithError(message string) error {

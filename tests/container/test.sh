@@ -137,16 +137,46 @@ $compose exec -T a ip address add 172.29.0.22/24 dev eth0
 $compose exec -T a iptables -t nat -I POSTROUTING 1 \
 	-p udp -s 172.29.0.2 --sport 51820 -d 172.29.0.3 --dport 51820 \
 	-j SNAT --to-source 172.29.0.22
+# Netfilter chooses NAT only for the first packet in a conntrack flow. Drop the
+# established mapping so the next QUIC packet actually exercises the new path.
+$compose exec -T a conntrack -F
 wait_ping a 10.77.0.2 "" "tunnel did not survive outer NAT address rebinding"
-# The WireGuard keepalive interval is one second. Leave the translated path
-# idle from the application's perspective before proving it remains usable.
+attempt=0
+while :; do
+	rebound_endpoint=$($compose exec -T b wg-quic show wg0 --json |
+		sed -n 's/.*"endpoint": "\([^"]*\)".*/\1/p')
+	if [ "${rebound_endpoint}" = "172.29.0.22:51820" ]; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	if [ "${attempt}" -ge 30 ]; then
+		fail_with_logs "peer status retained the pre-migration outer endpoint"
+	fi
+	sleep 0.1
+done
+# Leave the translated path idle from the application's perspective before
+# proving QUIC's own keepalive preserves it without WireGuard PersistentKeepalive.
 sleep 3
 $compose exec -T b ping -c 3 -W 2 10.77.0.1
 $compose exec -T a iptables -t nat -D POSTROUTING \
 	-p udp -s 172.29.0.2 --sport 51820 -d 172.29.0.3 --dport 51820 \
 	-j SNAT --to-source 172.29.0.22
+$compose exec -T a conntrack -F
 $compose exec -T a ip address delete 172.29.0.22/24 dev eth0
 wait_ping a 10.77.0.2 "" "tunnel did not migrate back to its original outer address"
+attempt=0
+while :; do
+	restored_endpoint=$($compose exec -T b wg-quic show wg0 --json |
+		sed -n 's/.*"endpoint": "\([^"]*\)".*/\1/p')
+	if [ "${restored_endpoint}" = "172.29.0.2:51820" ]; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	if [ "${attempt}" -ge 30 ]; then
+		fail_with_logs "peer status did not follow the restored outer endpoint"
+	fi
+	sleep 0.1
+done
 
 # A peer process disappearing destroys QUIC and WireGuard state. Neither side
 # has PersistentKeepalive in this fixture. Require the surviving side to

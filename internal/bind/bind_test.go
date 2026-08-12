@@ -2,6 +2,7 @@ package armorbind
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
 )
 
@@ -448,6 +450,72 @@ func TestBindReconnectsAfterAbruptPeerRestartWithoutWireGuardTraffic(t *testing.
 	got, _ := receiveOne(t, restartedReceive[0])
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("payload after silent recovery = %q, want %q", got, payload)
+	}
+}
+
+func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
+	owner := New(DefaultConfig())
+	configured := &Endpoint{
+		owner:      owner,
+		addr:       netip.MustParseAddrPort("192.0.2.10:51820"),
+		configured: true,
+	}
+	accepted := &Endpoint{
+		owner:    owner,
+		addr:     netip.MustParseAddrPort("198.51.100.20:52821"),
+		fallback: configured,
+	}
+	sess := &session{endpoint: accepted, remoteAddr: accepted.addr}
+	accepted.session = sess
+
+	migrated := sess.endpointForAddrPort(
+		netip.MustParseAddrPort("198.51.100.21:52821"),
+	)
+	if migrated == accepted {
+		t.Fatal("path migration reused the stale accepted endpoint")
+	}
+	if got := migrated.addr; got != netip.MustParseAddrPort("198.51.100.21:52821") {
+		t.Fatalf("migrated endpoint = %s", got)
+	}
+	if migrated.session != sess {
+		t.Fatal("migrated endpoint lost the established session")
+	}
+	if migrated.fallback != configured {
+		t.Fatal("migrated endpoint lost its configured fallback")
+	}
+	if got := sess.endpointForAddrPort(accepted.addr); got != accepted {
+		t.Fatal("unchanged QUIC path did not reuse its endpoint")
+	}
+}
+
+func TestEndpointSessionStateFollowsCurrentRemotePath(t *testing.T) {
+	bind := New(DefaultConfig())
+	state := &runState{
+		ctx:       context.Background(),
+		sessions:  make(map[uint64]*session),
+		endpoints: make(map[netip.AddrPort]*Endpoint),
+	}
+	accepted := &Endpoint{
+		owner: bind,
+		addr:  netip.MustParseAddrPort("198.51.100.20:52821"),
+	}
+	sess := &session{
+		id:         1,
+		state:      state,
+		endpoint:   accepted,
+		ctx:        context.Background(),
+		conn:       new(quiccarrier.Connection),
+		remoteAddr: netip.MustParseAddrPort("198.51.100.21:52821"),
+	}
+	state.sessions[sess.id] = sess
+	accepted.session = sess
+	bind.state = state
+
+	if got := bind.EndpointSessionState(sess.remoteAddr); got != EndpointSessionEstablished {
+		t.Fatalf("migrated endpoint session state = %q, want established", got)
+	}
+	if got := bind.EndpointSessionState(accepted.addr); got != EndpointSessionIdle {
+		t.Fatalf("stale endpoint session state = %q, want idle", got)
 	}
 }
 

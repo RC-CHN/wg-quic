@@ -2,6 +2,7 @@ package quic
 
 import (
 	"context"
+	"net"
 	"testing"
 	"testing/synctest"
 
@@ -105,6 +106,22 @@ func TestDatagramQueueReceiveOwnedUsesIndependentPooledBuffer(t *testing.T) {
 	datagram.Release()
 	require.Nil(t, datagram.Data)
 	require.Nil(t, datagram.buffer)
+	datagram.Release()
+}
+
+func TestDatagramQueueReceiveOwnedPreservesRemoteAddress(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	remote := &net.UDPAddr{IP: net.IPv4(198, 51, 100, 20), Port: 52821}
+	queue.HandleDatagramFrameFrom(
+		&wire.DatagramFrame{Data: []byte("migrated path")},
+		remote,
+	)
+	remote.IP[0] = 203
+	remote.Port = 1
+
+	datagram, err := queue.ReceiveOwned(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "198.51.100.20:52821", datagram.RemoteAddr.String())
 	datagram.Release()
 }
 

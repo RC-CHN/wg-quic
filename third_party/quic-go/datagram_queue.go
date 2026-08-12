@@ -2,6 +2,7 @@ package quic
 
 import (
 	"context"
+	"net"
 	"sync"
 
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -27,8 +28,9 @@ var datagramReceiveBufferPool = sync.Pool{
 // Release must be called after the payload is no longer needed. Release is
 // idempotent.
 type ReceivedDatagram struct {
-	Data   []byte
-	buffer *datagramReceiveBuffer
+	Data       []byte
+	RemoteAddr net.Addr
+	buffer     *datagramReceiveBuffer
 }
 
 func (d *ReceivedDatagram) Release() {
@@ -128,6 +130,14 @@ func (h *datagramQueue) Len() int {
 // borrows the decrypted packet buffer, so copy it into a pooled queue buffer
 // before packet processing returns.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
+	h.HandleDatagramFrameFrom(f, nil)
+}
+
+// HandleDatagramFrameFrom preserves the authenticated QUIC packet's source
+// address alongside its DATAGRAM payload. Applications that implement
+// endpoint roaming need the packet path, which can differ from Conn.RemoteAddr
+// until QUIC path validation completes.
+func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAddr net.Addr) {
 	if len(f.Data) > protocol.MaxPacketBufferSize {
 		if h.logger.Debug() {
 			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
@@ -137,7 +147,11 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	buffer := datagramReceiveBufferPool.Get().(*datagramReceiveBuffer)
 	data := buffer[:len(f.Data)]
 	copy(data, f.Data)
-	datagram := ReceivedDatagram{Data: data, buffer: buffer}
+	datagram := ReceivedDatagram{
+		Data:       data,
+		RemoteAddr: cloneDatagramRemoteAddr(remoteAddr),
+		buffer:     buffer,
+	}
 	var queued bool
 	h.rcvMx.Lock()
 	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
@@ -155,6 +169,16 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
 		}
 	}
+}
+
+func cloneDatagramRemoteAddr(remoteAddr net.Addr) net.Addr {
+	udp, ok := remoteAddr.(*net.UDPAddr)
+	if !ok || udp == nil {
+		return remoteAddr
+	}
+	cloned := *udp
+	cloned.IP = append(net.IP(nil), udp.IP...)
+	return &cloned
 }
 
 // Receive gets a received DATAGRAM frame.

@@ -404,7 +404,9 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 	configuredEndpoint := state.endpoints[endpoint]
 	sessions := make([]*session, 0, 1)
 	for _, candidate := range state.sessions {
-		remote := candidate.endpoint.addr
+		candidate.mu.Lock()
+		remote := candidate.remoteAddr
+		candidate.mu.Unlock()
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 		if remote == endpoint {
 			sessions = append(sessions, candidate)
@@ -915,6 +917,7 @@ func (b *Bind) newSessionLocked(
 		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
 		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
 		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
+		remoteAddr: ep.addr,
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
@@ -998,6 +1001,7 @@ type session struct {
 	control             chan []byte
 	mu                  sync.Mutex
 	conn                *quiccarrier.Connection
+	remoteAddr          netip.AddrPort
 	establishedAt       time.Time
 	readyOnce           sync.Once
 	closeOnce           sync.Once
@@ -1245,6 +1249,10 @@ func (s *session) receiveLoop() {
 	handleDatagram := func(datagram quiccarrier.ReceivedDatagram) {
 		defer datagram.Release()
 		wirePacket := datagram.Data
+		s.mu.Lock()
+		s.remoteAddr = datagram.RemoteAddr
+		s.mu.Unlock()
+		receiveEndpoint := s.endpointForAddrPort(datagram.RemoteAddr)
 		s.endpoint.owner.stats.wireRxPackets.Add(1)
 		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
 		result, err := s.fecDecoder.Handle(time.Now(), wirePacket)
@@ -1262,11 +1270,11 @@ func (s *session) receiveLoop() {
 			}
 			s.sendFECFeedback(result.SendFeedback)
 			for _, frame := range result.Frames {
-				s.deliverFrame(frame, true)
+				s.deliverFrame(frame, true, receiveEndpoint)
 			}
 			return
 		}
-		s.deliverFrame(wirePacket, false)
+		s.deliverFrame(wirePacket, false, receiveEndpoint)
 	}
 	expiry := time.NewTicker(fecExpiryPoll)
 	defer expiry.Stop()
@@ -1293,6 +1301,31 @@ func (s *session) receiveLoop() {
 	}
 }
 
+// endpointForRemote snapshots the live QUIC path for the WireGuard packet
+// being delivered. quic-go can migrate an established connection after a NAT
+// rebinding, while the endpoint created by Accept retains the address of the
+// initial path. WireGuard must receive the new immutable address so an
+// authenticated packet updates its roaming state and status output without
+// changing the session's configured/reconnect identity.
+func (s *session) endpointForAddrPort(remote netip.AddrPort) *Endpoint {
+	remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
+	if remote == s.endpoint.addr {
+		return s.endpoint
+	}
+	s.endpoint.mu.Lock()
+	fallback := s.endpoint.fallback
+	if s.endpoint.configured {
+		fallback = s.endpoint
+	}
+	s.endpoint.mu.Unlock()
+	return &Endpoint{
+		owner:    s.endpoint.owner,
+		addr:     remote,
+		session:  s,
+		fallback: fallback,
+	}
+}
+
 func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 	for _, feedback := range feedbacks {
 		s.endpoint.owner.stats.fecRawLost.Add(uint64(feedback.Missing))
@@ -1310,7 +1343,7 @@ func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 // deliverFrame parses and reassembles one WGQ1 frame. owned reports whether
 // frame stays valid after this call returns (FEC decoder output) as opposed
 // to aliasing the pooled QUIC receive datagram.
-func (s *session) deliverFrame(frame []byte, owned bool) {
+func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 	frag, err := parseFragment(frame)
 	if err != nil {
 		return
@@ -1324,7 +1357,7 @@ func (s *session) deliverFrame(frame []byte, owned bool) {
 	s.endpoint.owner.stats.wgRxPackets.Add(1)
 	s.endpoint.owner.stats.wgRxBytes.Add(uint64(len(packet)))
 	select {
-	case s.state.recv <- receivedPacket{data: packet, ep: s.endpoint}:
+	case s.state.recv <- receivedPacket{data: packet, ep: endpoint}:
 	case <-s.ctx.Done():
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)

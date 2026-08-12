@@ -230,7 +230,7 @@ func TestConnectionHandleStreamRelatedFrames(t *testing.T) {
 			tc := newServerTestConnection(t, gomock.NewController(t), nil, false)
 			data, err := test.frame.Append(nil, protocol.Version1)
 			require.NoError(t, err)
-			_, _, _, err = tc.conn.handleFrames(data, connID, protocol.Encryption1RTT, nil, monotime.Now())
+			_, _, _, err = tc.conn.handleFrames(data, connID, protocol.Encryption1RTT, nil, monotime.Now(), nil)
 			require.ErrorIs(t, err, &qerr.TransportError{ErrorCode: qerr.StreamStateError})
 		})
 	}
@@ -3465,7 +3465,7 @@ func testConnectionDatagrams(t *testing.T, enabled bool) {
 	require.NoError(t, err)
 	data, err = (&wire.DatagramFrame{Data: []byte("bar")}).Append(data, protocol.Version1)
 	require.NoError(t, err)
-	_, _, _, err = tc.conn.handleFrames(data, protocol.ConnectionID{}, protocol.Encryption1RTT, nil, monotime.Now())
+	_, _, _, err = tc.conn.handleFrames(data, protocol.ConnectionID{}, protocol.Encryption1RTT, nil, monotime.Now(), nil)
 
 	if !enabled {
 		require.ErrorIs(t, err, &qerr.TransportError{ErrorCode: qerr.FrameEncodingError, FrameType: uint64(wire.FrameTypeDatagramWithLength)})
