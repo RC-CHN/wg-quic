@@ -280,21 +280,24 @@ resolve_link_profile() {
 render_configs() {
 	local mode=$1
 	local mtu=$2
-	local settings fec obfs congestion
+	local settings fec obfs congestion data_shards
 	settings=$(mode_settings "$mode")
 	read -r fec obfs <<<"$settings"
 	congestion=${CONGESTION:-auto}
+	data_shards=${FEC_DATA_SHARDS:-32}
 	mkdir -p "$generated_dir"
 	sed \
 		-e "s/@FEC@/$fec/g" \
 		-e "s/@OBFS@/$obfs/g" \
 		-e "s/@CONGESTION@/$congestion/g" \
+		-e "s/@FEC_DATA_SHARDS@/$data_shards/g" \
 		-e "s/@MTU@/$mtu/g" \
 		"$script_dir/a.conf.in" >"$generated_dir/a.conf"
 	sed \
 		-e "s/@FEC@/$fec/g" \
 		-e "s/@OBFS@/$obfs/g" \
 		-e "s/@CONGESTION@/$congestion/g" \
+		-e "s/@FEC_DATA_SHARDS@/$data_shards/g" \
 		-e "s/@MTU@/$mtu/g" \
 		"$script_dir/b.conf.in" >"$generated_dir/b.conf"
 	cp "$script_dir/a.uapi.in" "$generated_dir/a.uapi"

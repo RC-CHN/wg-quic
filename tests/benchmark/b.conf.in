@@ -8,6 +8,7 @@ MTU = @MTU@
 # wg-quic: carrier=quic
 # wg-quic: congestion=@CONGESTION@
 # wg-quic: fec=@FEC@
+# wg-quic: fec-data-shards=@FEC_DATA_SHARDS@
 # wg-quic: obfs=@OBFS@
 
 [Peer]
