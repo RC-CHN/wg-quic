@@ -45,6 +45,7 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 	if controller == nil {
 		controller = NewController()
 	}
+	controller.SetDataShards(maxData)
 	encoder := &Encoder{
 		epoch: 1, maxData: maxData, controller: controller,
 		codecs: make(map[codecDimensions]reedsolomon.Encoder), lastParity: -1,

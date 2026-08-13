@@ -36,6 +36,7 @@ type Controller struct {
 	lossEWMA          float64
 	lossInitialized   bool
 	pathRTT           time.Duration
+	dataShards        int
 
 	transportInitialized bool
 	lastTransportSent    uint64
@@ -43,9 +44,20 @@ type Controller struct {
 }
 
 func NewController() *Controller {
-	controller := &Controller{parity: 1, lossInitialized: true}
+	controller := &Controller{parity: 1, lossInitialized: true, dataShards: DefaultDataShards}
 	controller.paritySnapshot.Store(1)
 	return controller
+}
+
+// SetDataShards records the encoder's data shard count so parity targets are
+// computed against the actual block length. The encoder calls this during
+// construction; the default keeps the controller aligned with DefaultDataShards.
+func (c *Controller) SetDataShards(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if n > 0 && n <= MaxDataShards {
+		c.dataShards = n
+	}
 }
 
 func (c *Controller) Parity(k int) int {
@@ -87,13 +99,13 @@ func (c *Controller) Observe(feedback Feedback) bool {
 		c.zeroLossGroups = 0
 	}
 
-	desired := c.desiredParityLocked(DefaultDataShards)
+	desired := c.desiredParityLocked()
 	if feedback.Missing > feedback.Recovered {
 		c.unrecoveredGroups++
 		if c.parity < desired ||
 			feedback.Missing-feedback.Recovered >= 2 ||
 			c.unrecoveredGroups >= 3 {
-			c.parity = min(c.parity+1, 4)
+			c.parity = min(c.parity+1, MaxParityShards)
 			c.unrecoveredGroups = 0
 		}
 		c.observedFrames = 0
@@ -173,7 +185,7 @@ func (c *Controller) ObserveTransport(packetsSent, packetsLost uint64) bool {
 	sample := float64(lost) / float64(sent)
 	c.updateLossLocked(sample, min(0.25, max(0.0625, float64(sent)/256)))
 	previous := c.parity
-	desired := c.desiredParityLocked(DefaultDataShards)
+	desired := c.desiredParityLocked()
 	switch {
 	case c.parity == 0 && lost >= 2 && sample >= 0.005:
 		c.parity = 1
@@ -203,13 +215,13 @@ func (c *Controller) storeSnapshotsLocked() {
 	c.lossSnapshotPPM.Store(uint64(min(1.0, max(0.0, c.lossEWMA))*1_000_000 + 0.5))
 }
 
-func (c *Controller) desiredParityLocked(dataShards int) int {
+func (c *Controller) desiredParityLocked() int {
 	threshold := defaultBypassLossThreshold
 	if c.pathRTT > bypassReferenceRTT {
 		threshold *= float64(bypassReferenceRTT) / float64(c.pathRTT)
 		threshold = max(minBypassLossThreshold, threshold)
 	}
-	return parityForLossThreshold(dataShards, c.lossEWMA, threshold)
+	return parityForLossThreshold(c.dataShards, c.lossEWMA, threshold)
 }
 
 func (c *Controller) decreaseWindowLocked(desired int) int {
@@ -235,7 +247,7 @@ func parityForLossThreshold(dataShards int, loss, bypassThreshold float64) int {
 	if dataShards <= 0 || loss <= bypassThreshold {
 		return 0
 	}
-	maxParity := min(4, max(1, dataShards/2))
+	maxParity := min(MaxParityShards, max(1, dataShards/2))
 	for parity := 1; parity <= maxParity; parity++ {
 		if binomialTail(dataShards+parity, loss, parity) <= 0.005 {
 			return parity

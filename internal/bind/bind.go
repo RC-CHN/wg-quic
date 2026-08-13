@@ -54,7 +54,7 @@ func DefaultConfig() Config {
 		},
 		CongestionMode:   "model",
 		FECMode:          "auto",
-		FECDataShards:    fec.DefaultDataShards,
+		FECDataShards:    fec.MaxDataShards,
 		FECFlushDeadline: 2 * time.Millisecond,
 		ObfsMode:         "none",
 	}

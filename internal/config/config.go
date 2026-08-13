@@ -47,10 +47,11 @@ type Peer struct {
 }
 
 type Transport struct {
-	Carrier    string
-	Congestion string
-	FEC        string
-	Obfs       string
+	Carrier       string
+	Congestion    string
+	FEC           string
+	Obfs          string
+	FECDataShards int
 }
 
 type DNSSettings struct {
@@ -290,6 +291,15 @@ func parseDirective(cfg *Config, peer *Peer, directive string) error {
 			return fmt.Errorf("unsupported fec mode %q", value)
 		}
 		cfg.Transport.FEC = value
+	case "fec-data-shards":
+		// MaxDataShards (32) is the wire-format ceiling and the deadline-based
+		// encoder shrinks the actual group size on low-rate links, so the
+		// configured value is an upper bound rather than a fixed block length.
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 32 {
+			return fmt.Errorf("fec-data-shards must be between 1 and 32, got %q", value)
+		}
+		cfg.Transport.FECDataShards = n
 	case "obfs":
 		if value != "none" && value != "salamander" {
 			return fmt.Errorf("unsupported obfs profile %q", value)
