@@ -222,6 +222,66 @@ func TestCompletionGraceDeliversLateShard(t *testing.T) {
 	}
 }
 
+func TestDecoderFastExpiresStaleGroups(t *testing.T) {
+	now := time.Now()
+
+	t.Run("dimensions-unknown", func(t *testing.T) {
+		decoder := NewDecoder()
+		// Group 1 gets one data shard but never its close/parity, so its
+		// dimensions are unknown.
+		if _, err := decoder.Handle(now, marshalPacket(packet{
+			kind: KindData, epoch: 1, groupID: 1, index: 0, payload: []byte{0, 1, 'a'},
+		})); err != nil {
+			t.Fatal(err)
+		}
+		result, err := decoder.Handle(now, marshalPacket(packet{
+			kind: KindData, epoch: 1, groupID: 2, index: 0, payload: []byte{0, 1, 'b'},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.SendFeedback) != 1 {
+			t.Fatalf("feedback = %#v, want one stale entry", result.SendFeedback)
+		}
+		fb := result.SendFeedback[0]
+		if fb.GroupID != 1 || fb.Missing != 1 || fb.Total != 0 {
+			t.Fatalf("feedback = %#v, want group 1 reported lost", fb)
+		}
+		if len(decoder.groups) != 1 {
+			t.Fatalf("incomplete groups = %d, want 1", len(decoder.groups))
+		}
+	})
+
+	t.Run("dimensions-known", func(t *testing.T) {
+		decoder := NewDecoder()
+		// Group 1 receives data[0] and parity[0] (k=3, r=1) but loses close.
+		// available=2 < k=3, so it cannot reconstruct and stalls.
+		if _, err := decoder.Handle(now, marshalPacket(packet{
+			kind: KindData, epoch: 1, groupID: 1, index: 0, payload: []byte{0, 1, 'a'},
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decoder.Handle(now, marshalPacket(packet{
+			kind: KindParity, epoch: 1, groupID: 1, index: 0, k: 3, r: 1, payload: []byte{0, 1, 'p'},
+		})); err != nil {
+			t.Fatal(err)
+		}
+		result, err := decoder.Handle(now, marshalPacket(packet{
+			kind: KindData, epoch: 1, groupID: 2, index: 0, payload: []byte{0, 1, 'b'},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.SendFeedback) != 1 {
+			t.Fatalf("feedback = %#v, want one stale entry", result.SendFeedback)
+		}
+		fb := result.SendFeedback[0]
+		if fb.GroupID != 1 || fb.Missing != 2 || fb.Total != 3 {
+			t.Fatalf("feedback = %#v, want group 1 missing two of three shards", fb)
+		}
+	})
+}
+
 func TestControllerIncreasesFastAndDecreasesSlowly(t *testing.T) {
 	controller := NewController()
 	if got := controller.Parity(8); got != 1 {
@@ -367,6 +427,8 @@ func TestControllerRemovesSurplusParityNormallyOnLongRTTPath(t *testing.T) {
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()
+	// fastExpire reclaims older incomplete groups as newer groups arrive, so
+	// monotonically increasing group IDs never accumulate past one group.
 	for i := 0; i < maxReceiveGroups; i++ {
 		packet := marshalPacket(packet{
 			kind: KindData, epoch: 1, groupID: uint64(i + 1), payload: []byte{0, 1, byte(i)},
@@ -375,11 +437,8 @@ func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 			t.Fatalf("group %d: %v", i, err)
 		}
 	}
-	excess := marshalPacket(packet{
-		kind: KindData, epoch: 1, groupID: maxReceiveGroups + 1, payload: []byte{0, 1, 1},
-	})
-	if _, err := decoder.Handle(now, excess); err == nil {
-		t.Fatal("decoder accepted more than the incomplete-group limit")
+	if len(decoder.groups) != 1 {
+		t.Fatalf("incomplete groups = %d, want 1 after fastExpire", len(decoder.groups))
 	}
 
 	decoder = NewDecoder()

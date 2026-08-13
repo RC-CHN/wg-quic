@@ -76,6 +76,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		return result, nil
 	}
 	result.SendFeedback = append(result.SendFeedback, d.expire(now)...)
+	result.SendFeedback = append(result.SendFeedback, d.fastExpire(p.groupID)...)
 	if done := d.completed[p.groupID]; done != nil {
 		d.handleLateShard(done, p, &result)
 		return result, nil
@@ -183,6 +184,41 @@ func (d *Decoder) handleLateShard(done *completedGroup, p packet, result *Result
 // Expire advances receiver state even when no more datagrams arrive.
 func (d *Decoder) Expire(now time.Time) []Feedback {
 	return d.expire(now)
+}
+
+// fastExpire reclaims incomplete groups left behind once a newer group
+// arrives. DATAGRAM frames are not reordered, so when a shard with group ID G
+// shows up, every older incomplete group must have lost its close frame (or
+// enough shards) and can be reported immediately instead of waiting out
+// groupTTL. This keeps the controller's parity response fast under burst loss.
+func (d *Decoder) fastExpire(currentGroupID uint64) []Feedback {
+	var feedback []Feedback
+	for id, group := range d.groups {
+		if id >= currentGroupID {
+			continue
+		}
+		if group.k > 0 {
+			received := 0
+			for i := 0; i < group.k; i++ {
+				if group.data[i] != nil {
+					received++
+				}
+			}
+			feedback = append(feedback, Feedback{
+				Epoch: group.epoch, GroupID: group.groupID,
+				Missing: uint16(group.k - received), Total: uint16(group.k),
+			})
+		} else {
+			// The whole group vanished before its dimensions arrived.
+			// Report one unrecovered shard so the controller still reacts.
+			feedback = append(feedback, Feedback{
+				Epoch: group.epoch, GroupID: group.groupID,
+				Missing: 1, Recovered: 0, Total: 0,
+			})
+		}
+		delete(d.groups, id)
+	}
+	return feedback
 }
 
 func (g *receiveGroup) setDimensions(k, r int) error {
