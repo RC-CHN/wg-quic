@@ -108,8 +108,8 @@ func TestSystematicDeliveryAndRecovery(t *testing.T) {
 	}
 
 	decoder := NewDecoder()
+	now := time.Now()
 	var got [][]byte
-	var feedback *Feedback
 	for i, packet := range packets {
 		p, handled, err := parsePacket(packet)
 		if err != nil || !handled {
@@ -118,14 +118,16 @@ func TestSystematicDeliveryAndRecovery(t *testing.T) {
 		if p.kind == KindData && p.index == 1 {
 			continue
 		}
-		result, err := decoder.Handle(time.Now(), packet)
+		result, err := decoder.Handle(now, packet)
 		if err != nil {
 			t.Fatalf("packet %d: %v", i, err)
 		}
 		got = append(got, result.Frames...)
-		if len(result.SendFeedback) != 0 {
-			feedback = &result.SendFeedback[len(result.SendFeedback)-1]
-		}
+	}
+	feedbackList := decoder.Expire(now.Add(completionGrace + time.Millisecond))
+	var feedback *Feedback
+	if len(feedbackList) != 0 {
+		feedback = &feedbackList[len(feedbackList)-1]
 	}
 	if feedback == nil || feedback.Missing != 1 || feedback.Recovered != 1 {
 		t.Fatalf("feedback = %#v, want one recovered shard", feedback)
@@ -144,6 +146,79 @@ func TestSystematicDeliveryAndRecovery(t *testing.T) {
 		if !found {
 			t.Fatalf("frame of length %d was not delivered", len(want))
 		}
+	}
+}
+
+func TestCompletionGraceAbsorbsReorderedShard(t *testing.T) {
+	now := time.Now()
+	controller := NewController()
+	encoder := NewEncoder(2, controller)
+	var packets [][]byte
+	for _, frame := range [][]byte{[]byte("a"), []byte("b")} {
+		out, err := encoder.Add(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packets = append(packets, out...)
+	}
+
+	decoder := NewDecoder()
+	var late []byte
+	for _, pkt := range packets {
+		p, handled, err := parsePacket(pkt)
+		if err != nil || !handled {
+			t.Fatalf("parse packet: handled=%v err=%v", handled, err)
+		}
+		if p.kind == KindData && p.index == 1 {
+			late = pkt
+			continue
+		}
+		if _, err := decoder.Handle(now, pkt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// data[1] was reconstructed when close finalized the group; now it
+	// arrives late and must walk the loss accounting back to zero.
+	if _, err := decoder.Handle(now, late); err != nil {
+		t.Fatal(err)
+	}
+	feedback := decoder.Expire(now.Add(completionGrace + time.Millisecond))
+	if len(feedback) != 1 {
+		t.Fatalf("feedback = %#v, want one entry", feedback)
+	}
+	if feedback[0].Missing != 0 || feedback[0].Recovered != 0 {
+		t.Fatalf("feedback = %#v, want reorder walked back to zero", feedback[0])
+	}
+}
+
+func TestCompletionGraceDeliversLateShard(t *testing.T) {
+	now := time.Now()
+	decoder := NewDecoder()
+	// data[0] delivers immediately.
+	if _, err := decoder.Handle(now, marshalPacket(packet{
+		kind: KindData, epoch: 1, groupID: 1, index: 0, payload: []byte{0, 1, 'a'},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	// close with k=2, r=0 finalizes with one missing shard.
+	if _, err := decoder.Handle(now, marshalPacket(packet{
+		kind: KindClose, epoch: 1, groupID: 1, k: 2, r: 0,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	// data[1] arrives late and is delivered now.
+	result, err := decoder.Handle(now, marshalPacket(packet{
+		kind: KindData, epoch: 1, groupID: 1, index: 1, payload: []byte{0, 1, 'b'},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Frames) != 1 || string(result.Frames[0]) != "b" {
+		t.Fatalf("late frames = %#v, want b", result.Frames)
+	}
+	feedback := decoder.Expire(now.Add(completionGrace + time.Millisecond))
+	if len(feedback) != 1 || feedback[0].Missing != 0 || feedback[0].Recovered != 0 {
+		t.Fatalf("feedback = %#v, want zero missing after late delivery", feedback)
 	}
 }
 

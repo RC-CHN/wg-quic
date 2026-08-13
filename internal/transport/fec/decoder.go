@@ -10,6 +10,7 @@ import (
 
 const (
 	groupTTL           = 3 * time.Second
+	completionGrace    = 10 * time.Millisecond
 	maxReceiveGroups   = 1024
 	maxCompletedGroups = 4096
 )
@@ -22,27 +23,42 @@ type Result struct {
 }
 
 type receiveGroup struct {
-	created   time.Time
-	epoch     uint16
-	groupID   uint64
-	k         int
-	r         int
-	data      map[int][]byte
-	parity    map[int][]byte
-	delivered map[int]bool
-	closed    bool
+	created       time.Time
+	epoch         uint16
+	groupID       uint64
+	k             int
+	r             int
+	data          map[int][]byte
+	parity        map[int][]byte
+	delivered     uint64 // bit i is set once shard i has been delivered
+	reconstructed uint64 // bit i is set once shard i was reconstructed from parity
+	closed        bool
+}
+
+// completedGroup retains the small amount of state needed to absorb late
+// shards after a group is finalized, without keeping the full shard payloads.
+// Feedback is deferred until the grace window expires so reordering is not
+// reported as loss.
+type completedGroup struct {
+	finalized     time.Time
+	epoch         uint16
+	k             int
+	delivered     uint64
+	reconstructed uint64
+	missing       uint16
+	recovered     uint16
 }
 
 type Decoder struct {
 	groups    map[uint64]*receiveGroup
-	completed map[uint64]time.Time
+	completed map[uint64]*completedGroup
 	codecs    map[codecDimensions]reedsolomon.Encoder
 }
 
 func NewDecoder() *Decoder {
 	return &Decoder{
 		groups:    make(map[uint64]*receiveGroup),
-		completed: make(map[uint64]time.Time),
+		completed: make(map[uint64]*completedGroup),
 		codecs:    make(map[codecDimensions]reedsolomon.Encoder),
 	}
 }
@@ -60,7 +76,8 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		return result, nil
 	}
 	result.SendFeedback = append(result.SendFeedback, d.expire(now)...)
-	if _, ok := d.completed[p.groupID]; ok {
+	if done := d.completed[p.groupID]; done != nil {
+		d.handleLateShard(done, p, &result)
 		return result, nil
 	}
 	group := d.groups[p.groupID]
@@ -70,7 +87,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		}
 		group = &receiveGroup{
 			created: now, epoch: p.epoch, groupID: p.groupID,
-			data: make(map[int][]byte), parity: make(map[int][]byte), delivered: make(map[int]bool),
+			data: make(map[int][]byte), parity: make(map[int][]byte),
 		}
 		d.groups[p.groupID] = group
 	}
@@ -86,14 +103,15 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		if group.data[index] == nil {
 			group.data[index] = append([]byte(nil), p.payload...)
 		}
-		if !group.delivered[index] {
+		bit := uint64(1) << uint(index)
+		if group.delivered&bit == 0 {
 			// Decode from the stored copy: the delivered frame may outlive the
 			// pooled receive datagram that p.payload aliases.
 			frame, err := decodeDataShard(group.data[index])
 			if err != nil {
 				return result, err
 			}
-			group.delivered[index] = true
+			group.delivered |= bit
 			result.Frames = append(result.Frames, frame)
 		}
 	case KindParity:
@@ -117,15 +135,49 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		return result, err
 	}
 	result.Frames = append(result.Frames, recovered...)
-	if feedback != nil {
-		result.SendFeedback = append(result.SendFeedback, *feedback)
-	}
 	if final {
 		delete(d.groups, group.groupID)
 		d.limitCompleted()
-		d.completed[group.groupID] = now
+		d.completed[group.groupID] = &completedGroup{
+			finalized:     now,
+			epoch:         group.epoch,
+			k:             group.k,
+			delivered:     group.delivered,
+			reconstructed: group.reconstructed,
+			missing:       feedback.Missing,
+			recovered:     feedback.Recovered,
+		}
 	}
 	return result, nil
+}
+
+// handleLateShard absorbs a shard arriving after its group was finalized. A
+// shard that was already reconstructed was only reordered (false loss), so its
+// missing/recovered counts are written back. A shard that was never delivered
+// is a genuine late arrival and is delivered now. Anything else is a duplicate.
+func (d *Decoder) handleLateShard(done *completedGroup, p packet, result *Result) {
+	if p.kind != KindData || int(p.index) >= done.k || len(p.payload) < 3 {
+		return
+	}
+	bit := uint64(1) << uint(p.index)
+	switch {
+	case done.reconstructed&bit != 0:
+		// Reconstructed at finalization: the shard was reordered, not lost.
+		done.missing--
+		done.recovered--
+	case done.delivered&bit == 0:
+		// Never delivered. Deliver a copy now; the pooled receive datagram
+		// backing p.payload is released after Handle returns.
+		frame, err := decodeDataShard(p.payload)
+		if err != nil {
+			return
+		}
+		done.delivered |= bit
+		done.missing--
+		result.Frames = append(result.Frames, append([]byte(nil), frame...))
+	default:
+		// Already delivered from the original shard: pure duplicate.
+	}
 }
 
 // Expire advances receiver state even when no more datagrams arrive.
@@ -220,8 +272,10 @@ func (d *Decoder) tryComplete(group *receiveGroup) ([][]byte, *Feedback, bool, e
 			return nil, nil, false, err
 		}
 		group.data[i] = shards[i]
-		if !group.delivered[i] {
-			group.delivered[i] = true
+		group.reconstructed |= uint64(1) << uint(i)
+		bit := uint64(1) << uint(i)
+		if group.delivered&bit == 0 {
+			group.delivered |= bit
 			frames = append(frames, frame)
 		}
 	}
@@ -273,8 +327,16 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 			delete(d.groups, id)
 		}
 	}
-	for id, completedAt := range d.completed {
-		if now.Sub(completedAt) > groupTTL {
+	for id, done := range d.completed {
+		if now.Sub(done.finalized) > groupTTL {
+			delete(d.completed, id)
+			continue
+		}
+		if now.Sub(done.finalized) > completionGrace {
+			feedback = append(feedback, Feedback{
+				Epoch: done.epoch, GroupID: id,
+				Missing: done.missing, Recovered: done.recovered, Total: uint16(done.k),
+			})
 			delete(d.completed, id)
 		}
 	}
@@ -287,9 +349,9 @@ func (d *Decoder) limitCompleted() {
 	}
 	var oldestID uint64
 	var oldestAt time.Time
-	for id, completedAt := range d.completed {
-		if oldestAt.IsZero() || completedAt.Before(oldestAt) {
-			oldestID, oldestAt = id, completedAt
+	for id, done := range d.completed {
+		if oldestAt.IsZero() || done.finalized.Before(oldestAt) {
+			oldestID, oldestAt = id, done.finalized
 		}
 	}
 	delete(d.completed, oldestID)
