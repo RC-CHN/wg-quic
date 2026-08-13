@@ -109,6 +109,8 @@ resolve_link_profile() {
 	link_queue_packets=$base_queue
 	link_loss_correlation=0
 	link_reorder_correlation=0
+	link_loss_model=random
+	link_burst_len=0
 	case "$profile" in
 	custom)
 		link_impairment=$base_impairment
@@ -126,6 +128,8 @@ resolve_link_profile() {
 		link_rev_reorder=${REV_REORDER_PCT:-0}
 		link_loss_correlation=${LOSS_CORRELATION_PCT:-0}
 		link_reorder_correlation=${REORDER_CORRELATION_PCT:-0}
+		link_loss_model=${LOSS_MODEL:-random}
+		link_burst_len=${BURST_LEN:-0}
 		;;
 	unshaped)
 		link_impairment=none
@@ -395,9 +399,20 @@ apply_netem_to() {
 		fi
 	fi
 	if [[ $loss_pct != 0 ]]; then
-		args+=(loss random "${loss_pct}%")
-		if [[ $link_loss_correlation != 0 ]]; then
-			args+=("${link_loss_correlation}%")
+		if [[ $link_loss_model == burst && $link_burst_len -gt 0 ]]; then
+			# loss state P13 P31 models a two-state Markov chain. P31 is the
+			# per-packet probability of leaving the burst state (mean burst
+			# length = 1/P31), and P13 = P31 * p / (1 - p) yields the requested
+			# steady-state loss probability p.
+			local p31 p13
+			p31=$(awk "BEGIN { printf \"%.4f\", 100 / $link_burst_len }")
+			p13=$(awk "BEGIN { printf \"%.4f\", $p31 * $loss_pct / (100 - $loss_pct) }")
+			args+=(loss state "${p13}%" "${p31}%")
+		else
+			args+=(loss random "${loss_pct}%")
+			if [[ $link_loss_correlation != 0 ]]; then
+				args+=("${link_loss_correlation}%")
+			fi
 		fi
 	fi
 	if [[ $duplicate_pct != 0 ]]; then
@@ -1321,6 +1336,7 @@ The trial command is configured with environment variables. Common values:
   IMPAIRMENT=none|forward|reverse|symmetric
   RATE_MBIT=0 LOSS_PCT=0 ONE_WAY_DELAY_MS=0 JITTER_MS=0
   FWD_RATE_MBIT=0 REV_RATE_MBIT=0 FWD_LOSS_PCT=0 REV_LOSS_PCT=0
+  LOSS_MODEL=random|burst BURST_LEN=8 LOSS_CORRELATION_PCT=0
   LINK_SCHEDULE=5:cellular,10:fiber
   TELEMETRY_INTERVAL_SECONDS=0.5
   IPERF_INTERVAL_SECONDS=0.25 STALL_BPS_THRESHOLD=0
