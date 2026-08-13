@@ -33,6 +33,7 @@ type Config struct {
 	CongestionMode   string
 	FECMode          string
 	FECDataShards    int
+	FECInterleave    int
 	FECFlushDeadline time.Duration
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
@@ -55,6 +56,7 @@ func DefaultConfig() Config {
 		CongestionMode:   "model",
 		FECMode:          "auto",
 		FECDataShards:    fec.MaxDataShards,
+		FECInterleave:    1,
 		FECFlushDeadline: 2 * time.Millisecond,
 		ObfsMode:         "none",
 	}
@@ -190,6 +192,9 @@ func New(cfg Config) *Bind {
 	}
 	if cfg.FECDataShards <= 0 {
 		cfg.FECDataShards = defaults.FECDataShards
+	}
+	if cfg.FECInterleave <= 0 {
+		cfg.FECInterleave = defaults.FECInterleave
 	}
 	if cfg.FECFlushDeadline <= 0 {
 		cfg.FECFlushDeadline = defaults.FECFlushDeadline
@@ -930,6 +935,8 @@ func (b *Bind) newSessionLocked(
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
 		sess.fecEncoder = fec.NewEncoder(state.cfg.FECDataShards, fec.NewController())
+		// SetInterleave cannot fail at construction: no groups are in flight.
+		_ = sess.fecEncoder.SetInterleave(state.cfg.FECInterleave)
 	}
 	state.sessions[sess.id] = sess
 	b.stats.activeSessions.Add(1)

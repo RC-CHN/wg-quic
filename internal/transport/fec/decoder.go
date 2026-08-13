@@ -50,9 +50,10 @@ type completedGroup struct {
 }
 
 type Decoder struct {
-	groups    map[uint64]*receiveGroup
-	completed map[uint64]*completedGroup
-	codecs    map[codecDimensions]reedsolomon.Encoder
+	groups      map[uint64]*receiveGroup
+	completed   map[uint64]*completedGroup
+	codecs      map[codecDimensions]reedsolomon.Encoder
+	lastGroupID uint64
 }
 
 func NewDecoder() *Decoder {
@@ -76,7 +77,10 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 		return result, nil
 	}
 	result.SendFeedback = append(result.SendFeedback, d.expire(now)...)
-	result.SendFeedback = append(result.SendFeedback, d.fastExpire(p.groupID)...)
+	if p.groupID > d.lastGroupID {
+		d.lastGroupID = p.groupID
+	}
+	result.SendFeedback = append(result.SendFeedback, d.fastExpire()...)
 	if done := d.completed[p.groupID]; done != nil {
 		d.handleLateShard(done, p, &result)
 		return result, nil
@@ -191,10 +195,14 @@ func (d *Decoder) Expire(now time.Time) []Feedback {
 // shows up, every older incomplete group must have lost its close frame (or
 // enough shards) and can be reported immediately instead of waiting out
 // groupTTL. This keeps the controller's parity response fast under burst loss.
-func (d *Decoder) fastExpire(currentGroupID uint64) []Feedback {
+func (d *Decoder) fastExpire() []Feedback {
 	var feedback []Feedback
 	for id, group := range d.groups {
-		if id >= currentGroupID {
+		// DATAGRAM frames are not reordered, but interleaving emits up to
+		// MaxInterleave groups concurrently, so an older group may still be in
+		// flight. Only groups lagging the newest by at least MaxInterleave are
+		// certainly lost.
+		if d.lastGroupID-id < MaxInterleave {
 			continue
 		}
 		if group.k > 0 {

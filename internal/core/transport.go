@@ -23,6 +23,9 @@ func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, er
 	if cfg.Transport.FECDataShards > 0 {
 		result.Bind.FECDataShards = cfg.Transport.FECDataShards
 	}
+	if cfg.Transport.FECInterleave > 0 {
+		result.Bind.FECInterleave = cfg.Transport.FECInterleave
+	}
 	result.Bind.CongestionMode = cfg.Transport.Congestion
 	result.Bind.ObfsMode = cfg.Transport.Obfs
 	if result.Bind.ObfsMode == "none" {

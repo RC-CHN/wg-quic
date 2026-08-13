@@ -235,7 +235,7 @@ func TestDecoderFastExpiresStaleGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := decoder.Handle(now, marshalPacket(packet{
-			kind: KindData, epoch: 1, groupID: 2, index: 0, payload: []byte{0, 1, 'b'},
+			kind: KindData, epoch: 1, groupID: 5, index: 0, payload: []byte{0, 1, 'b'},
 		}))
 		if err != nil {
 			t.Fatal(err)
@@ -267,7 +267,7 @@ func TestDecoderFastExpiresStaleGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := decoder.Handle(now, marshalPacket(packet{
-			kind: KindData, epoch: 1, groupID: 2, index: 0, payload: []byte{0, 1, 'b'},
+			kind: KindData, epoch: 1, groupID: 5, index: 0, payload: []byte{0, 1, 'b'},
 		}))
 		if err != nil {
 			t.Fatal(err)
@@ -427,8 +427,8 @@ func TestControllerRemovesSurplusParityNormallyOnLongRTTPath(t *testing.T) {
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()
-	// fastExpire reclaims older incomplete groups as newer groups arrive, so
-	// monotonically increasing group IDs never accumulate past one group.
+	// fastExpire reclaims groups lagging the newest by MaxInterleave, so
+	// monotonically increasing group IDs never accumulate past that window.
 	for i := 0; i < maxReceiveGroups; i++ {
 		packet := marshalPacket(packet{
 			kind: KindData, epoch: 1, groupID: uint64(i + 1), payload: []byte{0, 1, byte(i)},
@@ -437,8 +437,8 @@ func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 			t.Fatalf("group %d: %v", i, err)
 		}
 	}
-	if len(decoder.groups) != 1 {
-		t.Fatalf("incomplete groups = %d, want 1 after fastExpire", len(decoder.groups))
+	if len(decoder.groups) != MaxInterleave {
+		t.Fatalf("incomplete groups = %d, want %d after fastExpire", len(decoder.groups), MaxInterleave)
 	}
 
 	decoder = NewDecoder()

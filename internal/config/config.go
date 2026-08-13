@@ -52,6 +52,7 @@ type Transport struct {
 	FEC           string
 	Obfs          string
 	FECDataShards int
+	FECInterleave int
 }
 
 type DNSSettings struct {
@@ -300,6 +301,13 @@ func parseDirective(cfg *Config, peer *Peer, directive string) error {
 			return fmt.Errorf("fec-data-shards must be between 1 and 32, got %q", value)
 		}
 		cfg.Transport.FECDataShards = n
+	case "fec-interleave":
+		// MaxInterleave (4) is the encoder's group-round-robin ceiling.
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 4 {
+			return fmt.Errorf("fec-interleave must be between 1 and 4, got %q", value)
+		}
+		cfg.Transport.FECInterleave = n
 	case "obfs":
 		if value != "none" && value != "salamander" {
 			return fmt.Errorf("unsupported obfs profile %q", value)
