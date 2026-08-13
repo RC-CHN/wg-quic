@@ -424,6 +424,35 @@ func TestControllerRemovesSurplusParityNormallyOnLongRTTPath(t *testing.T) {
 	}
 }
 
+func TestControllerAdaptsInterleave(t *testing.T) {
+	t.Run("ramps-up-on-burst", func(t *testing.T) {
+		controller := NewController()
+		controller.setParity(interleaveParityFloor)
+		if got := controller.CurrentInterleave(); got != 1 {
+			t.Fatalf("initial interleave = %d, want 1", got)
+		}
+		controller.Observe(Feedback{Missing: interleaveMissingThreshold, Recovered: 0, Total: 8})
+		if got := controller.CurrentInterleave(); got != 2 {
+			t.Fatalf("interleave after burst = %d, want 2", got)
+		}
+	})
+
+	t.Run("ramps-down-after-healthy-run", func(t *testing.T) {
+		controller := NewController()
+		controller.setParity(interleaveParityFloor)
+		controller.Observe(Feedback{Missing: interleaveMissingThreshold, Recovered: 0, Total: 8})
+		if got := controller.CurrentInterleave(); got != 2 {
+			t.Fatalf("interleave before decrease = %d, want 2", got)
+		}
+		for range interleaveDecreaseGroups {
+			controller.Observe(Feedback{Total: 8})
+		}
+		if got := controller.CurrentInterleave(); got != 1 {
+			t.Fatalf("interleave after decrease = %d, want 1", got)
+		}
+	})
+}
+
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()

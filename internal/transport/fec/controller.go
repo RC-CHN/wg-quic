@@ -13,6 +13,15 @@ const (
 	bypassReferenceRTT         = 100 * time.Millisecond
 	defaultDecreaseGroups      = 32
 	maxDecreaseGroups          = 256
+	// interleaveParityFloor is the parity level at which interleaving becomes
+	// eligible. Spreading bursts over groups is cheaper than yet more parity.
+	interleaveParityFloor = 4
+	// interleaveMissingThreshold is the number of unrecovered shards in a
+	// single group that counts as a burst and ramps interleaving up.
+	interleaveMissingThreshold = 4
+	// interleaveDecreaseGroups is how many consecutive zero-loss groups it
+	// takes before halving the interleave depth.
+	interleaveDecreaseGroups = 32
 )
 
 type Feedback struct {
@@ -41,11 +50,15 @@ type Controller struct {
 	transportInitialized bool
 	lastTransportSent    uint64
 	lastTransportLost    uint64
+
+	interleave         int
+	interleaveSnapshot atomic.Int32
 }
 
 func NewController() *Controller {
-	controller := &Controller{parity: 1, lossInitialized: true, dataShards: DefaultDataShards}
+	controller := &Controller{parity: 1, lossInitialized: true, dataShards: DefaultDataShards, interleave: 1}
 	controller.paritySnapshot.Store(1)
+	controller.interleaveSnapshot.Store(1)
 	return controller
 }
 
@@ -108,12 +121,25 @@ func (c *Controller) Observe(feedback Feedback) bool {
 			c.parity = min(c.parity+1, MaxParityShards)
 			c.unrecoveredGroups = 0
 		}
+		if c.interleave < MaxInterleave && c.parity >= interleaveParityFloor &&
+			feedback.Missing-feedback.Recovered >= interleaveMissingThreshold {
+			// A single group losing several unrecovered shards is a burst:
+			// spread future groups by doubling the interleave depth.
+			c.interleave *= 2
+		}
 		c.observedFrames = 0
 		c.decreaseGroups = 0
 		return c.parity != previous
 	}
 	c.unrecoveredGroups = 0
 	decreaseWindow := c.decreaseWindowLocked(desired)
+	if c.interleave > 1 && c.zeroLossGroups >= interleaveDecreaseGroups {
+		// A long healthy run means the burst regime has ended: halve the
+		// interleave depth.
+		c.interleave /= 2
+		c.zeroLossGroups = 0
+		return c.parity != previous
+	}
 	if c.zeroLossGroups >= decreaseWindow && c.parity > desired {
 		c.parity--
 		c.zeroLossGroups = 0
@@ -140,6 +166,10 @@ func (c *Controller) Observe(feedback Feedback) bool {
 
 func (c *Controller) CurrentParity() int {
 	return int(c.paritySnapshot.Load())
+}
+
+func (c *Controller) CurrentInterleave() int {
+	return int(c.interleaveSnapshot.Load())
 }
 
 func (c *Controller) setParity(parity int) {
@@ -212,6 +242,7 @@ func (c *Controller) updateLossLocked(sample, alpha float64) {
 
 func (c *Controller) storeSnapshotsLocked() {
 	c.paritySnapshot.Store(int32(c.parity))
+	c.interleaveSnapshot.Store(int32(c.interleave))
 	c.lossSnapshotPPM.Store(uint64(min(1.0, max(0.0, c.lossEWMA))*1_000_000 + 0.5))
 }
 

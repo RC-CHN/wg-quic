@@ -71,10 +71,16 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 }
 
 // SetInterleave sets the number of concurrently emitted groups. A value of 1
-// (the default) preserves sequential emission order. Increasing it flushes any
-// in-flight groups before swapping the group set so a mid-stream change stays
-// wire-consistent.
+// (the default) preserves sequential emission order. It is used during
+// construction, where no groups are in flight yet.
 func (e *Encoder) SetInterleave(n int) error {
+	_, err := e.setInterleave(n)
+	return err
+}
+
+// setInterleave swaps the group set to n and returns any flushed packets so
+// the caller can send them before continuing.
+func (e *Encoder) setInterleave(n int) ([][]byte, error) {
 	if n < 1 {
 		n = 1
 	}
@@ -82,14 +88,15 @@ func (e *Encoder) SetInterleave(n int) error {
 		n = MaxInterleave
 	}
 	if n == e.interleave {
-		return nil
+		return nil, nil
 	}
-	if _, err := e.flushAll(); err != nil {
-		return err
+	flushed, err := e.flushAll()
+	if err != nil {
+		return nil, err
 	}
 	e.interleave = n
 	e.initGroups(n)
-	return nil
+	return flushed, nil
 }
 
 func (e *Encoder) initGroups(n int) {
@@ -104,13 +111,23 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 	if len(frame) == 0 || len(frame) > MaxFrameSize {
 		return nil, errors.New("invalid FEC data frame length")
 	}
+	var output [][]byte
+	if target := e.controller.CurrentInterleave(); target != e.interleave {
+		flushed, err := e.setInterleave(target)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, flushed...)
+	}
 	targetParity := e.controller.CurrentParity()
 	if targetParity == 0 && e.unprotected < healthyProbeFrames {
 		e.unprotected++
 		e.bypass[0] = frame
+		if len(output) != 0 {
+			return append(output, frame), nil
+		}
 		return e.bypass, nil
 	}
-	var output [][]byte
 	if e.lastParity >= 0 && targetParity != e.lastParity {
 		flushed, err := e.flushAll()
 		if err != nil {
