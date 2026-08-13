@@ -28,9 +28,14 @@ type Encoder struct {
 	controller    *Controller
 	codecs        map[codecDimensions]reedsolomon.Encoder
 	data          [][]byte
-	groupParity   int
-	lastParity    int
-	unprotected   int
+	// bypass reuses the single-frame result slice returned on the healthy
+	// fast path, where the encoder just forwards the frame without FEC work.
+	// The encoder is session-local and Add is only called from one goroutine,
+	// so the slice is safe to recycle between synchronous calls.
+	bypass      [][]byte
+	groupParity int
+	lastParity  int
+	unprotected int
 }
 
 func NewEncoder(maxData int, controller *Controller) *Encoder {
@@ -43,6 +48,7 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 	encoder := &Encoder{
 		epoch: 1, maxData: maxData, controller: controller,
 		codecs: make(map[codecDimensions]reedsolomon.Encoder), lastParity: -1,
+		bypass: make([][]byte, 1),
 	}
 	encoder.epochSnapshot.Store(1)
 	return encoder
@@ -56,7 +62,8 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 		targetParity := e.controller.CurrentParity()
 		if targetParity == 0 && e.unprotected < healthyProbeFrames {
 			e.unprotected++
-			return [][]byte{frame}, nil
+			e.bypass[0] = frame
+			return e.bypass, nil
 		}
 		if e.lastParity >= 0 && targetParity != e.lastParity {
 			e.epoch++
