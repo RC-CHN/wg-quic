@@ -156,6 +156,19 @@ function renderPeers(status?: CoreStatus): void {
   );
 }
 
+function tunnelSummary(tunnel: TunnelView): string {
+  const status = tunnel.status;
+  if (!status) {
+    return '—';
+  }
+  const address = status.addresses?.[0];
+  const peerEndpoint = status.peers?.find((peer) => peer.endpoint)?.endpoint;
+  if (address && peerEndpoint) {
+    return `${address} → ${peerEndpoint}`;
+  }
+  return address || peerEndpoint || '—';
+}
+
 function renderDetail(tunnel?: TunnelView): void {
   detail.classList.toggle('hidden', !tunnel);
   detailEmpty.classList.toggle('hidden', Boolean(tunnel));
@@ -182,6 +195,7 @@ function renderDetail(tunnel?: TunnelView): void {
   const backendSupported = Boolean(current?.backend.supported);
 
   setText('detail-name', tunnel.name);
+  setText('detail-summary', tunnelSummary(tunnel));
   setText('detail-path', tunnel.configPath);
   setText('detail-state', tunnelStateLabel(state));
   setText(
@@ -414,6 +428,35 @@ async function importTunnel(): Promise<void> {
     );
   }
 }
+
+function applyTheme(theme: 'dark' | 'light'): void {
+  document.documentElement.dataset.theme = theme;
+  byId<HTMLSpanElement>('theme-icon').textContent =
+    theme === 'light' ? '☀' : '☾';
+}
+
+function currentTheme(): 'dark' | 'light' {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function initTheme(): void {
+  const saved = localStorage.getItem('wg-quic-theme');
+  const initial =
+    saved === 'light' || saved === 'dark'
+      ? saved
+      : window.matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark';
+  applyTheme(initial);
+}
+
+initTheme();
+
+byId('theme-toggle').addEventListener('click', () => {
+  const next = currentTheme() === 'light' ? 'dark' : 'light';
+  localStorage.setItem('wg-quic-theme', next);
+  applyTheme(next);
+});
 
 byId('refresh').addEventListener('click', () => void refresh());
 byId('import-config').addEventListener('click', () => void importTunnel());

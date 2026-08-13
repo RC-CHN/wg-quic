@@ -38,6 +38,7 @@ export interface CoreStatus {
   carrier: string;
   fec_mode: string;
   obfs_mode: string;
+  addresses?: string[];
   peers?: PeerStatus[];
   stats: RuntimeStats;
 }

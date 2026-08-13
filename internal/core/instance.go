@@ -329,10 +329,15 @@ func (i *Instance) status() control.Status {
 		peers = append(peers, peer)
 	}
 	i.endpointMu.RUnlock()
+	addresses := make([]string, 0, len(i.cfg.Interface.Addresses))
+	for _, addr := range i.cfg.Interface.Addresses {
+		addresses = append(addresses, addr.String())
+	}
 	return control.Status{
 		Interface: i.name, State: state, ListenPort: i.bind.Port(),
 		Carrier: i.cfg.Transport.Carrier, FECMode: i.cfg.Transport.FEC,
-		ObfsMode: i.cfg.Transport.Obfs, Peers: peers, Stats: i.Stats(),
+		ObfsMode: i.cfg.Transport.Obfs, Addresses: addresses,
+		Peers: peers, Stats: i.Stats(),
 	}
 }
 

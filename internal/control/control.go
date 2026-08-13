@@ -21,6 +21,7 @@ type Status struct {
 	Carrier    string          `json:"carrier"`
 	FECMode    string          `json:"fec_mode"`
 	ObfsMode   string          `json:"obfs_mode"`
+	Addresses  []string        `json:"addresses,omitempty"`
 	Peers      []PeerStatus    `json:"peers,omitempty"`
 	Stats      telemetry.Stats `json:"stats"`
 }
