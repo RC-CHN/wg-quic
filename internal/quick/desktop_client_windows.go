@@ -205,7 +205,7 @@ func validateWindowsDesktopRequest(
 		return err
 	}
 	switch action {
-	case "up", "down", "check":
+	case "up", "down", "check", "delete":
 		if source != "" {
 			return fmt.Errorf("desktop %s does not accept a source path", action)
 		}

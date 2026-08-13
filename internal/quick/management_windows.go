@@ -709,7 +709,8 @@ func runWindowsManagementOperation(
 	}
 	if request.Action == "up" ||
 		request.Action == "down" ||
-		request.Action == "import" {
+		request.Action == "import" ||
+		request.Action == "delete" {
 		mutations.Lock()
 		defer mutations.Unlock()
 	}
@@ -744,6 +745,11 @@ func runWindowsManagementOperation(
 			host.ConfigPath(request.Name),
 			request.Overwrite,
 		)
+	case "delete":
+		// Best-effort stop before removal so a running tunnel does not
+		// outlive its configuration.
+		_ = manageWindowsBroker(ctx, "down", request.Name)
+		return DeleteDesktopConfig(request.Name)
 	case "probe":
 		return nil
 	default:

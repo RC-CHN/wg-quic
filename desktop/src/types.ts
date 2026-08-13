@@ -80,10 +80,16 @@ export interface ImportResult {
   snapshot: DesktopSnapshot;
 }
 
+export interface DeleteResult {
+  canceled: boolean;
+  snapshot: DesktopSnapshot;
+}
+
 export interface DesktopAPI {
   snapshot(): Promise<DesktopSnapshot>;
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;
+  deleteTunnel(name: string): Promise<DeleteResult>;
   importConfig(): Promise<ImportResult>;
   importConfigPath(
     sourcePath: string,

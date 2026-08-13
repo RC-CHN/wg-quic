@@ -188,6 +188,11 @@ func runWindowsDesktopHelper(
 	switch request.Action {
 	case "up", "down":
 		return Manage(ctx, request.Action, request.Name)
+	case "delete":
+		// Best-effort stop before removal so a running tunnel does not
+		// outlive its configuration.
+		_ = Manage(ctx, "down", request.Name)
+		return DeleteDesktopConfig(request.Name)
 	case "check":
 		lease, _, err := openAndValidateWindowsStoredConfig(request.Name)
 		if lease != nil {

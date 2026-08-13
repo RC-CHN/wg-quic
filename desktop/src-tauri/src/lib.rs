@@ -589,6 +589,8 @@ fn run_privileged(
         }
     } else if action == "check" {
         arguments.extend([argument("check"), argument(name)]);
+    } else if action == "delete" {
+        arguments.extend([argument("desktop-delete"), argument(name)]);
     } else {
         arguments.extend([argument(action), argument(name)]);
     }
@@ -623,6 +625,19 @@ fn check_tunnel(app: AppHandle, name: String) -> Result<String, String> {
     require_profile(&name)?;
     let paths = native_paths(&app)?;
     run_privileged(&paths, "check", &name, None, false)
+}
+
+#[tauri::command(async)]
+fn delete_tunnel(
+    app: AppHandle,
+    state: State<'_, BackendState>,
+    name: String,
+) -> Result<DesktopSnapshot, String> {
+    validate_interface_name(&name)?;
+    require_profile(&name)?;
+    let paths = native_paths(&app)?;
+    run_privileged(&paths, "delete", &name, None, false)?;
+    snapshot_inner(&app, &state)
 }
 
 #[tauri::command(async)]
@@ -822,6 +837,7 @@ pub fn run() {
             snapshot,
             manage_tunnel,
             check_tunnel,
+            delete_tunnel,
             import_config,
             open_config_directory,
             desktop_smoke_settings,

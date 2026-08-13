@@ -47,6 +47,11 @@ func run(args []string) error {
 			return usage()
 		}
 		return quick.ImportDesktopConfig(source, name, overwrite)
+	case "desktop-delete":
+		if len(args) != 2 {
+			return usage()
+		}
+		return quick.DeleteDesktopConfig(args[1])
 	case "desktop-client":
 		request, err := parseDesktopClientArgs(args[1:])
 		if err != nil {
@@ -172,7 +177,7 @@ func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
 	}
 	request := desktopClientRequest{action: args[0], name: args[1]}
 	switch request.action {
-	case "up", "down", "check":
+	case "up", "down", "check", "delete":
 		if len(args) != 2 {
 			return desktopClientRequest{}, errors.New("desktop action received unexpected arguments")
 		}

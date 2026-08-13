@@ -85,7 +85,9 @@ func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 		{"up", "wg0", "extra"},
 		{"import", "wg0"},
 		{"import", "wg0", "source.conf", "--replace"},
-		{"delete", "wg0"},
+		{"restart", "wg0"},
+		{"delete"},
+		{"delete", "wg0", "extra"},
 	} {
 		if _, err := parseDesktopClientArgs(args); err == nil {
 			t.Fatalf("parseDesktopClientArgs(%q) accepted invalid input", args)

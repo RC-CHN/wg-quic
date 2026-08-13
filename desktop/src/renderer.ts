@@ -232,6 +232,10 @@ function renderDetail(tunnel?: TunnelView): void {
   check.disabled = Boolean(action);
   check.dataset.name = tunnel.name;
 
+  const deleteButton = byId<HTMLButtonElement>('delete-tunnel');
+  deleteButton.disabled = Boolean(action) || !backendSupported;
+  deleteButton.dataset.name = tunnel.name;
+
   setText('detail-carrier', status?.carrier.toUpperCase() || 'QUIC');
   setText(
     'detail-modes',
@@ -411,6 +415,23 @@ async function checkTunnel(name: string): Promise<void> {
   }
 }
 
+async function deleteTunnel(name: string): Promise<void> {
+  try {
+    const result = await window.wgQuic.deleteTunnel(name);
+    if (result.canceled) {
+      return;
+    }
+    if (selectedName === name) {
+      selectedName = undefined;
+    }
+    render(result.snapshot);
+    showToast(`${name} deleted`);
+  } catch (error) {
+    showToast(`${name}: ${errorMessage(error)}`, 'error');
+    await refresh(false);
+  }
+}
+
 async function importTunnel(): Promise<void> {
   try {
     const result = await window.wgQuic.importConfig();
@@ -472,6 +493,12 @@ byId('check-tunnel').addEventListener('click', (event) => {
   const name = (event.currentTarget as HTMLButtonElement).dataset.name;
   if (name) {
     void checkTunnel(name);
+  }
+});
+byId('delete-tunnel').addEventListener('click', (event) => {
+  const name = (event.currentTarget as HTMLButtonElement).dataset.name;
+  if (name) {
+    void deleteTunnel(name);
   }
 });
 byId('open-directory').addEventListener('click', async () => {

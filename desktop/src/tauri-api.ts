@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ask, open } from '@tauri-apps/plugin-dialog';
 import type {
+  DeleteResult,
   DesktopAPI,
   DesktopSnapshot,
   ImportResult,
@@ -35,6 +36,24 @@ const api: DesktopAPI = {
   manage: (name: string, action: TunnelAction) =>
     invoke<DesktopSnapshot>('manage_tunnel', { name, action }),
   check: (name: string) => invoke<string>('check_tunnel', { name }),
+  deleteTunnel: async (name: string): Promise<DeleteResult> => {
+    const confirmed = await ask(
+      `Delete tunnel "${name}"? This stops the tunnel and removes its configuration. This cannot be undone.`,
+      {
+        title: 'Delete tunnel?',
+        kind: 'warning',
+        okLabel: 'Delete',
+        cancelLabel: 'Cancel',
+      },
+    );
+    if (!confirmed) {
+      return { canceled: true, snapshot: await api.snapshot() };
+    }
+    return {
+      canceled: false,
+      snapshot: await invoke<DesktopSnapshot>('delete_tunnel', { name }),
+    };
+  },
   importConfig: async () => {
     const selected = await open({
       title: 'Import wg-quic configuration',
