@@ -78,6 +78,17 @@ func TestParseDesktopClientArgs(t *testing.T) {
 	}
 }
 
+func TestParseDesktopClientReadArgs(t *testing.T) {
+	request, err := parseDesktopClientArgs([]string{"read", "office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.action != "read" || request.name != "office" ||
+		request.source != "" || request.overwrite {
+		t.Fatalf("unexpected desktop read request: %#v", request)
+	}
+}
+
 func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
@@ -88,6 +99,7 @@ func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 		{"restart", "wg0"},
 		{"delete"},
 		{"delete", "wg0", "extra"},
+		{"read", "wg0", "extra"},
 	} {
 		if _, err := parseDesktopClientArgs(args); err == nil {
 			t.Fatalf("parseDesktopClientArgs(%q) accepted invalid input", args)

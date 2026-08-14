@@ -26,6 +26,8 @@ const (
 	maxWindowsDesktopEnvelopeSize = 2*maxWindowsDesktopConfigSize + 64*1024
 )
 
+var windowsDesktopReadStoredConfig = readWindowsStoredDesktopConfig
+
 // RunWindowsDesktopHelper is the deliberately narrow elevated boundary used
 // by the desktop UI. Only a random local pipe name crosses the UAC command-line
 // boundary. The validated operation request and its result travel over that
@@ -42,13 +44,14 @@ func RunWindowsDesktopHelper(ctx context.Context, pipePath string) error {
 	))
 
 	request, operationErr := readWindowsDesktopRequest(connection)
+	contents := ""
 	if operationErr == nil {
 		var deadline time.Time
 		deadline, operationErr = windowsDesktopRequestDeadline(
 			request, time.Now(),
 		)
 		if operationErr == nil {
-			operationErr = runWindowsDesktopHelperUntilDeadline(
+			contents, operationErr = runWindowsDesktopHelperUntilDeadline(
 				ctx, request, deadline, runWindowsDesktopHelper,
 			)
 		}
@@ -59,12 +62,10 @@ func RunWindowsDesktopHelper(ctx context.Context, pipePath string) error {
 	} else if request.Action == "check" {
 		message = "configuration is valid for wg-quic-quick"
 	}
-	resultErr := json.NewEncoder(connection).Encode(struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}{
-		Success: operationErr == nil,
-		Message: message,
+	resultErr := json.NewEncoder(connection).Encode(windowsDesktopResult{
+		Success:  operationErr == nil,
+		Message:  message,
+		Contents: contents,
 	})
 	if resultErr != nil {
 		resultErr = fmt.Errorf("report desktop helper result: %w", resultErr)
@@ -118,28 +119,33 @@ func windowsDesktopRequestDeadline(
 type windowsDesktopOperation func(
 	context.Context,
 	windowsDesktopRequest,
-) error
+) (string, error)
 
 func runWindowsDesktopHelperUntilDeadline(
 	ctx context.Context,
 	request windowsDesktopRequest,
 	deadline time.Time,
 	operation windowsDesktopOperation,
-) error {
+) (string, error) {
 	operationContext, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	result := make(chan error, 1)
+	type operationResult struct {
+		contents string
+		err      error
+	}
+	result := make(chan operationResult, 1)
 	go func() {
-		result <- operation(operationContext, request)
+		contents, err := operation(operationContext, request)
+		result <- operationResult{contents: contents, err: err}
 	}()
 	select {
-	case err := <-result:
+	case result := <-result:
 		if contextErr := operationContext.Err(); contextErr != nil {
-			return windowsDesktopOperationEndError(contextErr)
+			return "", windowsDesktopOperationEndError(contextErr)
 		}
-		return windowsDesktopOperationEndError(err)
+		return result.contents, windowsDesktopOperationEndError(result.err)
 	case <-operationContext.Done():
-		return windowsDesktopOperationEndError(operationContext.Err())
+		return "", windowsDesktopOperationEndError(operationContext.Err())
 	}
 }
 
@@ -159,7 +165,7 @@ func windowsDesktopOperationEndError(err error) error {
 func runWindowsDesktopHelper(
 	ctx context.Context,
 	request windowsDesktopRequest,
-) error {
+) (string, error) {
 	source := ""
 	if request.Action == "import" && len(request.Config) != 0 {
 		source = "config-bytes"
@@ -167,19 +173,19 @@ func runWindowsDesktopHelper(
 	if err := validateWindowsDesktopRequest(
 		request.Action, request.Name, source,
 	); err != nil {
-		return err
+		return "", err
 	}
 	if request.Overwrite && request.Action != "import" {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"desktop %s does not accept overwrite", request.Action,
 		)
 	}
 	if request.Action == "import" {
 		if err := validateWindowsDesktopConfigBytes(request.Config); err != nil {
-			return err
+			return "", err
 		}
 	} else if len(request.Config) != 0 {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"desktop %s does not accept configuration contents",
 			request.Action,
 		)
@@ -187,27 +193,29 @@ func runWindowsDesktopHelper(
 
 	switch request.Action {
 	case "up", "down":
-		return Manage(ctx, request.Action, request.Name)
+		return "", Manage(ctx, request.Action, request.Name)
 	case "delete":
 		// Best-effort stop before removal so a running tunnel does not
 		// outlive its configuration.
 		_ = Manage(ctx, "down", request.Name)
-		return DeleteDesktopConfig(request.Name)
+		return "", DeleteDesktopConfig(request.Name)
 	case "check":
 		lease, _, err := openAndValidateWindowsStoredConfig(request.Name)
 		if lease != nil {
 			defer lease.Close()
 		}
-		return err
+		return "", err
+	case "read":
+		return windowsDesktopReadStoredConfig(request.Name)
 	case "import":
 		host := platform.Current()
-		return importWindowsDesktopConfigBytes(
+		return "", importWindowsDesktopConfigBytes(
 			request.Config,
 			host.ConfigPath(request.Name),
 			request.Overwrite,
 		)
 	default:
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"unsupported desktop helper action %q", request.Action,
 		)
 	}
@@ -302,6 +310,53 @@ func readWindowsDesktopConfig(sourcePath string) ([]byte, error) {
 		)
 	}
 	return contents, nil
+}
+
+func readWindowsStoredDesktopConfig(name string) (string, error) {
+	if err := platform.Current().ValidateInterfaceName(name); err != nil {
+		return "", err
+	}
+	directory, directoryLease, err := openWindowsSecureInterfacesDirectory()
+	if err != nil {
+		return "", err
+	}
+	defer directoryLease.Close()
+	input, err := openWindowsSecureExistingFile(
+		filepath.Join(directory, name+".conf"),
+		"stored desktop configuration",
+	)
+	if err != nil {
+		return "", fmt.Errorf("open desktop configuration: %w", err)
+	}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return "", fmt.Errorf("inspect desktop configuration: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf(
+			"desktop configuration %q is not a regular file", name,
+		)
+	}
+	if info.Size() > maxWindowsDesktopConfigSize {
+		return "", fmt.Errorf(
+			"desktop configuration is %d bytes; maximum is %d",
+			info.Size(), maxWindowsDesktopConfigSize,
+		)
+	}
+	contents, err := io.ReadAll(io.LimitReader(
+		input, maxWindowsDesktopConfigSize+1,
+	))
+	if err != nil {
+		return "", fmt.Errorf("read desktop configuration: %w", err)
+	}
+	if len(contents) > maxWindowsDesktopConfigSize {
+		return "", fmt.Errorf(
+			"desktop configuration exceeded %d bytes while reading",
+			maxWindowsDesktopConfigSize,
+		)
+	}
+	return string(contents), nil
 }
 
 func validateWindowsDesktopConfigBytes(contents []byte) error {

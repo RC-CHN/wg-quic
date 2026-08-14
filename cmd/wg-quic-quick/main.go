@@ -84,7 +84,11 @@ func run(args []string) error {
 			return err
 		}
 		if message != "" {
-			fmt.Println(message)
+			if request.action == "read" {
+				fmt.Print(message)
+			} else {
+				fmt.Println(message)
+			}
 		}
 		return nil
 	case "desktop-helper":
@@ -197,7 +201,7 @@ func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
 	}
 	request := desktopClientRequest{action: args[0], name: args[1]}
 	switch request.action {
-	case "up", "down", "check", "delete":
+	case "up", "down", "check", "delete", "read":
 		if len(args) != 2 {
 			return desktopClientRequest{}, errors.New("desktop action received unexpected arguments")
 		}

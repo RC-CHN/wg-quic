@@ -1008,6 +1008,9 @@ catch {
 $Quick = __WG_QUIC_QUICK__
 $Tunnel = __WG_QUIC_TUNNEL__
 $TunnelService = __WG_QUIC_SERVICE__
+$ConfigPath = __WG_QUIC_CONFIG_PATH__
+$ExpectedListenPort = __WG_QUIC_LISTEN_PORT__
+$ExpectedEndpointPort = __WG_QUIC_ENDPOINT_PORT__
 $RetiredRuntimeResult = __WG_QUIC_RETIRED_RUNTIME_RESULT__
 $Result = __WG_QUIC_RESULT__
 $ErrorActionPreference = "Stop"
@@ -1064,6 +1067,36 @@ try {
     if (($checkOutput | Out-String) -notmatch
         "configuration is valid for wg-quic-quick") {
         throw "filtered-admin desktop check returned unexpected output"
+    }
+    $directReadDenied = $false
+    try {
+        Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop |
+            Out-Null
+    }
+    catch [UnauthorizedAccessException] {
+        $directReadDenied = $true
+    }
+    if (-not $directReadDenied) {
+        throw "filtered-admin token directly read the protected configuration"
+    }
+    $readOutput = @(& $Quick desktop-client read $Tunnel 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "filtered-admin desktop read failed with exit code " +
+            "$LASTEXITCODE`: $($readOutput | Out-String)"
+        )
+    }
+    $readText = $readOutput | Out-String
+    if ($readText -notmatch '(?m)^\[Interface\]\s*$' -or
+        $readText -notmatch '(?m)^PrivateKey\s*=' -or
+        $readText -notmatch (
+            "(?m)^ListenPort\s*=\s*${ExpectedListenPort}\s*$"
+        ) -or
+        $readText -notmatch (
+            "(?m)^Endpoint\s*=\s*192\.0\.2\.200:" +
+            "${ExpectedEndpointPort}\s*$"
+        )) {
+        throw "filtered-admin desktop read returned unexpected configuration"
     }
     $beforeDownService = Get-CimInstance -ClassName Win32_Service `
         -Filter "Name='$TunnelService'" -ErrorAction Stop
@@ -1152,6 +1185,18 @@ catch {
     $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
         "__WG_QUIC_SERVICE__",
         "'" + $serviceName.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_CONFIG_PATH__",
+        "'" + $installedConfig.Replace("'", "''") + "'"
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_LISTEN_PORT__",
+        [string] $listenPort
+    )
+    $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
+        "__WG_QUIC_ENDPOINT_PORT__",
+        [string] $endpointPort
     )
     $filteredAdminScriptContent = $filteredAdminScriptContent.Replace(
         "__WG_QUIC_RETIRED_RUNTIME_RESULT__",

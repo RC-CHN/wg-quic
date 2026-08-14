@@ -186,6 +186,22 @@ func TestValidateWindowsManagementProbeIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestValidateWindowsManagementReadIsReadOnly(t *testing.T) {
+	if err := validateWindowsManagementRequest(windowsManagementRequest{
+		Action: "read", Name: "office",
+	}); err != nil {
+		t.Fatalf("valid management read: %v", err)
+	}
+	for _, request := range []windowsManagementRequest{
+		{Action: "read", Name: "office", Overwrite: true},
+		{Action: "read", Name: "office", Config: []byte("data")},
+	} {
+		if err := validateWindowsManagementRequest(request); err == nil {
+			t.Fatalf("accepted stateful management read %#v", request)
+		}
+	}
+}
+
 func TestWindowsManagementRejectsHooksWithElevationFallback(t *testing.T) {
 	const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	for _, hook := range []string{"PreUp", "PostUp", "PreDown", "PostDown"} {
@@ -400,6 +416,65 @@ func TestWindowsManagementAuthorizedMaximumImportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWindowsManagementReadRoundTrip(t *testing.T) {
+	original := windowsManagementDial
+	defer func() { windowsManagementDial = original }()
+	client, server := net.Pipe()
+	windowsManagementDial = func(context.Context) (net.Conn, error) {
+		return client, nil
+	}
+	const configuration = "  [Interface]\r\nPrivateKey = key\r\n\r\n"
+	serverResult := make(chan error, 1)
+	go func() {
+		defer server.Close()
+		if err := readWindowsManagementPreamble(server); err != nil {
+			serverResult <- err
+			return
+		}
+		if err := writeWindowsManagementResult(server, windowsManagementResult{
+			ProtocolVersion: windowsManagementProtocolVersion,
+			Success:         true,
+			Code:            windowsManagementCodeContinue,
+		}); err != nil {
+			serverResult <- err
+			return
+		}
+		request, err := readWindowsManagementRequest(server)
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		if request.Action != "read" || request.Name != "office" ||
+			request.Overwrite || len(request.Config) != 0 {
+			serverResult <- fmt.Errorf("unexpected read request %#v", request)
+			return
+		}
+		serverResult <- writeWindowsManagementResult(server, windowsManagementResult{
+			ProtocolVersion: windowsManagementProtocolVersion,
+			Success:         true,
+			Code:            windowsManagementCodeOK,
+			Contents:        configuration,
+		})
+	}()
+
+	operationContext, cancel := context.WithTimeout(
+		context.Background(), 30*time.Second,
+	)
+	defer cancel()
+	got, err := runWindowsManagementClient(
+		operationContext, "read", "office", "", false,
+	)
+	if err != nil {
+		t.Fatalf("authorized read: %v", err)
+	}
+	if got != configuration {
+		t.Fatalf("read configuration = %q, want %q", got, configuration)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWindowsManagementIncompatibleHandshakeSendsNoRequest(t *testing.T) {
 	original := windowsManagementDial
 	defer func() { windowsManagementDial = original }()
@@ -578,7 +653,7 @@ PreUp = whoami
 		return nil, cfg, nil
 	}
 	var mutations sync.Mutex
-	err = runWindowsManagementOperation(
+	_, err = runWindowsManagementOperation(
 		context.Background(),
 		windowsManagementRequest{Action: "up", Name: "hooked"},
 		&mutations,
@@ -601,13 +676,37 @@ func TestWindowsManagementCheckUsesSecureStoredConfigOpen(t *testing.T) {
 		return nil, nil, want
 	}
 	var mutations sync.Mutex
-	err := runWindowsManagementOperation(
+	_, err := runWindowsManagementOperation(
 		context.Background(),
 		windowsManagementRequest{Action: "check", Name: "office"},
 		&mutations,
 	)
 	if !errors.Is(err, want) {
 		t.Fatalf("management check error = %v", err)
+	}
+}
+
+func TestWindowsManagementReadUsesSecureStoredConfigReader(t *testing.T) {
+	original := windowsManagementReadStoredConfig
+	defer func() { windowsManagementReadStoredConfig = original }()
+	const configuration = "[Interface]\nPrivateKey = key\n"
+	windowsManagementReadStoredConfig = func(name string) (string, error) {
+		if name != "office" {
+			t.Fatalf("stored config name = %q", name)
+		}
+		return configuration, nil
+	}
+	var mutations sync.Mutex
+	got, err := runWindowsManagementOperation(
+		context.Background(),
+		windowsManagementRequest{Action: "read", Name: "office"},
+		&mutations,
+	)
+	if err != nil {
+		t.Fatalf("management read: %v", err)
+	}
+	if got != configuration {
+		t.Fatalf("management read = %q, want %q", got, configuration)
 	}
 }
 
@@ -691,7 +790,9 @@ func TestWindowsManagementPreambleAndResultAreBounded(t *testing.T) {
 	if got != want {
 		t.Fatalf("management result = %#v, want %#v", got, want)
 	}
-	oversized := bytes.Repeat([]byte("x"), 64*1024+2)
+	oversized := bytes.Repeat(
+		[]byte("x"), windowsManagementMaxEnvelopeSize+2,
+	)
 	if _, err := readWindowsManagementResult(bytes.NewReader(oversized)); err == nil {
 		t.Fatal("accepted an oversized management result")
 	}

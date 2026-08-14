@@ -45,8 +45,9 @@ type windowsDesktopRequest struct {
 }
 
 type windowsDesktopResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success  bool   `json:"success"`
+	Message  string `json:"message"`
+	Contents string `json:"contents,omitempty"`
 }
 
 // RunWindowsDesktopClient owns the unprivileged side of the narrow desktop
@@ -193,6 +194,9 @@ func runWindowsElevatedDesktopClient(
 	if launchErr != nil {
 		return "", windowsDesktopLauncherError(launcherMessage, launchErr)
 	}
+	if action == "read" {
+		return result.Contents, nil
+	}
 	return strings.TrimSpace(result.Message), nil
 }
 
@@ -205,7 +209,7 @@ func validateWindowsDesktopRequest(
 		return err
 	}
 	switch action {
-	case "up", "down", "check", "delete":
+	case "up", "down", "check", "delete", "read":
 		if source != "" {
 			return fmt.Errorf("desktop %s does not accept a source path", action)
 		}
@@ -263,7 +267,7 @@ func exchangeWindowsDesktopConnection(
 	}
 	limited := &io.LimitedReader{
 		R: connection,
-		N: maxWindowsDesktopConfigSize + 1,
+		N: maxWindowsDesktopEnvelopeSize + 1,
 	}
 	var result windowsDesktopResult
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
@@ -273,7 +277,7 @@ func exchangeWindowsDesktopConnection(
 	}
 	if limited.N == 0 {
 		return windowsDesktopResult{}, errors.New(
-			"desktop helper result exceeded 1 MiB",
+			"desktop helper result exceeded its size limit",
 		)
 	}
 	return result, nil

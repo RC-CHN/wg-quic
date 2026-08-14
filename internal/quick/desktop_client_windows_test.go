@@ -186,10 +186,12 @@ func TestValidateWindowsDesktopRequest(t *testing.T) {
 		valid  bool
 	}{
 		{action: "up", name: "office", valid: true},
+		{action: "read", name: "office", valid: true},
 		{action: "import", name: "office", source: `C:\\office.conf`, valid: true},
 		{action: "delete", name: "office", valid: true},
 		{action: "import", name: "office"},
 		{action: "up", name: "office", source: `C:\\office.conf`},
+		{action: "read", name: "office", source: `C:\\office.conf`},
 		{action: "delete", name: "office", source: `C:\\office.conf`},
 		{action: "restart", name: "office"},
 		{action: "up", name: `bad/name`},
@@ -219,11 +221,33 @@ func TestWindowsDesktopLauncherErrorNamesFailedHandshake(t *testing.T) {
 }
 
 func TestWindowsDesktopHelperRejectsUnexpectedOverwrite(t *testing.T) {
-	err := runWindowsDesktopHelper(context.Background(), windowsDesktopRequest{
+	_, err := runWindowsDesktopHelper(context.Background(), windowsDesktopRequest{
 		Action: "up", Name: "office", Overwrite: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not accept overwrite") {
 		t.Fatalf("unexpected overwrite error = %v", err)
+	}
+}
+
+func TestWindowsDesktopHelperReadReturnsStoredConfiguration(t *testing.T) {
+	original := windowsDesktopReadStoredConfig
+	defer func() { windowsDesktopReadStoredConfig = original }()
+	const configuration = "[Interface]\nPrivateKey = key\n"
+	windowsDesktopReadStoredConfig = func(name string) (string, error) {
+		if name != "office" {
+			t.Fatalf("stored config name = %q", name)
+		}
+		return configuration, nil
+	}
+	got, err := runWindowsDesktopHelper(
+		context.Background(),
+		windowsDesktopRequest{Action: "read", Name: "office"},
+	)
+	if err != nil {
+		t.Fatalf("desktop helper read: %v", err)
+	}
+	if got != configuration {
+		t.Fatalf("desktop helper read = %q, want %q", got, configuration)
 	}
 }
 
@@ -268,13 +292,13 @@ func TestWindowsDesktopHelperDeadlineDoesNotWaitForBlockedOperation(t *testing.T
 	release := make(chan struct{})
 	deadline := time.Now().Add(40 * time.Millisecond)
 	started := time.Now()
-	err := runWindowsDesktopHelperUntilDeadline(
+	_, err := runWindowsDesktopHelperUntilDeadline(
 		context.Background(),
 		windowsDesktopRequest{Action: "check", Name: "office"},
 		deadline,
-		func(context.Context, windowsDesktopRequest) error {
+		func(context.Context, windowsDesktopRequest) (string, error) {
 			<-release
-			return nil
+			return "", nil
 		},
 	)
 	close(release)

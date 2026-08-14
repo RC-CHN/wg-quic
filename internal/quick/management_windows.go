@@ -54,6 +54,7 @@ var (
 	)
 	windowsManagementDial             = dialWindowsManagementPipe
 	windowsManagementOpenStoredConfig = openAndValidateWindowsStoredConfig
+	windowsManagementReadStoredConfig = readWindowsStoredDesktopConfig
 )
 
 const (
@@ -216,6 +217,9 @@ func runWindowsManagementClient(
 				"management service returned an inconsistent success result",
 			)
 		}
+		if action == "read" {
+			return result.Contents, nil
+		}
 		return message, nil
 	}
 	return "", windowsManagementResultError(result)
@@ -265,6 +269,7 @@ type windowsManagementResult struct {
 	Success         bool   `json:"success"`
 	Code            string `json:"code"`
 	Message         string `json:"message,omitempty"`
+	Contents        string `json:"contents,omitempty"`
 }
 
 // RunWindowsManagementService runs the MSI-owned, long-lived privilege
@@ -551,13 +556,14 @@ func handleWindowsManagementConnection(
 	_ = connection.SetDeadline(deadline.Add(windowsDesktopResultGrace))
 	operationContext, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	err = runWindowsManagementOperation(
+	contents, err := runWindowsManagementOperation(
 		operationContext, request, mutations,
 	)
 	result := windowsManagementResult{
 		ProtocolVersion: windowsManagementProtocolVersion,
 		Success:         err == nil,
 		Code:            windowsManagementCodeOK,
+		Contents:        contents,
 	}
 	if err != nil {
 		result.Code = windowsManagementFailureCode(
@@ -613,7 +619,9 @@ func readWindowsManagementRequest(
 func readWindowsManagementResult(
 	reader io.Reader,
 ) (windowsManagementResult, error) {
-	limited := &io.LimitedReader{R: reader, N: 64*1024 + 1}
+	limited := &io.LimitedReader{
+		R: reader, N: windowsManagementMaxEnvelopeSize + 1,
+	}
 	var result windowsManagementResult
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
 		return windowsManagementResult{}, fmt.Errorf(
@@ -622,7 +630,7 @@ func readWindowsManagementResult(
 	}
 	if limited.N == 0 {
 		return windowsManagementResult{}, errors.New(
-			"management result exceeded 64 KiB",
+			"management result exceeded its size limit",
 		)
 	}
 	return result, nil
@@ -703,9 +711,9 @@ func runWindowsManagementOperation(
 	ctx context.Context,
 	request windowsManagementRequest,
 	mutations *sync.Mutex,
-) error {
+) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return "", err
 	}
 	if request.Action == "up" ||
 		request.Action == "down" ||
@@ -715,32 +723,34 @@ func runWindowsManagementOperation(
 		defer mutations.Unlock()
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return "", err
 	}
 	switch request.Action {
 	case "up":
 		if err := validateWindowsManagementStoredConfig(
 			request.Name,
 		); err != nil {
-			return err
+			return "", err
 		}
-		return manageWindowsBroker(ctx, request.Action, request.Name)
+		return "", manageWindowsBroker(ctx, request.Action, request.Name)
 	case "down":
-		return manageWindowsBroker(ctx, request.Action, request.Name)
+		return "", manageWindowsBroker(ctx, request.Action, request.Name)
 	case "check":
 		lease, _, err := windowsManagementOpenStoredConfig(request.Name)
 		if err != nil {
-			return err
+			return "", err
 		}
-		return lease.Close()
+		return "", lease.Close()
+	case "read":
+		return windowsManagementReadStoredConfig(request.Name)
 	case "import":
 		if err := validateWindowsManagementConfigBytes(
 			request.Config,
 		); err != nil {
-			return err
+			return "", err
 		}
 		host := platform.Current()
-		return importWindowsDesktopConfigBytes(
+		return "", importWindowsDesktopConfigBytes(
 			request.Config,
 			host.ConfigPath(request.Name),
 			request.Overwrite,
@@ -749,11 +759,11 @@ func runWindowsManagementOperation(
 		// Best-effort stop before removal so a running tunnel does not
 		// outlive its configuration.
 		_ = manageWindowsBroker(ctx, "down", request.Name)
-		return DeleteDesktopConfig(request.Name)
+		return "", DeleteDesktopConfig(request.Name)
 	case "probe":
-		return nil
+		return "", nil
 	default:
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"unsupported desktop management action %q",
 			request.Action,
 		)

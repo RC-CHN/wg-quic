@@ -779,6 +779,17 @@ async function start(): Promise<void> {
         `desktop imported ${JSON.stringify(imported.importedName)} instead of ${JSON.stringify(smoke.name)}`,
       );
     }
+    const storedConfiguration = await window.wgQuic.readTunnel(smoke.name);
+    if (
+      !/^\[Interface\]\s*$/m.test(storedConfiguration) ||
+      !/^PrivateKey\s*=/m.test(storedConfiguration) ||
+      !/^\[Peer\]\s*$/m.test(storedConfiguration) ||
+      !/^Endpoint\s*=\s*192\.0\.2\.200:/m.test(storedConfiguration)
+    ) {
+      throw new Error(
+        'desktop read returned an unexpected installed configuration',
+      );
+    }
     const checked = await window.wgQuic.check(smoke.name);
     if (!/configuration is valid for wg-quic-quick/i.test(checked)) {
       throw new Error(
