@@ -187,9 +187,11 @@ func TestValidateWindowsDesktopRequest(t *testing.T) {
 	}{
 		{action: "up", name: "office", valid: true},
 		{action: "import", name: "office", source: `C:\\office.conf`, valid: true},
+		{action: "delete", name: "office", valid: true},
 		{action: "import", name: "office"},
 		{action: "up", name: "office", source: `C:\\office.conf`},
-		{action: "delete", name: "office"},
+		{action: "delete", name: "office", source: `C:\\office.conf`},
+		{action: "restart", name: "office"},
 		{action: "up", name: `bad/name`},
 	} {
 		err := validateWindowsDesktopRequest(test.action, test.name, test.source)
