@@ -79,6 +79,27 @@ export function tunnelStateLabel(state: TunnelDisplayState): string {
   }
 }
 
+export function actionProgressDescription(
+  tunnel: TunnelView,
+  action: TunnelAction,
+  elapsedSeconds: number,
+): string {
+  const elapsed =
+    elapsedSeconds >= 3 ? ` (${Math.floor(elapsedSeconds)}s)` : '';
+  if (action === 'up') {
+    if (tunnel.running) {
+      const sessions = tunnel.status?.stats.active_sessions || 0;
+      return sessions > 0
+        ? `QUIC session established; finishing activation${elapsed}`
+        : `Interface is up; establishing QUIC session${elapsed}`;
+    }
+    return `Starting wg-quic-quick and creating the interface${elapsed}`;
+  }
+  return tunnel.running
+    ? `Stopping the service and cleaning up host state${elapsed}`
+    : `Finishing deactivation${elapsed}`;
+}
+
 export function chooseSelectedTunnel(
   tunnels: TunnelView[],
   selectedName?: string,

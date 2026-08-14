@@ -431,6 +431,26 @@ dd {
   border-color: var(--amber);
   background: var(--amber);
   box-shadow: 0 0 7px rgba(var(--amber-rgb), 0.35);
+  animation: state-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes state-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 3px rgba(var(--amber-rgb), 0.2);
+    opacity: 0.65;
+  }
+  50% {
+    box-shadow: 0 0 9px rgba(var(--amber-rgb), 0.55);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .state-dot.activating,
+  .state-dot.deactivating {
+    animation: none;
+  }
 }
 
 .state-dot.large {
@@ -956,6 +976,7 @@ footer {
 /* === Tunnel form === */
 .tunnel-form {
   overflow-y: auto;
+  padding: 22px 24px 24px;
 }
 
 .tunnel-form form {
@@ -1101,7 +1122,8 @@ footer {
     grid-template-columns: 250px minmax(0, 1fr);
   }
 
-  .tunnel-detail {
+  .tunnel-detail,
+  .tunnel-form {
     padding-right: 18px;
     padding-left: 18px;
   }

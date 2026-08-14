@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { TunnelView } from './types';
+import type { CoreStatus, TunnelView } from './types';
 import {
+  actionProgressDescription,
   chooseSelectedTunnel,
   createSingleFlight,
   formatBitRate,
@@ -32,6 +33,40 @@ test('pending commands override observed state labels', () => {
   assert.equal(tunnelDisplayState(tunnel('alpha'), 'up'), 'activating');
   assert.equal(tunnelDisplayState(tunnel('alpha', true), 'down'), 'deactivating');
   assert.equal(tunnelStateLabel('deactivating'), 'Deactivating…');
+});
+
+test('action progress copy follows observed core state', () => {
+  const running = (sessions: number): TunnelView => ({
+    ...tunnel('alpha', true),
+    status: {
+      stats: { active_sessions: sessions },
+    } as unknown as CoreStatus,
+  });
+
+  assert.equal(
+    actionProgressDescription(tunnel('alpha'), 'up', 1),
+    'Starting wg-quic-quick and creating the interface',
+  );
+  assert.equal(
+    actionProgressDescription(tunnel('alpha'), 'up', 4),
+    'Starting wg-quic-quick and creating the interface (4s)',
+  );
+  assert.equal(
+    actionProgressDescription(running(0), 'up', 1),
+    'Interface is up; establishing QUIC session',
+  );
+  assert.equal(
+    actionProgressDescription(running(1), 'up', 1),
+    'QUIC session established; finishing activation',
+  );
+  assert.equal(
+    actionProgressDescription(running(0), 'down', 1),
+    'Stopping the service and cleaning up host state',
+  );
+  assert.equal(
+    actionProgressDescription(tunnel('alpha'), 'down', 6),
+    'Finishing deactivation (6s)',
+  );
 });
 
 test('telemetry formatters preserve byte and bit-rate units', () => {

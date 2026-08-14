@@ -12,6 +12,7 @@ import type {
   TunnelView,
 } from './types';
 import {
+  actionProgressDescription,
   chooseSelectedTunnel,
   createSingleFlight,
   formatBitRate,
@@ -47,6 +48,7 @@ const tunnelForm = byId<HTMLElement>('tunnel-form');
 const notice = byId<HTMLElement>('notice');
 const toast = byId<HTMLDivElement>('toast');
 const pending = new Map<string, TunnelAction>();
+const pendingSince = new Map<string, number>();
 
 let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
@@ -214,12 +216,15 @@ function renderDetail(tunnel?: TunnelView): void {
   setText('detail-summary', tunnelSummary(tunnel));
   setText('detail-path', tunnel.configPath);
   setText('detail-state', tunnelStateLabel(state));
+  const startedAt = pendingSince.get(tunnel.name);
   setText(
     'detail-state-copy',
     action
-      ? action === 'up'
-        ? 'Starting wg-quic-quick…'
-        : 'Stopping wg-quic-quick…'
+      ? actionProgressDescription(
+          tunnel,
+          action,
+          startedAt ? (Date.now() - startedAt) / 1000 : 0,
+        )
       : stateDescription(tunnel),
   );
   byId('detail-state-dot').className = `state-dot large ${state}`;
@@ -557,9 +562,16 @@ async function manageTunnel(
     return;
   }
   pending.set(name, action);
+  pendingSince.set(name, Date.now());
   if (current) {
     render(current);
   }
+  // While the privileged command runs, track the core status socket at a
+  // fine cadence so the progress copy follows real state transitions
+  // (interface up, QUIC session established) instead of a static label.
+  const progressPoll = setInterval(() => {
+    void refresh(false);
+  }, 500);
   try {
     render(await window.wgQuic.manage(name, action));
     showToast(`${name} ${action === 'up' ? 'activated' : 'deactivated'}`);
@@ -570,7 +582,9 @@ async function manageTunnel(
     );
     await refresh(false);
   } finally {
+    clearInterval(progressPoll);
     pending.delete(name);
+    pendingSince.delete(name);
     if (current) {
       render(current);
     }
