@@ -52,6 +52,26 @@ func run(args []string) error {
 			return usage()
 		}
 		return quick.DeleteDesktopConfig(args[1])
+	case "desktop-read":
+		if len(args) != 2 {
+			return usage()
+		}
+		contents, err := quick.ReadDesktopConfig(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Print(contents)
+		return nil
+	case "desktop-genkey":
+		if len(args) != 1 {
+			return usage()
+		}
+		keys, err := quick.GenerateDesktopKeys()
+		if err != nil {
+			return err
+		}
+		fmt.Println(keys)
+		return nil
 	case "desktop-client":
 		request, err := parseDesktopClientArgs(args[1:])
 		if err != nil {

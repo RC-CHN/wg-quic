@@ -37,6 +37,9 @@
           <button class="button secondary" id="open-directory" type="button">
             Open config folder
           </button>
+          <button class="button secondary" id="new-tunnel" type="button">
+            New tunnel
+          </button>
           <button class="button primary" id="import-config" type="button">
             Import tunnel…
           </button>
@@ -120,6 +123,9 @@
               <div class="detail-actions">
                 <button class="button danger" id="delete-tunnel" type="button">
                   Delete
+                </button>
+                <button class="button secondary" id="edit-tunnel" type="button">
+                  Edit
                 </button>
                 <button class="button secondary" id="check-tunnel" type="button">
                   Check config
@@ -215,6 +221,107 @@
               </div>
               <div class="peer-list" id="peer-list"></div>
             </section>
+          </article>
+
+          <article class="tunnel-form hidden" id="tunnel-form">
+            <header class="detail-header">
+              <div class="detail-title">
+                <div class="eyebrow" id="form-mode-label">NEW TUNNEL</div>
+                <h1 id="form-title">Create tunnel</h1>
+              </div>
+            </header>
+            <form id="tunnel-form-fields" novalidate>
+              <div class="form-errors hidden" id="form-errors" role="alert"></div>
+
+              <section class="form-section">
+                <div class="form-section-label">Basics</div>
+                <div class="form-field">
+                  <label for="form-name">Name</label>
+                  <input id="form-name" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-addresses">Tunnel address</label>
+                  <input id="form-addresses" type="text" placeholder="10.0.0.2/32" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-listen-port">Listen port <span class="field-hint">optional, blank = auto</span></label>
+                  <input id="form-listen-port" type="text" inputmode="numeric" autocomplete="off" />
+                </div>
+              </section>
+
+              <section class="form-section">
+                <div class="form-section-label">Peer</div>
+                <div class="form-field">
+                  <label for="form-peer-public-key">Peer public key</label>
+                  <input id="form-peer-public-key" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-endpoint">Endpoint <span class="field-hint">host:port</span></label>
+                  <input id="form-endpoint" type="text" placeholder="vpn.example.com:51820" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-allowed-ips">Allowed IPs</label>
+                  <input id="form-allowed-ips" type="text" placeholder="0.0.0.0/0, ::/0" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-keepalive">Keepalive <span class="field-hint">seconds, 0/off = disabled</span></label>
+                  <input id="form-keepalive" type="text" inputmode="numeric" autocomplete="off" />
+                </div>
+              </section>
+
+              <details class="form-advanced" id="form-advanced">
+                <summary>Advanced</summary>
+                <div class="form-field">
+                  <label for="form-private-key">Private key</label>
+                  <div class="field-with-button">
+                    <input id="form-private-key" type="text" autocomplete="off" spellcheck="false" />
+                    <button class="button secondary" id="form-generate-key" type="button">Generate</button>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="form-preshared-key">Preshared key <span class="field-hint">optional</span></label>
+                  <input id="form-preshared-key" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-field">
+                  <label for="form-dns">DNS <span class="field-hint">optional, comma-separated</span></label>
+                  <input id="form-dns" type="text" autocomplete="off" />
+                </div>
+                <div class="form-field">
+                  <label for="form-mtu">MTU <span class="field-hint">optional, blank = 1280</span></label>
+                  <input id="form-mtu" type="text" inputmode="numeric" autocomplete="off" />
+                </div>
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label for="form-congestion">Congestion</label>
+                    <select id="form-congestion">
+                      <option value="auto">auto</option>
+                      <option value="reno">reno</option>
+                      <option value="cubic">cubic</option>
+                      <option value="model">model</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="form-fec">FEC</label>
+                    <select id="form-fec">
+                      <option value="auto">auto</option>
+                      <option value="off">off</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="form-obfs">Obfuscation</label>
+                    <select id="form-obfs">
+                      <option value="salamander">salamander</option>
+                      <option value="none">none</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
+
+              <div class="form-actions">
+                <button class="button secondary" id="form-cancel" type="button">Cancel</button>
+                <button class="button primary" id="form-save" type="submit">Save &amp; validate</button>
+              </div>
+            </form>
           </article>
         </section>
       </main>

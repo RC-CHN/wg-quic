@@ -23,6 +23,13 @@ import {
   tunnelDisplayState,
   tunnelStateLabel,
 } from './view-model';
+import {
+  buildConf,
+  emptyTunnelDraft,
+  parseConf,
+  validateTunnelDraft,
+  type TunnelDraft,
+} from './tunnel-draft';
 
 const byId = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -36,12 +43,15 @@ const tunnelList = byId<HTMLDivElement>('tunnel-list');
 const noTunnels = byId<HTMLDivElement>('no-tunnels');
 const detailEmpty = byId<HTMLDivElement>('detail-empty');
 const detail = byId<HTMLElement>('tunnel-detail');
+const tunnelForm = byId<HTMLElement>('tunnel-form');
 const notice = byId<HTMLElement>('notice');
 const toast = byId<HTMLDivElement>('toast');
 const pending = new Map<string, TunnelAction>();
 
 let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
+let formDraft: TunnelDraft | null = null;
+let formMode: 'new' | 'edit' = 'new';
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
@@ -170,8 +180,14 @@ function tunnelSummary(tunnel: TunnelView): string {
 }
 
 function renderDetail(tunnel?: TunnelView): void {
-  detail.classList.toggle('hidden', !tunnel);
-  detailEmpty.classList.toggle('hidden', Boolean(tunnel));
+  const inForm = formDraft !== null;
+  tunnelForm.classList.toggle('hidden', !inForm);
+  detail.classList.toggle('hidden', inForm || !tunnel);
+  detailEmpty.classList.toggle('hidden', inForm || Boolean(tunnel));
+  if (inForm) {
+    renderForm();
+    return;
+  }
   if (!tunnel) {
     setText(
       'detail-empty-title',
@@ -236,6 +252,10 @@ function renderDetail(tunnel?: TunnelView): void {
   deleteButton.disabled = Boolean(action) || !backendSupported;
   deleteButton.dataset.name = tunnel.name;
 
+  const editButton = byId<HTMLButtonElement>('edit-tunnel');
+  editButton.disabled = Boolean(action) || !backendSupported;
+  editButton.dataset.name = tunnel.name;
+
   setText('detail-carrier', status?.carrier.toUpperCase() || 'QUIC');
   setText(
     'detail-modes',
@@ -264,6 +284,157 @@ function renderDetail(tunnel?: TunnelView): void {
     `${(stats?.fec_current_parity_shards || 0).toLocaleString()} current parity · ${(stats?.fec_unrecovered || 0).toLocaleString()} residual`,
   );
   renderPeers(status);
+}
+
+// === Tunnel form (new/edit) ===
+
+function fillFormFromDraft(draft: TunnelDraft): void {
+  byId<HTMLInputElement>('form-name').value = draft.name;
+  byId<HTMLInputElement>('form-addresses').value = draft.addresses;
+  byId<HTMLInputElement>('form-listen-port').value = draft.listenPort;
+  byId<HTMLInputElement>('form-peer-public-key').value = draft.peerPublicKey;
+  byId<HTMLInputElement>('form-endpoint').value = draft.endpoint;
+  byId<HTMLInputElement>('form-allowed-ips').value = draft.allowedIPs;
+  byId<HTMLInputElement>('form-keepalive').value = draft.keepalive;
+  byId<HTMLInputElement>('form-private-key').value = draft.privateKey;
+  byId<HTMLInputElement>('form-preshared-key').value = draft.presharedKey;
+  byId<HTMLInputElement>('form-dns').value = draft.dns;
+  byId<HTMLInputElement>('form-mtu').value = draft.mtu;
+  byId<HTMLSelectElement>('form-congestion').value = draft.congestion;
+  byId<HTMLSelectElement>('form-fec').value = draft.fec;
+  byId<HTMLSelectElement>('form-obfs').value = draft.obfs;
+}
+
+function readFormIntoDraft(): TunnelDraft {
+  return {
+    name: byId<HTMLInputElement>('form-name').value.trim(),
+    addresses: byId<HTMLInputElement>('form-addresses').value,
+    listenPort: byId<HTMLInputElement>('form-listen-port').value,
+    peerPublicKey: byId<HTMLInputElement>('form-peer-public-key').value,
+    endpoint: byId<HTMLInputElement>('form-endpoint').value,
+    allowedIPs: byId<HTMLInputElement>('form-allowed-ips').value,
+    keepalive: byId<HTMLInputElement>('form-keepalive').value,
+    privateKey: byId<HTMLInputElement>('form-private-key').value,
+    presharedKey: byId<HTMLInputElement>('form-preshared-key').value,
+    dns: byId<HTMLInputElement>('form-dns').value,
+    mtu: byId<HTMLInputElement>('form-mtu').value,
+    carrier: 'quic',
+    congestion: byId<HTMLSelectElement>('form-congestion').value,
+    fec: byId<HTMLSelectElement>('form-fec').value,
+    obfs: byId<HTMLSelectElement>('form-obfs').value,
+  };
+}
+
+function renderForm(): void {
+  if (!formDraft) {
+    return;
+  }
+  setText('form-mode-label', formMode === 'new' ? 'NEW TUNNEL' : 'EDIT TUNNEL');
+  setText(
+    'form-title',
+    formMode === 'new' ? 'Create tunnel' : `Edit ${formDraft.name}`,
+  );
+  fillFormFromDraft(formDraft);
+  byId<HTMLInputElement>('form-name').disabled = formMode === 'edit';
+  byId('form-errors').classList.add('hidden');
+}
+
+function showFormErrors(errors: string[]): void {
+  const box = byId('form-errors');
+  box.innerHTML = '';
+  const list = document.createElement('ul');
+  for (const error of errors) {
+    const item = document.createElement('li');
+    item.textContent = error;
+    list.appendChild(item);
+  }
+  box.appendChild(list);
+  box.classList.remove('hidden');
+}
+
+async function startNewTunnel(): Promise<void> {
+  formMode = 'new';
+  formDraft = emptyTunnelDraft('');
+  if (current) {
+    render(current);
+  }
+  try {
+    const keys = await window.wgQuic.generateKeys();
+    const field = byId<HTMLInputElement>('form-private-key');
+    if (formDraft && formMode === 'new' && !field.value) {
+      field.value = keys.private_key;
+    }
+  } catch (error) {
+    showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
+  }
+}
+
+async function startEditTunnel(name: string): Promise<void> {
+  try {
+    const conf = await window.wgQuic.readTunnel(name);
+    formMode = 'edit';
+    formDraft = parseConf(conf);
+    formDraft.name = name;
+    if (current) {
+      render(current);
+    }
+  } catch (error) {
+    showToast(`Read tunnel failed: ${errorMessage(error)}`, 'error');
+  }
+}
+
+function cancelForm(): void {
+  formDraft = null;
+  if (current) {
+    render(current);
+  }
+}
+
+async function generateKeyIntoForm(): Promise<void> {
+  try {
+    const keys = await window.wgQuic.generateKeys();
+    byId<HTMLInputElement>('form-private-key').value = keys.private_key;
+  } catch (error) {
+    showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
+  }
+}
+
+async function saveForm(): Promise<void> {
+  if (!formDraft) {
+    return;
+  }
+  const draft = readFormIntoDraft();
+  if (formMode === 'edit') {
+    draft.name = formDraft.name;
+  }
+  const errors = validateTunnelDraft(draft, formMode === 'new');
+  if (errors.length > 0) {
+    showFormErrors(errors);
+    return;
+  }
+  const conf = buildConf(draft);
+  const saveButton = byId<HTMLButtonElement>('form-save');
+  saveButton.disabled = true;
+  try {
+    const snapshot = await window.wgQuic.writeTunnel(
+      draft.name,
+      conf,
+      formMode === 'edit',
+    );
+    const savedName = draft.name;
+    const wasNew = formMode === 'new';
+    formDraft = null;
+    current = snapshot;
+    selectedName = savedName;
+    render(current);
+    showToast(
+      wasNew ? `Tunnel ${savedName} created` : `Tunnel ${savedName} updated`,
+    );
+  } catch (error) {
+    showFormErrors([errorMessage(error)]);
+  } finally {
+    saveButton.disabled = false;
+  }
 }
 
 function setNotice(snapshot: DesktopSnapshot): void {
@@ -500,6 +671,21 @@ byId('delete-tunnel').addEventListener('click', (event) => {
   if (name) {
     void deleteTunnel(name);
   }
+});
+byId('new-tunnel').addEventListener('click', () => void startNewTunnel());
+byId('edit-tunnel').addEventListener('click', (event) => {
+  const name = (event.currentTarget as HTMLButtonElement).dataset.name;
+  if (name) {
+    void startEditTunnel(name);
+  }
+});
+byId('form-cancel').addEventListener('click', () => cancelForm());
+byId('form-generate-key').addEventListener('click', () =>
+  void generateKeyIntoForm(),
+);
+byId('tunnel-form-fields').addEventListener('submit', (event) => {
+  event.preventDefault();
+  void saveForm();
 });
 byId('open-directory').addEventListener('click', async () => {
   const error = await window.wgQuic.openConfigDirectory();

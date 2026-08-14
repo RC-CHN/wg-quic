@@ -12,6 +12,8 @@
   "include": [
     "src/types.ts",
     "src/view-model.ts",
-    "src/view-model.test.ts"
+    "src/view-model.test.ts",
+    "src/tunnel-draft.ts",
+    "src/tunnel-draft.test.ts"
   ]
 }

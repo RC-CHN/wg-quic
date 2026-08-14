@@ -85,11 +85,23 @@ export interface DeleteResult {
   snapshot: DesktopSnapshot;
 }
 
+export interface TunnelKeys {
+  private_key: string;
+  public_key: string;
+}
+
 export interface DesktopAPI {
   snapshot(): Promise<DesktopSnapshot>;
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;
   deleteTunnel(name: string): Promise<DeleteResult>;
+  readTunnel(name: string): Promise<string>;
+  generateKeys(): Promise<TunnelKeys>;
+  writeTunnel(
+    name: string,
+    contents: string,
+    overwrite: boolean,
+  ): Promise<DesktopSnapshot>;
   importConfig(): Promise<ImportResult>;
   importConfigPath(
     sourcePath: string,

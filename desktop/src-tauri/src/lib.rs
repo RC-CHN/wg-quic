@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
 
@@ -266,6 +266,33 @@ fn run_output_with_timeout(
 
 fn run_output(program: &Path, arguments: &[OsString]) -> Result<String, String> {
     run_output_with_timeout(program, arguments, Duration::from_secs(10))
+}
+
+fn write_temp_config(contents: &str) -> Result<PathBuf, String> {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!(
+        "wg-quic-desktop-{}-{unique}.conf",
+        std::process::id()
+    ));
+    // The staged config carries the tunnel private key, so keep it
+    // owner-only even though the file is short-lived.
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .map_err(|error| format!("create temporary configuration: {error}"))?;
+    use std::io::Write;
+    file.write_all(contents.as_bytes())
+        .map_err(|error| format!("write temporary configuration: {error}"))?;
+    Ok(path)
 }
 
 fn output_text(program: &Path, arguments: &[OsString], output: Output) -> Result<String, String> {
@@ -591,6 +618,8 @@ fn run_privileged(
         arguments.extend([argument("check"), argument(name)]);
     } else if action == "delete" {
         arguments.extend([argument("desktop-delete"), argument(name)]);
+    } else if action == "read" {
+        arguments.extend([argument("desktop-read"), argument(name)]);
     } else {
         arguments.extend([argument(action), argument(name)]);
     }
@@ -638,6 +667,40 @@ fn delete_tunnel(
     let paths = native_paths(&app)?;
     run_privileged(&paths, "delete", &name, None, false)?;
     snapshot_inner(&app, &state)
+}
+
+#[tauri::command(async)]
+fn read_tunnel(app: AppHandle, name: String) -> Result<String, String> {
+    validate_interface_name(&name)?;
+    require_profile(&name)?;
+    let paths = native_paths(&app)?;
+    run_privileged(&paths, "read", &name, None, false)
+}
+
+#[tauri::command(async)]
+fn generate_keys(app: AppHandle) -> Result<String, String> {
+    let paths = native_paths(&app)?;
+    run_output(&paths.quick, &[argument("desktop-genkey")])
+}
+
+#[tauri::command(async)]
+fn write_tunnel(
+    app: AppHandle,
+    state: State<'_, BackendState>,
+    name: String,
+    contents: String,
+    overwrite: bool,
+) -> Result<DesktopSnapshot, String> {
+    validate_interface_name(&name)?;
+    let temporary = write_temp_config(&contents)?;
+    let result = (|| {
+        let paths = native_paths(&app)?;
+        run_output(&paths.quick, &[argument("check"), argument(&temporary)])?;
+        run_privileged(&paths, "import", &name, Some(&temporary), overwrite)?;
+        snapshot_inner(&app, &state)
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
 }
 
 #[tauri::command(async)]
@@ -838,6 +901,9 @@ pub fn run() {
             manage_tunnel,
             check_tunnel,
             delete_tunnel,
+            read_tunnel,
+            generate_keys,
+            write_tunnel,
             import_config,
             open_config_directory,
             desktop_smoke_settings,

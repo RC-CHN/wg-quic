@@ -13,8 +13,6 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/platform"
 )
 
-const maxDesktopConfigSize = 1024 * 1024
-
 // ImportDesktopConfig installs one validated configuration. Desktop shells
 // execute this narrow operation through pkexec instead of running their whole
 // webview process with root privileges.

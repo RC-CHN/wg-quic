@@ -6,6 +6,7 @@ import type {
   DesktopSnapshot,
   ImportResult,
   TunnelAction,
+  TunnelKeys,
 } from './types';
 
 interface DesktopSmokeSettings {
@@ -54,6 +55,13 @@ const api: DesktopAPI = {
       snapshot: await invoke<DesktopSnapshot>('delete_tunnel', { name }),
     };
   },
+  readTunnel: (name: string) => invoke<string>('read_tunnel', { name }),
+  generateKeys: async (): Promise<TunnelKeys> => {
+    const raw = await invoke<string>('generate_keys');
+    return JSON.parse(raw) as TunnelKeys;
+  },
+  writeTunnel: (name: string, contents: string, overwrite: boolean) =>
+    invoke<DesktopSnapshot>('write_tunnel', { name, contents, overwrite }),
   importConfig: async () => {
     const selected = await open({
       title: 'Import wg-quic configuration',

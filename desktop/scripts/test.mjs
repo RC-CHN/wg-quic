@@ -34,6 +34,7 @@ try {
     run([
       '--test',
       path.join(outputDir, 'src', 'view-model.test.js'),
+      path.join(outputDir, 'src', 'tunnel-draft.test.js'),
       path.join(scriptDir, 'check-version.test.mjs'),
       path.join(scriptDir, 'release-artifacts.test.mjs'),
       path.join(scriptDir, 'wix-management-service.test.mjs'),
