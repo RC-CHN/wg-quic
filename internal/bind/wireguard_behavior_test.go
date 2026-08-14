@@ -195,10 +195,11 @@ func TestWireGuardMultiPeerCryptokeyRoutingOverArmorBind(t *testing.T) {
 			tun:  tuntest.NewChannelTUN(),
 			ipv4: netip.AddrFrom4([4]byte{10, 56, 0, byte(i + 1)}),
 		}
-		peers[i].dev = device.NewDevice(
+		peers[i].dev = device.NewDeviceWithOptions(
 			peers[i].tun.TUN(),
 			peers[i].bind,
 			device.NewLogger(device.LogLevelError, fmt.Sprintf("wgq-multi-%d: ", i)),
+			device.Options{DisableTUNEventStateTransitions: true},
 		)
 		t.Cleanup(peers[i].dev.Close)
 	}
@@ -310,10 +311,11 @@ func newBehaviorPair(
 		bindConfig.ObfsMode = "salamander"
 		bindConfig.ObfsKeys = []obfs.Key{obfsKey}
 		peer.bind = New(bindConfig)
-		peer.dev = device.NewDevice(
+		peer.dev = device.NewDeviceWithOptions(
 			peer.tun.TUN(),
 			peer.bind,
 			device.NewLogger(device.LogLevelError, fmt.Sprintf("wgq-behavior-%d: ", i)),
+			device.Options{DisableTUNEventStateTransitions: true},
 		)
 		t.Cleanup(peer.dev.Close)
 

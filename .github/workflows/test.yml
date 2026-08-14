@@ -18,6 +18,11 @@ jobs:
       - run: ./scripts/check-no-reference-deps.sh
       - name: In-repository quic-go tests
         working-directory: third_party/quic-go
+        env:
+          # Upstream integration tests settle on fixed sleeps (e.g. 25ms
+          # before draining the accept queue); scale their timings on loaded
+          # CI runners via quic-go's own TIMESCALE_FACTOR knob.
+          TIMESCALE_FACTOR: "3"
         run: go test -count=1 ./...
       - run: go test ./...
       - name: Pinned WireGuard behavior over production ArmorBind

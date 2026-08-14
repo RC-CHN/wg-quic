@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-08-14
+
+Adaptive FEC, desktop tunnel management, and data-plane performance release.
+
+- Interleaved FEC groups across the wire and adapted interleave depth to
+  observed burst loss, so bursty links recover packets that single sequential
+  groups would lose; reordered shards are absorbed through a completion grace
+  window, and groups abandoned by a newer group expire immediately instead of
+  occupying the decoder.
+- Raised the FEC data-shard ceiling and parity cap, and exposed the shard
+  layout to the benchmark fixture, which also gained a stateful burst-loss
+  model for asymmetric link profiles.
+- Stopped duplicating WireGuard handshake packets across FEC groups while
+  still duplicating other priority datagrams, keeping handshake latency
+  off the parity path.
+- Pooled datagram send, reassembly, and FEC marshal buffers across the bind,
+  QUIC, and FEC layers; released pooled send buffers on queue-full drops, cut
+  receive-path copies, disabled GSO on the DATAGRAM-only carrier, and made
+  Salamander obfuscation word-wise with cached keyed BLAKE2b states.
+- Restored idle peers autonomously at the transport layer, retried network
+  path reconciliation after endpoint changes, and tracked migrated peer
+  endpoints so NAT rebinding keeps sessions authenticated; the status schema
+  now exposes per-peer authenticated receive/send activity.
+- Added a desktop inline new/edit tunnel form with key generation and
+  validation, tunnel deletion, a light theme, peer endpoint display, and
+  broker-mediated configuration reads on Windows; activation and deactivation
+  now follow live core status transitions with elapsed-time indication
+  instead of a static pending label.
+- Installed the OPNsense status helper as an executable and exercised client
+  address rebinding in the QEMU plugin tests.
+
 ## v0.2.3 - 2026-08-12
 
 Windows custom-install trust and MSI hardening release.

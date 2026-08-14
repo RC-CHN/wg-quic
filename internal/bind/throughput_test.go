@@ -62,10 +62,11 @@ func benchmarkThroughput(b *testing.B, obfsMode string) {
 		}
 		peers[i].bind = New(bindConfig)
 		peers[i].tun = tuntest.NewChannelTUN()
-		peers[i].dev = device.NewDevice(
+		peers[i].dev = device.NewDeviceWithOptions(
 			peers[i].tun.TUN(),
 			peers[i].bind,
 			device.NewLogger(device.LogLevelError, fmt.Sprintf("wgq-bench-%d: ", i)),
+			device.Options{DisableTUNEventStateTransitions: true},
 		)
 		cfg := fmt.Sprintf(
 			"private_key=%s\nlisten_port=0\nreplace_peers=true\npublic_key=%s\npreshared_key=%s\nprotocol_version=1\nreplace_allowed_ips=true\nallowed_ip=%s/32\n",

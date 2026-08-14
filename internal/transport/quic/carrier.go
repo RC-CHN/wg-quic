@@ -247,11 +247,18 @@ func (c *Carrier) AbortNetwork() error {
 func (c *Carrier) Close() error {
 	listenerErr := c.listener.Close()
 	transportErr := c.transport.Close()
+	// quic-go does not close a caller-provided PacketConn, so release the
+	// UDP socket explicitly; otherwise the leaked socket keeps the port and
+	// a same-port rebind fails with EADDRINUSE.
+	connErr := c.packetConn.Close()
 	if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
 		return listenerErr
 	}
 	if transportErr != nil && !errors.Is(transportErr, net.ErrClosed) {
 		return transportErr
+	}
+	if connErr != nil && !errors.Is(connErr, net.ErrClosed) {
+		return connErr
 	}
 	return nil
 }
