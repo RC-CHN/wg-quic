@@ -767,25 +767,32 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		b.stats.wgTxPackets.Add(1)
 		b.stats.wgTxBytes.Add(uint64(len(buf)))
 		queue := sess.send
+		copies := 1
 		if priorityWireGuardDatagram(buf) {
 			queue = sess.priority
+			// Duplicate handshake/keepalive datagrams so a burst cannot wipe
+			// out both copies at once; WireGuard dedupes the repeat by its
+			// counter, so the duplicated send is protocol-safe.
+			copies = 2
 		}
-		preparedFrame := quiccarrier.AcquireDatagramSendBuffer(frameHeaderSize + len(buf))
-		copy(preparedFrame[frameHeaderSize:], buf)
-		packet := outboundPacket{
-			preparedFrame: preparedFrame,
-			id:            b.nextPacket.Add(1),
-		}
-		select {
-		case queue <- packet:
-		case <-state.ctx.Done():
-			quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
-			return net.ErrClosed
-		default:
-			quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
-			b.stats.queueDrops.Add(1)
-			b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
-			return errors.New("wg-quic send queue is full")
+		for i := 0; i < copies; i++ {
+			preparedFrame := quiccarrier.AcquireDatagramSendBuffer(frameHeaderSize + len(buf))
+			copy(preparedFrame[frameHeaderSize:], buf)
+			packet := outboundPacket{
+				preparedFrame: preparedFrame,
+				id:            b.nextPacket.Add(1),
+			}
+			select {
+			case queue <- packet:
+			case <-state.ctx.Done():
+				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
+				return net.ErrClosed
+			default:
+				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
+				b.stats.queueDrops.Add(1)
+				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
+				return errors.New("wg-quic send queue is full")
+			}
 		}
 	}
 	return nil
@@ -1126,6 +1133,15 @@ func (s *session) sendLoop() {
 		}
 		return true
 	}
+	// flushPending emits any in-flight FEC groups so a priority datagram and
+	// its duplicate land in separate groups and survive the same burst.
+	flushPending := func() bool {
+		if s.fecEncoder == nil {
+			return true
+		}
+		packets, err := s.fecEncoder.Flush()
+		return err == nil && sendPackets(packets)
+	}
 	stopTimer := func() {
 		if timerActive && !timer.Stop() {
 			select {
@@ -1200,12 +1216,18 @@ func (s *session) sendLoop() {
 			if !sendWGPacket(packet) {
 				return
 			}
+			if !flushPending() {
+				return
+			}
 			continue
 		default:
 		}
 		select {
 		case packet := <-s.priority:
 			if !sendWGPacket(packet) {
+				return
+			}
+			if !flushPending() {
 				return
 			}
 		case packet := <-s.send:

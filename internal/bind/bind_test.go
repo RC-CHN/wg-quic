@@ -3,6 +3,7 @@ package armorbind
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"log"
 	"net"
@@ -63,6 +64,38 @@ func TestBindRejectsZeroEndpointPort(t *testing.T) {
 	if _, err := bind.ParseEndpoint("192.0.2.1:0"); err == nil ||
 		!strings.Contains(err.Error(), "between 1 and 65535") {
 		t.Fatalf("zero-port endpoint error = %v", err)
+	}
+}
+
+func TestBindDuplicatesPriorityDatagrams(t *testing.T) {
+	a, b := New(DefaultConfig()), New(DefaultConfig())
+	if _, _, err := a.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	bReceive, bPort, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	aToB, err := a.ParseEndpoint(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort))))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A WireGuard keepalive is a type-4 datagram with no encrypted payload:
+	// 16-byte transport header plus the 16-byte AEAD tag. It must be sent
+	// twice (once in each FEC group) so a burst cannot wipe out both copies.
+	keepalive := make([]byte, 32)
+	binary.LittleEndian.PutUint32(keepalive[:4], 4)
+	if err := a.Send([][]byte{keepalive}, aToB); err != nil {
+		t.Fatal(err)
+	}
+
+	first, _ := receiveOne(t, bReceive[0])
+	second, _ := receiveOne(t, bReceive[0])
+	if !bytes.Equal(first, keepalive) || !bytes.Equal(second, keepalive) {
+		t.Fatalf("priority datagram was not duplicated: first=%x second=%x", first, second)
 	}
 }
 
