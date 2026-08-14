@@ -207,13 +207,19 @@ func TestRejectMalformedFrame(t *testing.T) {
 }
 
 func TestWireGuardControlPriority(t *testing.T) {
+	// Handshake packets (types 1/2/3) carry Noise state-machine semantics and
+	// must not be duplicated: two copies arriving together race the handshake
+	// state and break it. WireGuard retransmits a lost handshake on its own
+	// RekeyTimeout, so duplication gains nothing.
 	for _, messageType := range []byte{1, 2, 3} {
 		packet := make([]byte, 148)
 		packet[0] = messageType
-		if !priorityWireGuardDatagram(packet) {
-			t.Errorf("WireGuard message type %d was not prioritized", messageType)
+		if priorityWireGuardDatagram(packet) {
+			t.Errorf("WireGuard handshake message type %d was prioritized", messageType)
 		}
 	}
+	// Only a keepalive (type 4 with no payload) is safe to duplicate: it is a
+	// transport packet with a replay counter that dedupes the second copy.
 	keepalive := make([]byte, 32)
 	keepalive[0] = 4
 	if !priorityWireGuardDatagram(keepalive) {

@@ -78,16 +78,16 @@ func priorityWireGuardDatagram(packet []byte) bool {
 	if len(packet) < 4 {
 		return false
 	}
-	switch binary.LittleEndian.Uint32(packet[:4]) {
-	case 1, 2, 3:
-		return true
-	case 4:
-		// A type-4 packet with no encrypted payload is a WireGuard keepalive:
-		// 16-byte transport header plus the 16-byte AEAD tag.
-		return len(packet) == 32
-	default:
+	// Only a keepalive (type 4 with no payload) is safe to send twice.
+	// Handshake packets (types 1/2/3) carry Noise state-machine semantics:
+	// duplicating them makes two copies race the initiation/response state
+	// and breaks the handshake. WireGuard already retransmits a lost
+	// handshake on its own RekeyTimeout, so they gain nothing from a copy.
+	if binary.LittleEndian.Uint32(packet[:4]) != 4 {
 		return false
 	}
+	// 16-byte transport header plus the 16-byte AEAD tag.
+	return len(packet) == 32
 }
 
 func parseFragment(frame []byte) (fragment, error) {
