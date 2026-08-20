@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+. (Join-Path $PSScriptRoot "lifecycle-fixtures.ps1")
 
 function Wait-For {
     param(
@@ -316,7 +317,7 @@ try {
         throw "derive installed desktop peer public key failed"
     }
     $peerPublicKey = $peerPublicKey.Trim()
-    $listenPort = 53000 + ($PID % 1000)
+    $listenPort = Get-AvailableLifecycleUdpPort
     $endpointPort = 63000 + ($PID % 1000)
     @"
 [Interface]

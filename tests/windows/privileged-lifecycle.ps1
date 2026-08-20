@@ -7,6 +7,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lifecycle-fixtures.ps1")
 
 function Invoke-Native {
     param(
@@ -128,7 +129,7 @@ $endpointAddress = "192.0.2.$octet"
 $endpointPrefix = "$endpointAddress/32"
 $dnsServer = "192.0.2.53"
 $dnsSuffix = "ci.wg-quic.invalid"
-$listenPort = 52000 + ($PID % 1000)
+$listenPort = Get-AvailableLifecycleUdpPort
 $endpointPort = 62000 + ($PID % 1000)
 $serviceStarted = $false
 $endpointRoutesBefore = @(

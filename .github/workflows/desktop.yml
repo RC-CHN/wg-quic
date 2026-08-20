@@ -74,6 +74,11 @@ jobs:
           if ([int] $enableLUA -ne 1) {
             throw "installed filtered-Administrator lifecycle requires EnableLUA=1"
           }
+          . ./tests/windows/lifecycle-fixtures.ps1
+          $fixturePort = Get-AvailableLifecycleUdpPort
+          if ($fixturePort -lt 20000 -or $fixturePort -gt 45000) {
+            throw "lifecycle UDP fixture selected invalid port $fixturePort"
+          }
           go test -count=1 `
             ./internal/quick `
             ./tests/windows/desktop-ipc-probe
