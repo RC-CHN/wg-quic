@@ -35,6 +35,10 @@ jobs:
       - run: ./scripts/check-no-reference-deps.sh
       - name: In-repository quic-go tests
         working-directory: third_party/quic-go
+        env:
+          # Match the regular test workflow: upstream integration tests use
+          # fixed timing windows that need scaling on loaded CI runners.
+          TIMESCALE_FACTOR: "3"
         run: go test -count=1 ./...
       - run: go test -count=1 ./...
       - run: go test -race ./...
