@@ -140,7 +140,7 @@ func ping(network *netstack.Net, address string) (time.Duration, error) {
 	echo := icmp.Echo{
 		ID:   os.Getpid() & 0xffff,
 		Seq:  rand.IntN(1 << 16),
-		Data: []byte("wg-quic Linux host to OPNsense interoperability"),
+		Data: []byte("wg-quic Linux netstack interoperability"),
 	}
 	request, err := (&icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
@@ -270,7 +270,7 @@ func run(configPath string, options runOptions) error {
 	}
 
 	fmt.Printf(
-		"HOST INTEROP PASSED: Linux netstack <-> OPNsense %s, ping=%s, tx=%d, rx=%d\n",
+		"HOST INTEROP PASSED: Linux netstack <-> peer %s, ping=%s, tx=%d, rx=%d\n",
 		pingAddress,
 		latency.Round(time.Microsecond),
 		initial.txBytes,

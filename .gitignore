@@ -9,5 +9,6 @@
 /tests/benchmark/build/
 /tests/benchmark/.generated/
 /tests/benchmark/results/
+/tests/openwrt/.qemu/
 .rcoder/
 bind.test
