@@ -4,7 +4,8 @@
 
 - Added an OpenWrt package with explicit `kmod-tun` and `ip-full` runtime
   dependencies, procd/UCI multi-instance lifecycle, service-aware
-  `wg-quic-quick up/down`, and a LuCI-ready configuration/status boundary.
+  `wg-quic-quick up/down`, ARM64 and x86_64 release builds, and a LuCI-ready
+  configuration/status boundary.
 - Made direct `wg-quic run` reject hook-bearing profiles instead of silently
   ignoring their host policy, and made missing Linux TUN errors name the
   OpenWrt `kmod-tun` remedy.

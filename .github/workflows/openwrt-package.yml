@@ -1,0 +1,73 @@
+name: openwrt-package
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - ".github/workflows/openwrt-package.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "packaging/openwrt/**"
+  pull_request:
+    paths:
+      - ".github/workflows/openwrt-package.yml"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "third_party/**"
+      - "packaging/openwrt/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openwrt-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: arm64
+            artifact: armsr-armv8
+          - target: x86_64
+            artifact: x86-64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install SDK extraction dependency
+        run: sudo apt-get update && sudo apt-get install -y zstd
+      - name: Cache official OpenWrt SDK archive
+        uses: actions/cache@v5
+        with:
+          path: .cache/openwrt
+          key: openwrt-sdk-25.12.5-${{ matrix.target }}
+      - name: Build OpenWrt package
+        env:
+          OPENWRT_SDK_CACHE: ${{ github.workspace }}/.cache/openwrt
+        run: |
+          ./packaging/openwrt/build-release-target.sh \
+            "${{ matrix.target }}" \
+            "$(sed -n '1p' VERSION)" \
+            "dist/openwrt/${{ matrix.target }}"
+      - name: Upload OpenWrt package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-openwrt-${{ matrix.artifact }}
+          path: dist/openwrt/${{ matrix.target }}/*.apk
+          if-no-files-found: error
+          retention-days: 14

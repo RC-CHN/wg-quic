@@ -79,6 +79,7 @@ apk or ipk:
 # by the SDK so the ip-full runtime dependency can be recorded accurately.
 cd /path/to/openwrt-sdk
 ./scripts/feeds update base
+make defconfig
 ./scripts/feeds install ip-full
 cd /path/to/wg-quic
 
@@ -91,3 +92,18 @@ The helper uses the SDK's `NO_DEPS` single-package mode: `kmod-tun` and
 `ip-full` remain mandatory package metadata, but are installed from OpenWrt's
 matching binary repositories instead of being rebuilt locally. See the
 repeatable ARM64 test procedure in `tests/openwrt/README.md`.
+
+For the two release targets, a pinned wrapper downloads and verifies the exact
+official SDK, prepares its base feed, builds the package, verifies its
+architecture/dependencies, and gives each artifact a collision-free name:
+
+```sh
+./packaging/openwrt/build-release-target.sh arm64
+./packaging/openwrt/build-release-target.sh x86_64
+```
+
+These produce OpenWrt 25.12.5 packages for `armsr/armv8`
+(`aarch64_generic`) and `x86/64` (`x86_64`). An APK must still match the
+firmware target and kernel package repository; the architecture-neutral
+configuration and procd files do not make kernel dependencies portable across
+OpenWrt releases.
