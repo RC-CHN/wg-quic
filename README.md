@@ -21,6 +21,14 @@ route, status, and cleanup lifecycle. All platforms share the same userspace
 WireGuard, QUIC, FEC,
 obfuscation, and configuration core.
 
+OpenWrt ARM64 is exercised on an official QEMU image with an installable
+apk, automatic `kmod-tun`/`ip-full` dependencies, procd multi-instance
+supervision, UCI boot configuration, fw4-aware hooks, reboot recovery, and
+uninstall cleanup. Profiles use `/etc/wg-quic/<name>.conf`; the UCI/procd and
+JSON status boundary is ready for a future LuCI frontend, but no LuCI UI is
+included yet. See [`packaging/openwrt/`](packaging/openwrt/README.md) and
+[`tests/openwrt/`](tests/openwrt/README.md).
+
 The command boundary mirrors WireGuard's daemon/`wg-quick` split:
 
 - `wg-quic` owns only the TUN-backed userspace data plane, local status socket,

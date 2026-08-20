@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added an OpenWrt package with explicit `kmod-tun` and `ip-full` runtime
+  dependencies, procd/UCI multi-instance lifecycle, service-aware
+  `wg-quic-quick up/down`, and a LuCI-ready configuration/status boundary.
+- Made direct `wg-quic run` reject hook-bearing profiles instead of silently
+  ignoring their host policy, and made missing Linux TUN errors name the
+  OpenWrt `kmod-tun` remedy.
+- Added an official ARM64 OpenWrt QEMU fixture covering package installation,
+  PostUp/PostDown with fw4, encrypted ICMP traffic, reboot recovery, cleanup,
+  and uninstall profile retention.
+
 ## v0.3.0 - 2026-08-14
 
 Adaptive FEC, desktop tunnel management, and data-plane performance release.
