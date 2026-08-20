@@ -4,6 +4,7 @@ set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH='' cd -- "${script_dir}/../.." && pwd)
+monorepo_dir=$(CDPATH='' cd -- "${project_dir}/.." && pwd)
 share_dir=${1:-"${project_dir}/.qemu/shared"}
 
 test -x "${project_dir}/net/wg-quic/src/sbin/wg-quic"
@@ -29,6 +30,7 @@ cp "${script_dir}/configure-host-client.php" "${share_dir}/configure-host-client
 cp "${script_dir}/api-credentials.php" "${share_dir}/api-credentials.php"
 cp "${script_dir}/guest-validate.sh" "${share_dir}/guest-validate.sh"
 cp "${script_dir}/guest-outer-rebind.sh" "${share_dir}/guest-outer-rebind.sh"
+cp "${monorepo_dir}/VERSION" "${share_dir}/VERSION"
 chmod 0755 "${share_dir}/guest-validate.sh" \
     "${share_dir}/guest-outer-rebind.sh"
 ls -lh "${share_dir}"

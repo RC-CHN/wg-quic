@@ -41,10 +41,10 @@ Build the package with the matching official SDK as described in
 `packaging/openwrt/README.md`, then copy the package and guest test driver:
 
 ```sh
-scp -O -P 2222 dist/openwrt/wg-quic-0.3.0-r1.apk \
+scp -O -P 2222 dist/openwrt/wg-quic-0.3.1-r1.apk \
   tests/openwrt/guest-validate.sh root@127.0.0.1:/tmp/
 ssh -p 2222 root@127.0.0.1 \
-  'chmod 0755 /tmp/guest-validate.sh; /tmp/guest-validate.sh install-smoke /tmp/wg-quic-0.3.0-r1.apk'
+  'chmod 0755 /tmp/guest-validate.sh; /tmp/guest-validate.sh install-smoke /tmp/wg-quic-0.3.1-r1.apk'
 ```
 
 The package must install `kmod-tun` and `ip-full` automatically. The smoke test

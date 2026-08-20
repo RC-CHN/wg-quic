@@ -6,7 +6,7 @@ target=${1:?usage: build-release-target.sh arm64|x86_64 [WG-QUIC-VERSION [OUTPUT
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
-wg_quic_version=${2:-$(sed -n '1p' "$repo_dir/VERSION")}
+wg_quic_version=${2:-$("$repo_dir/scripts/release-version.sh")}
 openwrt_version=${OPENWRT_VERSION:-25.12.5}
 output_dir=${3:-"$repo_dir/dist/openwrt/$target"}
 cache_dir=${OPENWRT_SDK_CACHE:-/tmp/wg-quic-openwrt-sdk-cache}

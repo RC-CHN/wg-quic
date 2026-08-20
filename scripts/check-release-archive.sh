@@ -20,6 +20,7 @@ windows)
 	printf '%s\n' "$members" | grep -Fx "$root/wg-quic.exe" >/dev/null
 	printf '%s\n' "$members" | grep -Fx "$root/wg-quic-quick.exe" >/dev/null
 	printf '%s\n' "$members" | grep -Fx "$root/wintun.dll" >/dev/null
+	printf '%s\n' "$members" | grep -Fx "$root/README_CN.md" >/dev/null
 	printf '%s\n' "$members" | grep -Fx "$root/SHA256SUMS" >/dev/null
 	unzip -q "$archive" -d "$temporary"
 	(cd "$temporary/$root" && sha256sum -c SHA256SUMS)
@@ -28,6 +29,7 @@ linux|freebsd)
 	members=$(tar -tzf "$archive")
 	printf '%s\n' "$members" | grep -Fx "$root/wg-quic" >/dev/null
 	printf '%s\n' "$members" | grep -Fx "$root/wg-quic-quick" >/dev/null
+	printf '%s\n' "$members" | grep -Fx "$root/README_CN.md" >/dev/null
 	backslash=$(printf '\134')
 	if printf '%s\n' "$members" | grep -F "$backslash" >/dev/null; then
 		echo "archive contains a non-Unix path separator" >&2

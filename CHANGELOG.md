@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.3.1 - 2026-08-20
+
+OpenWrt packaging and supervised host-policy correction release.
+
 - Added an OpenWrt package with explicit `kmod-tun` and `ip-full` runtime
   dependencies, procd/UCI multi-instance lifecycle, service-aware
   `wg-quic-quick up/down`, ARM64 and x86_64 release builds, and a LuCI-ready
@@ -12,6 +16,18 @@
 - Added an official ARM64 OpenWrt QEMU fixture covering package installation,
   PostUp/PostDown with fw4, encrypted ICMP traffic, reboot recovery, cleanup,
   and uninstall profile retention.
+- Reworked the English documentation and added a Simplified Chinese guide with
+  an explicit platform support matrix, shared configuration guidance, and
+  short Linux, Windows, FreeBSD, OPNsense, and OpenWrt installation procedures.
+- Stabilized the Windows installed lifecycle fixtures by probing an exclusive
+  UDP listen port outside the default dynamic client range, preventing runner
+  and WebView traffic from intermittently taking a PID-derived test port.
+- Matched release validation to the regular quic-go integration-test timing
+  scale so loaded runners do not trip upstream one-second MITM deadlines.
+- Made the authenticated-activity test wait for asynchronous successful-send
+  bookkeeping, removing a FreeBSD QEMU race without weakening its assertions.
+- Made the quic-go listener-close test drain and validate both connection sets
+  before closing either side, removing its invalid dependency on accept order.
 
 ## v0.3.0 - 2026-08-14
 

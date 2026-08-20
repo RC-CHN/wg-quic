@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version to validate without publishing
-        required: true
-        default: "0.3.0"
+        description: Optional version assertion; leave blank to use VERSION
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -17,9 +17,6 @@ permissions:
 concurrency:
   group: release-${{ github.ref }}-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
-
-env:
-  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   verify-linux:
@@ -29,9 +26,15 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Match tag to release version
+      - name: Resolve and validate release version
         shell: bash
-        run: test "$(sed -n '1p' VERSION)" = "${RELEASE_VERSION#v}"
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            REQUESTED_VERSION=$GITHUB_REF_NAME
+          fi
+          ./scripts/release-version.sh "$REQUESTED_VERSION"
       - run: ./scripts/check-no-reference-deps.sh
       - name: In-repository quic-go tests
         working-directory: third_party/quic-go
@@ -130,11 +133,11 @@ jobs:
           go-version-file: go.mod
       - name: Build release archive
         shell: bash
-        run: ./scripts/package-release.sh "${{ matrix.target.os }}" "${{ matrix.target.arch }}" "${RELEASE_VERSION#v}"
+        run: ./scripts/package-release.sh "${{ matrix.target.os }}" "${{ matrix.target.arch }}"
       - name: Validate archive paths, contents, version, and checksums
         shell: bash
         run: |
-          version="${RELEASE_VERSION#v}"
+          version=$(./scripts/release-version.sh)
           archive="dist/wg-quic-v${version}-${{ matrix.target.os }}-${{ matrix.target.arch }}.${{ matrix.target.extension }}"
           ./scripts/check-release-archive.sh "$archive" "${{ matrix.target.os }}" "${{ matrix.target.arch }}" "$version"
       - name: Upload release archive

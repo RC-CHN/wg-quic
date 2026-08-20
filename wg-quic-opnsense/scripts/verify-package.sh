@@ -12,9 +12,9 @@ esac
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH='' cd -- "${script_dir}/.." && pwd)
+monorepo_dir=$(CDPATH='' cd -- "${project_dir}/.." && pwd)
 plugin_dir="${project_dir}/net/wg-quic"
-plugin_version=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' \
-    "${plugin_dir}/Makefile")
+plugin_version=$("${monorepo_dir}/scripts/release-version.sh")
 manifest_file=$(mktemp /tmp/wg-quic-manifest.XXXXXX)
 payload_dir=$(mktemp -d /tmp/wg-quic-payload.XXXXXX)
 trap 'rm -f -- "${manifest_file}"; rm -rf -- "${payload_dir}"' EXIT HUP INT TERM

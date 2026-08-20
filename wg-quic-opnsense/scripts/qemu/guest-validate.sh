@@ -28,6 +28,8 @@ fi
 
 test -f "${archive}"
 test -f "${core_archive}"
+plugin_version=$(sed -n '1p' "${mount_dir}/VERSION")
+test -n "${plugin_version}"
 # The qcow2 disks are deliberately reusable. Remove the previous plugin
 # checkout so stale work/pkg staging files can never be mistaken for a package
 # built from the archive under test.
@@ -42,11 +44,10 @@ uname -a
 
 echo "== plugin lint =="
 cd /usr/plugins/net/wg-quic
-make lint
+make PLUGIN_VERSION="${plugin_version}" lint
 
 echo "== package build =="
-make package
-plugin_version=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' Makefile)
+make PLUGIN_VERSION="${plugin_version}" package
 package_file=$(find work/pkg -name 'os-wg-quic-*.pkg' -type f | head -n 1)
 test -n "${package_file}"
 pkg info -F "${package_file}"

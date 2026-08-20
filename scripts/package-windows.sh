@@ -5,11 +5,7 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 architecture=${1:-amd64}
 version=${WG_QUIC_VERSION:-}
 if [ -z "$version" ]; then
-	if [ -f "$repo_dir/VERSION" ]; then
-		version=$(sed -n '1p' "$repo_dir/VERSION")
-	else
-		version=0.1.0-dev
-	fi
+	version=$("$repo_dir/scripts/release-version.sh")
 fi
 
 case "$architecture" in
@@ -44,10 +40,11 @@ install -m 0644 "$repo_dir/third_party/wintun/LICENSE.txt" "$output_dir/LICENSE-
 install -m 0644 "$repo_dir/third_party/wintun/ORIGIN.md" "$output_dir/ORIGIN-WINTUN.md"
 install -m 0644 "$repo_dir/LICENSE" "$output_dir/LICENSE-wg-quic.txt"
 install -m 0644 "$repo_dir/packaging/windows/README.md" "$output_dir/README.md"
+install -m 0644 "$repo_dir/README_CN.md" "$output_dir/README_CN.md"
 printf '%s\n' "$version" >"$output_dir/VERSION"
 
 (cd "$output_dir" && sha256sum \
 	wg-quic.exe wg-quic-quick.exe wintun.dll \
-	LICENSE-WINTUN.txt ORIGIN-WINTUN.md LICENSE-wg-quic.txt README.md VERSION > SHA256SUMS)
+	LICENSE-WINTUN.txt ORIGIN-WINTUN.md LICENSE-wg-quic.txt README.md README_CN.md VERSION > SHA256SUMS)
 
 echo "created self-contained Windows $architecture bundle for $version at $output_dir"

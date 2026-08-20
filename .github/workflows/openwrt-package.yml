@@ -59,11 +59,7 @@ jobs:
       - name: Build OpenWrt package
         env:
           OPENWRT_SDK_CACHE: ${{ github.workspace }}/.cache/openwrt
-        run: |
-          ./packaging/openwrt/build-release-target.sh \
-            "${{ matrix.target }}" \
-            "$(sed -n '1p' VERSION)" \
-            "dist/openwrt/${{ matrix.target }}"
+        run: ./packaging/openwrt/build-release-target.sh "${{ matrix.target }}"
       - name: Upload OpenWrt package
         uses: actions/upload-artifact@v7
         with:

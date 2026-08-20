@@ -11,7 +11,7 @@ case "$target_os" in
 linux|freebsd|windows)
 	;;
 *)
-	echo "usage: $0 linux|freebsd|windows amd64|arm64 VERSION [dist-directory]" >&2
+	echo "usage: $0 linux|freebsd|windows amd64|arm64 [VERSION [dist-directory]]" >&2
 	exit 2
 	;;
 esac
@@ -19,13 +19,12 @@ case "$target_arch" in
 amd64|arm64)
 	;;
 *)
-	echo "usage: $0 linux|freebsd|windows amd64|arm64 VERSION [dist-directory]" >&2
+	echo "usage: $0 linux|freebsd|windows amd64|arm64 [VERSION [dist-directory]]" >&2
 	exit 2
 	;;
 esac
 if [ -z "$version" ]; then
-	echo "release version is required" >&2
-	exit 2
+	version=$("$repo_dir/scripts/release-version.sh")
 fi
 version=${version#v}
 case "$version" in
@@ -68,6 +67,7 @@ env CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
 	go build -trimpath -ldflags "$ldflags" -o "$package_dir/wg-quic-quick" "$repo_dir/cmd/wg-quic-quick"
 install -m 0644 "$repo_dir/LICENSE" "$package_dir/LICENSE"
 install -m 0644 "$repo_dir/README.md" "$package_dir/README.md"
+install -m 0644 "$repo_dir/README_CN.md" "$package_dir/README_CN.md"
 printf '%s\n' "$version" >"$package_dir/VERSION"
 
 case "$target_os" in

@@ -4,10 +4,9 @@ set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH='' cd -- "${script_dir}/.." && pwd)
-plugin_dir="${project_dir}/net/wg-quic"
+monorepo_dir=$(CDPATH='' cd -- "${project_dir}/.." && pwd)
 dist_dir="${project_dir}/dist"
-plugin_version=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' \
-    "${plugin_dir}/Makefile")
+plugin_version=$("${monorepo_dir}/scripts/release-version.sh")
 
 (
     cd "${dist_dir}"

@@ -45,29 +45,19 @@ function makeFixture() {
     JSON.stringify({ version }),
     repositoryDirectory,
   );
-  writeFixture(
-    'wg-quic-opnsense/net/wg-quic/Makefile',
-    `PLUGIN_NAME= wg-quic\nPLUGIN_VERSION= ${version}\n`,
-    repositoryDirectory,
-  );
-  writeFixture(
-    'wg-quic-opnsense/scripts/build-wg-quic.sh',
-    `version="\${WG_QUIC_VERSION:-${version}-opnsense}"\n`,
-    repositoryDirectory,
-  );
   return repositoryDirectory;
 }
 
-test('accepts synchronized desktop lockfiles and OPNsense versions', (t) => {
+test('accepts synchronized desktop metadata versions', (t) => {
   const repositoryDirectory = makeFixture();
   t.after(() => rmSync(repositoryDirectory, { recursive: true, force: true }));
 
   const result = checkVersionConsistency(repositoryDirectory);
   assert.equal(result.expected, version);
-  assert.equal(result.sources.length, 8);
+  assert.equal(result.sources.length, 6);
 });
 
-test('reports every drifted lockfile and OPNsense version source', (t) => {
+test('reports every drifted desktop lockfile version source', (t) => {
   const repositoryDirectory = makeFixture();
   t.after(() => rmSync(repositoryDirectory, { recursive: true, force: true }));
 
@@ -84,25 +74,12 @@ test('reports every drifted lockfile and OPNsense version source', (t) => {
     '[[package]]\nname = "wg-quic-desktop"\nversion = "3.0.0"\n',
     repositoryDirectory,
   );
-  writeFixture(
-    'wg-quic-opnsense/net/wg-quic/Makefile',
-    'PLUGIN_VERSION= 4.0.0\n',
-    repositoryDirectory,
-  );
-  writeFixture(
-    'wg-quic-opnsense/scripts/build-wg-quic.sh',
-    'version="${WG_QUIC_VERSION:-5.0.0-opnsense}"\n',
-    repositoryDirectory,
-  );
-
   assert.throws(
     () => checkVersionConsistency(repositoryDirectory),
     (error) => {
       assert.match(error.message, /package-lock\.json#version/);
       assert.match(error.message, /package-lock\.json#packages\[""\]/);
       assert.match(error.message, /Cargo\.lock#wg-quic-desktop/);
-      assert.match(error.message, /net\/wg-quic\/Makefile/);
-      assert.match(error.message, /scripts\/build-wg-quic\.sh/);
       return true;
     },
   );

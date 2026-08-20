@@ -61,31 +61,11 @@ export function collectVersionSources(
     repositoryDirectory,
     'desktop/src-tauri/Cargo.lock',
   );
-  const opnsenseMakefile = readText(
-    repositoryDirectory,
-    'wg-quic-opnsense/net/wg-quic/Makefile',
-  );
-  const opnsenseBuildScript = readText(
-    repositoryDirectory,
-    'wg-quic-opnsense/scripts/build-wg-quic.sh',
-  );
-
   const cargoManifestVersion = requiredMatch(
     cargoManifest,
     /^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     'desktop Cargo package version',
   );
-  const opnsensePluginVersion = requiredMatch(
-    opnsenseMakefile,
-    /^PLUGIN_VERSION\s*=\s*([^\s#]+)\s*$/m,
-    'OPNsense plugin version',
-  );
-  const opnsenseFallbackVersion = requiredMatch(
-    opnsenseBuildScript,
-    /^version="\$\{WG_QUIC_VERSION:-([^}]+)\}"\s*$/m,
-    'OPNsense build fallback version',
-  );
-
   return {
     expected,
     sources: [
@@ -118,16 +98,6 @@ export function collectVersionSources(
         source: 'desktop/src-tauri/tauri.conf.json',
         actual: tauriConfig.version,
         wanted: expected,
-      },
-      {
-        source: 'wg-quic-opnsense/net/wg-quic/Makefile',
-        actual: opnsensePluginVersion,
-        wanted: expected,
-      },
-      {
-        source: 'wg-quic-opnsense/scripts/build-wg-quic.sh',
-        actual: opnsenseFallbackVersion,
-        wanted: `${expected}-opnsense`,
       },
     ],
   };

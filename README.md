@@ -2,6 +2,8 @@
 
 Repository: <https://github.com/RC-CHN/wg-quic>
 
+[简体中文](README_CN.md)
+
 `wg-quic` carries complete encrypted WireGuard datagrams over QUIC DATAGRAM
 frames. It keeps the WireGuard interface and configuration model, but replaces
 the outer WireGuard UDP transport with QUIC, optional adaptive FEC, and
@@ -13,9 +15,7 @@ Salamander-style packet obfuscation.
 > and `wg-quick`-style configuration files.
 
 The current public release is
-[`v0.3.0`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.0). The source on
-the development branch also contains the OpenWrt packaging work described
-below.
+[`v0.3.1`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.1).
 
 ## Platform status
 
@@ -28,10 +28,9 @@ below.
 | OpenWrt | OpenWrt 25.12.5 APK workflow artifacts for `armsr/armv8` and `x86/64` | procd and UCI multi-instance service | Both APKs are SDK-built and metadata-checked; ARM64 additionally has full QEMU install, traffic, reboot, hooks, and uninstall coverage |
 | macOS, Android, iOS | None | None | Not currently supported |
 
-The already-published `v0.3.0` Release predates the OpenWrt workflow and does
-not contain APK files. The current workflow uploads
-`release-openwrt-armsr-armv8` and `release-openwrt-x86-64` artifacts, and the
-release workflow is prepared to include their APKs in a future tag.
+Starting with `v0.3.1`, the release workflow publishes both OpenWrt APKs in
+addition to the `release-openwrt-armsr-armv8` and
+`release-openwrt-x86-64` workflow artifacts.
 
 ## Choose the right command
 
@@ -125,11 +124,11 @@ Download the archive matching the host architecture from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). For example, on amd64:
 
 ```sh
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.0/wg-quic-v0.3.0-linux-amd64.tar.gz
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.0/SHA256SUMS
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.1/wg-quic-v0.3.1-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.1/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf wg-quic-v0.3.0-linux-amd64.tar.gz
-cd wg-quic-v0.3.0-linux-amd64
+tar -xzf wg-quic-v0.3.1-linux-amd64.tar.gz
+cd wg-quic-v0.3.1-linux-amd64
 
 sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 sudo install -m 0644 wg-quic@.service /etc/systemd/system/
@@ -150,7 +149,7 @@ sudo wg-quic-quick down wg0
 The amd64 desktop Deb is an alternative for Linux desktop users:
 
 ```sh
-sudo apt install ./wg-quic-desktop-v0.3.0-linux-amd64.deb
+sudo apt install ./wg-quic-desktop-v0.3.1-linux-amd64.deb
 ```
 
 The desktop imports profiles into `/etc/wg-quic/` with mode `0600` and uses
@@ -164,7 +163,7 @@ unit grants the required capability and access to `/dev/net/tun`.
 ## Windows
 
 For x64 Windows, the recommended installation is
-`wg-quic-desktop-v0.3.0-windows-x64.msi` from
+`wg-quic-desktop-v0.3.1-windows-x64.msi` from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). The per-machine MSI
 asks for elevation once, installs the UI under Program Files, and registers the
 restricted `wg-quic-manager` LocalSystem service. Use **Import** in the desktop
@@ -206,8 +205,8 @@ Download the amd64 or arm64 FreeBSD archive and install its two programs and
 rc.d script:
 
 ```sh
-tar -xzf wg-quic-v0.3.0-freebsd-amd64.tar.gz
-cd wg-quic-v0.3.0-freebsd-amd64
+tar -xzf wg-quic-v0.3.1-freebsd-amd64.tar.gz
+cd wg-quic-v0.3.1-freebsd-amd64
 install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
 install -d -m 0700 /usr/local/etc/wg-quic
@@ -231,14 +230,14 @@ After the rc.d script is installed, `wg-quic-quick up wg0` and
 
 Use the package whose OPNsense version exactly matches the firewall:
 
-- `os-wg-quic-0.3.0-opnsense-26.1-amd64.pkg`
-- `os-wg-quic-0.3.0-opnsense-26.7-amd64.pkg`
+- `os-wg-quic-0.3.1-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.3.1-opnsense-26.7-amd64.pkg`
 
 Copy it to the firewall and install it from a console or SSH session. For
 OPNsense 26.7:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.3.0-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.3.1-opnsense-26.7-amd64.pkg
 ```
 
 Then open `VPN > wg-quic`:
@@ -283,7 +282,7 @@ packages such as `kmod-tun` must match the running firmware. Install the APK
 on the router:
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.3.0-r1-openwrt-25.12.5-armsr-armv8.apk
+apk add --allow-untrusted ./wg-quic-0.3.1-r1-openwrt-25.12.5-armsr-armv8.apk
 ```
 
 The package pulls in `kmod-tun` and `ip-full`, installs both executables, and
@@ -396,12 +395,18 @@ Every `v*` tag is gated on Linux, Windows, FreeBSD, the privileged Linux tunnel
 matrix, desktop packages, OPNsense packages, and the OpenWrt package matrix.
 The release job publishes checksums in one top-level `SHA256SUMS` file.
 
+The root [`VERSION`](VERSION) file is the canonical release version. Packaging
+scripts and a manually dispatched release workflow read it automatically; the
+optional workflow input only asserts that the requested version matches it.
+Desktop npm/Cargo/Tauri manifests still require literal versions for their
+native tooling, and `npm run version:check --prefix desktop` detects drift.
+
 Build and validate the six portable CLI archives locally with:
 
 ```sh
-make release-artifacts VERSION=0.3.0
+make release-artifacts VERSION=0.3.1
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.3.0-linux-amd64.tar.gz linux amd64 0.3.0
+  dist/wg-quic-v0.3.1-linux-amd64.tar.gz linux amd64 0.3.1
 ```
 
 OpenWrt and OPNsense packages must additionally match their exact target

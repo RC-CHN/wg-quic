@@ -1,6 +1,9 @@
 include $(TOPDIR)/rules.mk
 
-WG_QUIC_VERSION ?= 0.3.0
+WG_QUIC_VERSION ?= $(strip $(shell sed -n '1p' "$(CURDIR)/VERSION" 2>/dev/null))
+ifeq ($(WG_QUIC_VERSION),)
+$(error WG_QUIC_VERSION is required)
+endif
 
 PKG_NAME:=wg-quic
 PKG_VERSION:=$(WG_QUIC_VERSION)

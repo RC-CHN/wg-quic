@@ -52,8 +52,12 @@ git clone --depth 1 --branch "stable/${target}" \
 git -C "${build_root}/plugins" rev-parse HEAD
 git -C "${build_root}/core" rev-parse HEAD
 
-binary_version=${WG_QUIC_VERSION:-"$(sed -n '1p' "${monorepo_dir}/VERSION")-opnsense"}
+binary_version=${WG_QUIC_VERSION:-}
+if [ -z "${binary_version}" ]; then
+    binary_version=$("${monorepo_dir}/scripts/release-version.sh")-opnsense
+fi
 WG_QUIC_VERSION="${binary_version}" "${script_dir}/build-wg-quic.sh"
+plugin_version=$("${monorepo_dir}/scripts/release-version.sh")
 
 mkdir -p "${build_root}/plugins/net/wg-quic"
 tar -C "${project_dir}/net/wg-quic" -cf - . |
@@ -67,6 +71,7 @@ fi
 echo "== official plugin lint =="
 cd "${build_root}/plugins/net/wg-quic"
 make \
+    PLUGIN_VERSION="${plugin_version}" \
     PLUGIN_ABI="${target}" \
     PLUGIN_ARCH=amd64 \
     PLUGIN_HASH="${source_revision}" \
@@ -74,12 +79,12 @@ make \
 
 echo "== official plugin package =="
 make \
+    PLUGIN_VERSION="${plugin_version}" \
     PLUGIN_ABI="${target}" \
     PLUGIN_ARCH=amd64 \
     PLUGIN_HASH="${source_revision}" \
     package
 
-plugin_version=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' Makefile)
 package_file=$(find work/pkg -name 'os-wg-quic-*.pkg' -type f | head -n 1)
 test -n "${package_file}"
 destination="${output_dir}/os-wg-quic-${plugin_version}-opnsense-${target}-amd64.pkg"

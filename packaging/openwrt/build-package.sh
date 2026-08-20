@@ -3,12 +3,16 @@
 set -eu
 
 sdk_dir=${1:?usage: build-package.sh OPENWRT-SDK [VERSION [GOARCH [OUTPUT-DIR]]]}
-version=${2:-0.3.0}
+version=${2:-}
 goarch=${3:-arm64}
 output_dir=${4:-}
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
+
+if [ -z "$version" ]; then
+	version=$("$repo_dir/scripts/release-version.sh")
+fi
 
 case "$sdk_dir" in
 /*) ;;
@@ -85,6 +89,7 @@ fi
 
 cp -R "$script_dir" "$package_dir"
 cp "$repo_dir/LICENSE" "$package_dir/LICENSE"
+cp "$repo_dir/VERSION" "$package_dir/VERSION"
 if [ -f "$sdk_config" ]; then
 	cp "$sdk_config" "$saved_config"
 	had_sdk_config=1
