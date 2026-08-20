@@ -552,7 +552,11 @@ func CreateTUN(name string, mtu int) (Device, error) {
 	nfd, err := unix.Open(cloneDevicePath, unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("CreateTUN(%q) failed; %s does not exist", name, cloneDevicePath)
+			return nil, fmt.Errorf(
+				"CreateTUN(%q) failed; %s does not exist; install or load the TUN kernel driver (OpenWrt package: kmod-tun)",
+				name,
+				cloneDevicePath,
+			)
 		}
 		return nil, err
 	}

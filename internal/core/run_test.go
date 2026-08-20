@@ -63,3 +63,41 @@ func TestLoadConfigurationUsesSnapshotWithoutReadingSourcePath(t *testing.T) {
 		t.Fatalf("loaded snapshot = %#v, want %#v", got, cfg)
 	}
 }
+
+func TestDirectCoreConfigurationRejectsIgnoredHooks(t *testing.T) {
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+			PostUp:     []string{"echo should-run"},
+		},
+		Transport: config.DefaultTransport(),
+	}
+	err := validateDirectCoreConfiguration(cfg)
+	if err == nil || !strings.Contains(err.Error(), "run wg-quic-quick") {
+		t.Fatalf("hook validation error = %v", err)
+	}
+}
+
+func TestSupervisedSnapshotMayContainHooks(t *testing.T) {
+	cfg := &config.Config{
+		Interface: config.Interface{
+			PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+			PostUp:     []string{"echo supervised"},
+		},
+		Transport: config.DefaultTransport(),
+	}
+	snapshot, err := config.MarshalSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadConfiguration(
+		"/path/owned/by/quick.conf",
+		RunOptions{Snapshot: bytes.NewReader(snapshot)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Interface.PostUp) != 1 || got.Interface.PostUp[0] != "echo supervised" {
+		t.Fatalf("supervised hooks = %#v", got.Interface.PostUp)
+	}
+}

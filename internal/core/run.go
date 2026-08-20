@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"time"
@@ -25,6 +26,11 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 	cfg, err := loadConfiguration(configPath, options)
 	if err != nil {
 		return err
+	}
+	if options.Snapshot == nil {
+		if err := validateDirectCoreConfiguration(cfg); err != nil {
+			return err
+		}
 	}
 	if options.FwMark != nil {
 		cfg.Interface.FwMark = *options.FwMark
@@ -58,6 +64,20 @@ func Run(ctx context.Context, configPath string, options RunOptions) error {
 		go logDebugStats(ctx, name, instance)
 	}
 	return instance.Wait(ctx)
+}
+
+func validateDirectCoreConfiguration(cfg *config.Config) error {
+	if cfg == nil {
+		return errors.New("configuration is required")
+	}
+	if len(cfg.Interface.PreUp) != 0 || len(cfg.Interface.PostUp) != 0 ||
+		len(cfg.Interface.PreDown) != 0 || len(cfg.Interface.PostDown) != 0 {
+		return errors.New(
+			"configuration contains PreUp/PostUp/PreDown/PostDown hooks; " +
+				"wg-quic run never executes host hooks; run wg-quic-quick instead",
+		)
+	}
+	return nil
 }
 
 func loadConfiguration(configPath string, options RunOptions) (*config.Config, error) {
