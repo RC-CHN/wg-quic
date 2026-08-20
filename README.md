@@ -3,61 +3,356 @@
 Repository: <https://github.com/RC-CHN/wg-quic>
 
 `wg-quic` carries complete encrypted WireGuard datagrams over QUIC DATAGRAM
-frames. Its WireGuard userspace cryptographic and peer state machine is a
-pinned in-repository fork under `third_party/wireguard-go`; production code and
-behavior tests no longer download `golang.zx2c4.com/wireguard`.
-The complete quic-go v0.61.0 source and tests are likewise pinned under
-`third_party/quic-go`. The root product module uses that nested upstream module
-through a local `replace` and `go.work`; production builds do not substitute a
-module-cache or `references/` copy.
+frames. It keeps the WireGuard interface and configuration model, but replaces
+the outer WireGuard UDP transport with QUIC, optional adaptive FEC, and
+Salamander-style packet obfuscation.
 
-The broadest exercised runtime is currently Linux. The FreeBSD data plane and
-`wg-quic-quick` host-policy layer are also QEMU-validated through the OPNsense
-plugin on FreeBSD 14 and 15, and an rc.d service script is included. Windows
-has a Wintun, host-network, Named Pipe, and per-tunnel SCM implementation with
-a Tauri desktop shell; hosted CI validates the installed UI's elevation
-boundary plus its privileged Wintun, LocalSystem service, address, MTU, DNS,
-route, status, and cleanup lifecycle. All platforms share the same userspace
-WireGuard, QUIC, FEC,
-obfuscation, and configuration core.
+> [!IMPORTANT]
+> Both ends of a tunnel must run `wg-quic`. A stock WireGuard endpoint cannot
+> connect to a `wg-quic` endpoint even though both use familiar WireGuard keys
+> and `wg-quick`-style configuration files.
 
-OpenWrt ARM64 is exercised on an official QEMU image with an installable
-apk, automatic `kmod-tun`/`ip-full` dependencies, procd multi-instance
-supervision, UCI boot configuration, fw4-aware hooks, reboot recovery, and
-uninstall cleanup. Profiles use `/etc/wg-quic/<name>.conf`; the UCI/procd and
-JSON status boundary is ready for a future LuCI frontend, but no LuCI UI is
-included yet. See [`packaging/openwrt/`](packaging/openwrt/README.md) and
-[`tests/openwrt/`](tests/openwrt/README.md).
+The current public release is
+[`v0.3.0`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.0). The source on
+the development branch also contains the OpenWrt packaging work described
+below.
 
-The command boundary mirrors WireGuard's daemon/`wg-quick` split:
+## Platform status
 
-- `wg-quic` owns only the TUN-backed userspace data plane, local status socket,
-  configuration validation, and key utilities;
-- `wg-quic-quick` owns addresses, routes, DNS, hooks, and platform service
-  management. It starts and supervises the separate `wg-quic` executable; it
-  does not import or embed the core package.
+| Platform | Available packages | Service or UI | Current validation boundary |
+|---|---|---|---|
+| Linux | CLI archives for amd64 and arm64; desktop Deb for amd64 | systemd; optional Tauri desktop | Native tests, race tests, and privileged two-node TUN interoperability on amd64; arm64 is cross-built |
+| Windows | CLI bundles for amd64 and arm64; desktop MSI for x64 | Wintun, one SCM service per tunnel, and a Tauri desktop | Installed x64 MSI, LocalSystem service, Wintun, address/MTU/DNS/routes, upgrade, status, and cleanup; arm64 is cross-built |
+| FreeBSD | CLI archives for amd64 and arm64 | rc.d | Native FreeBSD 14 amd64 tests; arm64 is cross-built |
+| OPNsense | Private packages for 26.1/FreeBSD 14 and 26.7/FreeBSD 15, amd64 | `VPN > wg-quic`, Dashboard widget, configd, and `quicN` interfaces | Both versions are package-validated and QEMU runtime-tested; Linux-to-OPNsense traffic is also exercised |
+| OpenWrt | OpenWrt 25.12.5 APK workflow artifacts for `armsr/armv8` and `x86/64` | procd and UCI multi-instance service | Both APKs are SDK-built and metadata-checked; ARM64 additionally has full QEMU install, traffic, reboot, hooks, and uninstall coverage |
+| macOS, Android, iOS | None | None | Not currently supported |
 
-The supervised startup configuration also has one owner:
-`wg-quic-quick` parses and validates the `.conf` once, resolves automatic host
-policy, and sends a versioned immutable configuration snapshot to the core over
-the child's standard input. Private and preshared keys do not enter process
-arguments, and the supervised core does not reread the path.
+The already-published `v0.3.0` Release predates the OpenWrt workflow and does
+not contain APK files. The current workflow uploads
+`release-openwrt-armsr-armv8` and `release-openwrt-x86-64` artifacts, and the
+release workflow is prepared to include their APKs in a future tag.
 
-QUIC is also isolated below the WireGuard bind adapter:
-`internal/transport/quic` owns quic-go, outer TLS, UDP sockets, socket marks,
-and Salamander PacketConn wiring, while `internal/bind` sees only opaque
-datagram connections.
+## Choose the right command
 
-`wg-quic` accepts ordinary `wg-quick` INI configuration files. Both peers must
-run `wg-quic`; it is not wire-compatible with a stock WireGuard UDP endpoint.
+The project deliberately has two executables:
 
-By default, every outer QUIC UDP packet uses the built-in Salamander-style
-obfuscation profile. Its per-peer key is derived from the existing WireGuard
-private/public key pair with X25519. If a peer already has a WireGuard
-`PresharedKey`, that key is mixed into the derivation as well. No transport
-password or extra configuration field is required.
+- `wg-quic` is the low-level userspace data plane. It owns WireGuard, QUIC,
+  the TUN device, and the local status interface.
+- `wg-quic-quick` is the normal entry point. It owns addresses, routes, MTU,
+  DNS, hooks, endpoint route pinning, and platform service management.
 
-## Development
+Use `wg-quic-quick` for a normal tunnel. Running `wg-quic run` directly does
+not apply `Address`, routes, DNS, `PreUp`, `PostUp`, `PreDown`, or `PostDown`.
+Direct core startup rejects hook-bearing profiles instead of silently ignoring
+their host policy.
+
+The common commands are:
+
+```sh
+wg-quic-quick check wg0
+sudo wg-quic-quick run wg0       # foreground, complete tunnel lifecycle
+sudo wg-quic-quick up wg0        # start through the platform service manager
+wg-quic-quick show wg0
+wg-quic-quick show wg0 --json
+sudo wg-quic-quick down wg0
+```
+
+`show` reports the numeric peer endpoint, QUIC session state, latest WireGuard
+handshake, authenticated traffic activity, transfer totals, and transport/FEC
+counters. `SaveConfig = true` is rejected because runtime configuration
+mutation is not implemented.
+
+## Create a first profile
+
+Generate a private/public keypair on each peer. Keep the private key file
+secret:
+
+```sh
+umask 077
+wg-quic genkey > private.key
+wg-quic pubkey < private.key > public.key
+```
+
+A minimal profile for peer A looks like this:
+
+```ini
+[Interface]
+PrivateKey = PEER_A_PRIVATE_KEY
+Address = 10.203.0.1/32
+ListenPort = 51820
+MTU = 1280
+
+[Peer]
+PublicKey = PEER_B_PUBLIC_KEY
+AllowedIPs = 10.203.0.2/32
+Endpoint = PEER_B_PUBLIC_IP_OR_NAME:51820
+PersistentKeepalive = 25
+```
+
+On peer B, use its private key, `10.203.0.2/32`, peer A's public key,
+`10.203.0.1/32`, and peer A's reachable endpoint. Start with narrow `/32`
+`AllowedIPs`; test a default route only after a split tunnel works. If a
+`PresharedKey` is used, place the same value in both matching `[Peer]`
+sections.
+
+QUIC, adaptive FEC, and Salamander obfuscation are enabled by the default
+transport profile, so this basic configuration needs no separate transport
+password. Salamander keys are derived from the WireGuard key agreement and,
+when present, the WireGuard preshared key.
+
+Configuration locations are platform-specific:
+
+| Platform | Profile location |
+|---|---|
+| Linux and OpenWrt | `/etc/wg-quic/<name>.conf` |
+| FreeBSD | `/usr/local/etc/wg-quic/<name>.conf` |
+| Windows | `%ProgramData%\wg-quic\interfaces\<name>.conf` |
+| OPNsense | `/usr/local/etc/wg-quic/quicN.conf`, generated by the plugin |
+
+On Unix-like systems, keep the directory private and each profile readable
+only by root:
+
+```sh
+sudo install -d -m 0700 /etc/wg-quic
+sudo install -m 0600 wg0.conf /etc/wg-quic/wg0.conf
+sudo wg-quic-quick check wg0
+```
+
+## Linux
+
+Download the archive matching the host architecture from
+[Releases](https://github.com/RC-CHN/wg-quic/releases). For example, on amd64:
+
+```sh
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.0/wg-quic-v0.3.0-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.0/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+tar -xzf wg-quic-v0.3.0-linux-amd64.tar.gz
+cd wg-quic-v0.3.0-linux-amd64
+
+sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
+sudo install -m 0644 wg-quic@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+Put `wg0.conf` in `/etc/wg-quic/`, then start it and optionally enable it for
+boot:
+
+```sh
+sudo wg-quic-quick check wg0
+sudo wg-quic-quick up wg0
+sudo systemctl enable wg-quic@wg0.service
+wg-quic-quick show wg0
+sudo wg-quic-quick down wg0
+```
+
+The amd64 desktop Deb is an alternative for Linux desktop users:
+
+```sh
+sudo apt install ./wg-quic-desktop-v0.3.0-linux-amd64.deb
+```
+
+The desktop imports profiles into `/etc/wg-quic/` with mode `0600` and uses
+`pkexec` only for fixed privileged operations. It is a UI over the same
+`wg-quic-quick` service and configuration model, not a separate tunnel
+implementation.
+
+Linux requires a working TUN device and `CAP_NET_ADMIN`. The packaged systemd
+unit grants the required capability and access to `/dev/net/tun`.
+
+## Windows
+
+For x64 Windows, the recommended installation is
+`wg-quic-desktop-v0.3.0-windows-x64.msi` from
+[Releases](https://github.com/RC-CHN/wg-quic/releases). The per-machine MSI
+asks for elevation once, installs the UI under Program Files, and registers the
+restricted `wg-quic-manager` LocalSystem service. Use **Import** in the desktop
+application to add a profile and then start or stop it from the tunnel list.
+
+The desktop itself remains unelevated. Local Administrator accounts use the
+authenticated management service for hook-free profiles; standard users and
+profiles containing lifecycle hooks fall back to a one-operation UAC helper.
+
+For CLI-only use, download the amd64 or arm64 ZIP. Keep `wg-quic.exe`,
+`wg-quic-quick.exe`, and the architecture-matching signed `wintun.dll`
+together. From an elevated PowerShell terminal:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:ProgramData\wg-quic\interfaces"
+Copy-Item .\wg0.conf "$env:ProgramData\wg-quic\interfaces\wg0.conf"
+.\wg-quic-quick.exe check wg0
+.\wg-quic-quick.exe up wg0
+.\wg-quic-quick.exe show wg0
+.\wg-quic-quick.exe down wg0
+```
+
+Use `wg-quic-quick.exe debug wg0` for foreground diagnostics. Redacted logs
+are written under `%ProgramData%\wg-quic\logs`. If an interrupted stop leaves
+an exact managed service, adapter, or route lease behind, the explicit
+recovery command is:
+
+```powershell
+.\wg-quic-quick.exe down wg0 --repair
+```
+
+When this peer accepts incoming sessions, allow its outer UDP `ListenPort` in
+Windows Firewall. See [`packaging/windows/README.md`](packaging/windows/README.md)
+for the complete LAN test and recovery procedure.
+
+## FreeBSD
+
+Download the amd64 or arm64 FreeBSD archive and install its two programs and
+rc.d script:
+
+```sh
+tar -xzf wg-quic-v0.3.0-freebsd-amd64.tar.gz
+cd wg-quic-v0.3.0-freebsd-amd64
+install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
+install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
+install -d -m 0700 /usr/local/etc/wg-quic
+install -m 0600 /path/to/wg0.conf /usr/local/etc/wg-quic/wg0.conf
+```
+
+Enable one or more interfaces and start the service:
+
+```sh
+sysrc wg_quic_enable=YES
+sysrc 'wg_quic_interfaces=wg0'
+service wg_quic start
+wg-quic-quick show wg0
+service wg_quic stop
+```
+
+After the rc.d script is installed, `wg-quic-quick up wg0` and
+`wg-quic-quick down wg0` use the same service boundary.
+
+## OPNsense 26.1 and 26.7
+
+Use the package whose OPNsense version exactly matches the firewall:
+
+- `os-wg-quic-0.3.0-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.3.0-opnsense-26.7-amd64.pkg`
+
+Copy it to the firewall and install it from a console or SSH session. For
+OPNsense 26.7:
+
+```sh
+pkg add -f /tmp/os-wg-quic-0.3.0-opnsense-26.7-amd64.pkg
+```
+
+Then open `VPN > wg-quic`:
+
+1. Add or generate peers.
+2. Create an instance and assign the desired peer(s).
+3. Apply the configuration and check the **Status** page.
+4. Add an explicit pass rule on `wg-quic (Group)` for the intended inner
+   traffic. As with every new OPNsense VPN interface, traffic is not
+   automatically allowed by installation alone.
+
+The plugin creates `quicN` interfaces and owns the generated profiles,
+configd actions, service lifecycle, CARP/XML-RPC integration, API, logs, and
+Dashboard widget. It is separate from OPNsense's stock WireGuard integration.
+
+Route installation is disabled by default. Before enabling broad
+`AllowedIPs` remotely, confirm they cannot replace the route used to
+administer the firewall and keep a console or other recovery path available.
+Remove the package with `pkg delete os-wg-quic`.
+
+See [`wg-quic-opnsense/README.md`](wg-quic-opnsense/README.md) for build and
+QEMU details.
+
+## OpenWrt 25.12.5
+
+The current OpenWrt workflow builds these exact 64-bit targets:
+
+- `armsr/armv8` with package architecture `aarch64_generic`;
+- `x86/64` with package architecture `x86_64`.
+
+Download the matching artifact from the
+[`openwrt-package` workflow](https://github.com/RC-CHN/wg-quic/actions/workflows/openwrt-package.yml),
+or build both packages with the pinned official SDK wrappers:
+
+```sh
+./packaging/openwrt/build-release-target.sh arm64
+./packaging/openwrt/build-release-target.sh x86_64
+```
+
+Do not install an APK built for a different OpenWrt release or target. Kernel
+packages such as `kmod-tun` must match the running firmware. Install the APK
+on the router:
+
+```sh
+apk add --allow-untrusted ./wg-quic-0.3.0-r1-openwrt-25.12.5-armsr-armv8.apk
+```
+
+The package pulls in `kmod-tun` and `ip-full`, installs both executables, and
+registers a procd multi-instance service. Profiles live in `/etc/wg-quic/`:
+
+```sh
+install -d -m 0700 /etc/wg-quic
+chmod 0600 /etc/wg-quic/aws.conf
+wg-quic-quick check aws
+wg-quic-quick up aws
+wg-quic-quick show aws --json
+wg-quic-quick down aws
+```
+
+To start the profile at boot, add one UCI instance:
+
+```sh
+uci set wg-quic.aws='instance'
+uci set wg-quic.aws.enabled='1'
+uci set wg-quic.aws.config='/etc/wg-quic/aws.conf'
+uci commit wg-quic
+/etc/init.d/wg-quic enable
+/etc/init.d/wg-quic reload
+```
+
+If `/dev/net/tun` does not exist, first confirm that the package was built for
+the exact firmware target and that its dependency installed successfully:
+
+```sh
+apk add kmod-tun ip-full
+test -c /dev/net/tun
+```
+
+Do not work around this by running the low-level `wg-quic run` command; it
+still cannot apply addresses, routes, or hooks. Use `wg-quic-quick` or procd.
+
+OpenWrt does not normally provide `systemd-resolved` or `resolvconf`. Keep DNS
+policy in OpenWrt network/dnsmasq configuration instead of adding `DNS =` to a
+profile. Prefer persistent `/etc/config/firewall` rules for tunnel traffic.
+Lifecycle `PostUp`/`PostDown` hooks are supported through the supervised quick
+or procd path and run as root, so keep profiles mode `0600` and review every
+hook carefully.
+
+The UCI/procd and redacted JSON status boundary is ready for a future LuCI
+application, but **no LuCI UI is included yet**. See
+[`packaging/openwrt/README.md`](packaging/openwrt/README.md) for firewall-hook,
+SDK, and package details, and
+[`tests/openwrt/README.md`](tests/openwrt/README.md) for the ARM64 QEMU fixture.
+
+## Architecture and protocol notes
+
+The pinned userspace WireGuard implementation lives under
+[`third_party/wireguard-go`](third_party/wireguard-go), and the complete pinned
+quic-go source lives under [`third_party/quic-go`](third_party/quic-go).
+Production builds do not download or substitute either implementation from a
+module cache.
+
+`wg-quic-quick` parses and validates a profile once, resolves host policy, and
+sends an immutable configuration snapshot to the supervised core through
+standard input. Private and preshared keys do not enter process arguments, and
+the supervised core does not reread the profile path.
+
+The wire format, transport directives, security boundaries, adaptive FEC
+policy, and current limitations are documented in
+[`docs/WG-QUIC-PROTOCOL.md`](docs/WG-QUIC-PROTOCOL.md).
+
+## Development and verification
+
+The normal local checks are:
 
 ```sh
 go test ./...
@@ -68,8 +363,14 @@ make test-quic
 make build
 ```
 
-Controlled performance and loss measurements use a separate two-node fixture
-that keeps all TUN, route, and `tc netem` state inside containers:
+The privileged container fixture keeps TUN devices, routes, DNS, and network
+emulation inside isolated Linux namespaces. CI covers IPv4 and IPv6
+inner/outer paths, TCP and UDP, large packets, MTU, loss/FEC, reordering, NAT
+rebinding, and peer restart recovery. See
+[`tests/WIREGUARD-FORK.md`](tests/WIREGUARD-FORK.md) for the pinned WireGuard
+test mapping.
+
+Performance and controlled-loss fixtures are available through:
 
 ```sh
 make benchmark-smoke
@@ -81,144 +382,21 @@ make benchmark-bandwidth
 make benchmark-protocol
 ```
 
-It compares direct userspace WireGuard with all four wg-quic FEC/obfuscation
-combinations, and supports asymmetric custom links, built-in
-LAN/Wi-Fi/cellular/satellite profiles, runtime link changes, outer-path
-baselines, per-interval controller sampling, protocol signature drop/police
-controls, and FEC/QUIC/CPU/wire counters. See
-[`tests/benchmark/README.md`](tests/benchmark/README.md). The implemented wire
-format, versioning, security boundaries, local adaptive policy, product goals,
-and current limitations are recorded in
-[`docs/WG-QUIC-PROTOCOL.md`](docs/WG-QUIC-PROTOCOL.md).
+See [`tests/benchmark/README.md`](tests/benchmark/README.md) for the available
+LAN, Wi-Fi, cellular, satellite, FEC, obfuscation, CPU, and protocol-signature
+measurements.
 
-The container test leaves the host route table and DNS untouched. It creates
-isolated privileged nodes with separate Linux network namespaces and real TUN
-devices. The GitHub Actions gate covers IPv4 and IPv6 inner/outer paths,
-TCP/UDP, large packets, carrier MTU, loss/FEC, reordering, NAT rebinding, and
-peer restart recovery. See
-[`tests/WIREGUARD-FORK.md`](tests/WIREGUARD-FORK.md) for the mapping to
-the pinned WireGuard fork and its imported test suite.
-
-The OPNsense plugin lives in
-[`wg-quic-opnsense/`](wg-quic-opnsense/README.md) as a separate monorepo
-subtree. Its Web UI, Dashboard widget, package, services, and `quicN`
-interfaces are isolated from OPNsense's built-in WireGuard integration.
-
-The Windows and Linux desktop shell lives in
-[`desktop/`](desktop/README.md). It is a constrained Tauri webview over the
-existing `wg-quic-quick check/up/down/show` command boundary;
-there is no separate desktop tunnel implementation or configuration model.
-
-Check a configuration without changing the host:
-
-```sh
-go run ./cmd/wg-quic-quick check /etc/wg-quic/wg0.conf
-```
-
-Run one complete tunnel in the foreground:
-
-```sh
-sudo go run ./cmd/wg-quic-quick run /etc/wg-quic/wg0.conf
-```
-
-For service-managed Linux installations:
-
-```sh
-sudo wg-quic-quick up wg0
-wg-quic-quick show wg0
-sudo wg-quic-quick down wg0
-```
-
-`wg-quic show` remains available as the lower-level equivalent. Both `show`
-commands expose the current numeric peer endpoint, QUIC session state, latest
-WireGuard handshake, authenticated receive/send activity, and transfer totals;
-add `--json` for the shared structured status schema.
-
-`wg-quic run` is the deliberately lower-level core entry point. It creates and
-starts the userspace device but does not assign addresses, install routes,
-configure DNS, or run hooks.
-
-`SaveConfig=true` is rejected by `wg-quic-quick` instead of being silently
-ignored. There is no runtime configuration mutation to persist yet.
-
-Bare interface names resolve under `/etc/wg-quic/` on Linux and
-`/usr/local/etc/wg-quic/` on FreeBSD. Explicit paths remain supported, but the
-defaults are intentionally separate from stock WireGuard because the on-wire
-protocols are not compatible.
-
-On FreeBSD, install `packaging/freebsd/wg_quic` under
-`/usr/local/etc/rc.d/`, put profiles in `/usr/local/etc/wg-quic/`, and set
-`wg_quic_interfaces` in `rc.conf`. The same quick commands then use rc.d:
-
-```sh
-sudo wg-quic-quick up wg0
-sudo wg-quic-quick down wg0
-```
-
-Windows preserves the same two-program boundary:
-`wg-quic.exe` owns the Wintun data plane, while `wg-quic-quick.exe` owns host
-`%ProgramData%\wg-quic\interfaces\`. The per-machine MSI asks for elevation
-once and installs the `wg-quic-manager` LocalSystem service. An unelevated
-desktop, explicitly marked `asInvoker`, running under a local Administrator
-account can then validate, import,
-start, and stop hook-free profiles through that narrow authenticated broker.
-Standard users, unavailable/incompatible broker versions, and profiles with
-`PreUp`, `PostUp`, `PreDown`, or `PostDown` retain the one-operation UAC helper;
-the desktop/WebView itself is never elevated. The equivalent elevated-terminal
-commands are:
-
-```powershell
-wg-quic-quick.exe check wg0
-wg-quic-quick.exe up wg0
-wg-quic.exe show wg0
-wg-quic-quick.exe down wg0
-# Explicit recovery only, if a previous stop left residual state:
-wg-quic-quick.exe down wg0 --repair
-```
-
-The quick service runs as LocalSystem, supervises a separate sibling
-`wg-quic.exe`, and exposes an Administrators/System-only control Named Pipe
-plus a separate local status-only pipe using the same JSON request/response
-protocol as Unix sockets. Desktop-started services use a fresh, unpredictable,
-LocalSystem-owned native runtime under `%ProgramData%\wg-quic\runtime`, rather
-than the installer's replaceable application directory. Privileged paths are
-opened without following reparses, and legacy permissive roots are isolated
-before a bounded batch of validated hook-free profiles is migrated. An active
-runtime survives desktop upgrade or uninstall; once SCM confirms a tunnel has
-stopped and its service record is gone, its retired runtime is reclaimed. The
-desktop itself is installed per-machine under ACL-protected Program Files by a
-WiX MSI. Shutdown uses bounded cleanup contexts, reports SCM checkpoints and
-wait hints for the current cleanup stage, and contains the core in a Windows
-Job Object. Normal `down` never force-terminates the service. The explicit
-`down --repair` path gives it a final graceful-stop window, may terminate only
-that tunnel's stuck service process, then removes the exact named residual
-Wintun adapter and reconciles only dead, provably managed route leases. Routes
-with live owners and ambiguous kernel routes are left untouched.
-
-Before installing AllowedIPs, its endpoint supervisor asks the
-Windows route manager for a lease on every resolved endpoint. The manager uses
-per-interface `GetBestRoute2`, excludes Wintun, compares prefix length and
-effective route cost, and owns pins through a persistent reference-counted
-ledger. It never approximates selection by taking the first default route or
-uses a magic metric as ownership. Hosted CI validates Wintun creation, SCM,
-address/MTU/DNS and split-route policy, endpoint pinning, status, and cleanup; a
-two-host Windows traffic test remains a separate integration boundary.
-
-`make build-windows` creates self-contained amd64 and arm64 test directories
-under `build/`. Each contains both executables, an unmodified official signed
-Wintun 0.14.1 DLL, its original license, checksums, and a LAN test guide.
-GitHub Actions uploads the same directories as the `wg-quic-windows` artifact.
-On Windows, `wg-quic-quick debug wg0` runs the tunnel in the foreground and
-writes a key-redacted diagnostic log under `%ProgramData%\wg-quic\logs`.
+The Windows and Linux desktop source and tests live under
+[`desktop/`](desktop/README.md). The OPNsense plugin is maintained in the
+[`wg-quic-opnsense/`](wg-quic-opnsense/README.md) monorepo subtree.
 
 ## Release archives
 
-Every `v*` tag is gated again on native Linux, Windows, and FreeBSD tests plus
-the privileged Linux tunnel matrix. CD then publishes amd64 and arm64 archives
-for Linux, FreeBSD, and Windows together with one top-level `SHA256SUMS`.
-Windows archives include the matching official Wintun DLL and its license.
+Every `v*` tag is gated on Linux, Windows, FreeBSD, the privileged Linux tunnel
+matrix, desktop packages, OPNsense packages, and the OpenWrt package matrix.
+The release job publishes checksums in one top-level `SHA256SUMS` file.
 
-To build and validate the same six archives locally:
+Build and validate the six portable CLI archives locally with:
 
 ```sh
 make release-artifacts VERSION=0.3.0
@@ -226,5 +404,6 @@ make release-artifacts VERSION=0.3.0
   dist/wg-quic-v0.3.0-linux-amd64.tar.gz linux amd64 0.3.0
 ```
 
-The implementation and tests are under active development. See the local
-`design/architecture.md` when the design checkout is present.
+OpenWrt and OPNsense packages must additionally match their exact target
+firmware and packaging framework; a generic CPU architecture match is not
+sufficient.
