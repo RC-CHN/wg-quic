@@ -3,7 +3,7 @@
 
 set -eu
 
-mode=${1:?usage: guest-validate.sh install-smoke PACKAGE | interop-start CONFIG | interop-verify | interop-stop | boot-verify | uninstall}
+mode=${1:?usage: guest-validate.sh install-smoke PACKAGE | runtime-smoke | interop-start CONFIG | interop-verify | interop-stop | boot-verify | uninstall}
 
 wait_for_state()
 {
@@ -59,9 +59,11 @@ remove_package()
 }
 
 case "$mode" in
-install-smoke)
-	package=${2:?install-smoke requires a package path}
-	install_package "$package"
+install-smoke|runtime-smoke)
+	if [ "$mode" = install-smoke ]; then
+		package=${2:?install-smoke requires a package path}
+		install_package "$package"
+	fi
 	test -c /dev/net/tun
 	ip -Version 2>&1 | grep -q 'iproute2'
 	test -x /usr/bin/wg-quic
@@ -87,9 +89,50 @@ install-smoke)
 	grep -q 'run wg-quic-quick instead' /tmp/wg-quic-direct.log
 
 	rm -f /tmp/wg-quic-smoke-hooks
+	uci -q delete wg-quic.smoke || true
+	uci set wg-quic.smoke=instance
+	uci set wg-quic.smoke.enabled=1
+	uci set wg-quic.smoke.config=/etc/wg-quic/smoke.conf
+	uci commit wg-quic
 	wg-quic-quick up smoke
 	wait_for_state smoke up
 	/etc/init.d/wg-quic running smoke
+	before_status=$(wg-quic-quick show smoke --json)
+	before_epoch=$(printf '%s\n' "$before_status" | jsonfilter -e '@.supervisor_epoch')
+	test "$(printf '%s\n' "$before_status" | jsonfilter -e '@.desired_generation')" = 1
+
+	# A procd reload must use the manager-neutral runtime transaction. It must
+	# neither stop the TUN nor rerun interface lifecycle hooks.
+	cp /etc/wg-quic/smoke.conf /tmp/wg-quic-smoke-base.conf
+	{
+		cat /tmp/wg-quic-smoke-base.conf
+		printf '%s\n' \
+			'' \
+			'[Peer]' \
+			'PublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=' \
+			'AllowedIPs = 10.79.0.0/16' \
+			'PersistentKeepalive = 15' \
+			'# wg-quic: peer.fec-latency = latency'
+	} > /etc/wg-quic/.smoke.conf.runtime
+	chmod 0600 /etc/wg-quic/.smoke.conf.runtime
+	mv /etc/wg-quic/.smoke.conf.runtime /etc/wg-quic/smoke.conf
+	/etc/init.d/wg-quic reload
+	runtime_status=$(wg-quic-quick show smoke --json)
+	test "$(printf '%s\n' "$runtime_status" | jsonfilter -e '@.desired_generation')" = 2
+	test "$(printf '%s\n' "$runtime_status" | jsonfilter -e '@.supervisor_epoch')" = "$before_epoch"
+	printf '%s\n' "$runtime_status" | grep -q 'peer_reconcile_v1'
+	printf '%s\n' "$runtime_status" | grep -q 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI='
+	printf '%s\n' "$runtime_status" | grep -q '"fec_policy": "latency"'
+	test "$(wc -l < /tmp/wg-quic-smoke-hooks)" = 1
+	test -e /sys/class/net/smoke
+
+	cp /tmp/wg-quic-smoke-base.conf /etc/wg-quic/.smoke.conf.runtime
+	chmod 0600 /etc/wg-quic/.smoke.conf.runtime
+	mv /etc/wg-quic/.smoke.conf.runtime /etc/wg-quic/smoke.conf
+	wg-quic-quick reload smoke --json >/tmp/wg-quic-smoke-reload.json
+	test "$(jsonfilter -i /tmp/wg-quic-smoke-reload.json -e '@.result.generation')" = 3
+	test "$(wg-quic-quick show smoke --json | jsonfilter -e '@.supervisor_epoch')" = "$before_epoch"
+	test -e /sys/class/net/smoke
 	wg-quic-quick down smoke
 	wait_for_absence smoke
 	test "$(sed -n '1p' /tmp/wg-quic-smoke-hooks)" = up-smoke
@@ -107,7 +150,11 @@ install-smoke)
 	/etc/init.d/wg-quic stop smoke
 	wait_for_absence smoke
 	test ! -e /sys/class/net/smoke
-	echo 'OPENWRT PACKAGE SMOKE PASSED'
+	if [ "$mode" = install-smoke ]; then
+		echo 'OPENWRT PACKAGE SMOKE PASSED'
+	else
+		echo 'OPENWRT CURRENT-BINARY RUNTIME SMOKE PASSED'
+	fi
 	;;
 interop-start)
 	config=${2:?interop-start requires a config path}

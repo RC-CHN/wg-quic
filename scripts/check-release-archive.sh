@@ -38,6 +38,7 @@ linux|freebsd)
 	tar -xzf "$archive" -C "$temporary"
 	if [ "$target_os" = linux ]; then
 		test -f "$temporary/$root/wg-quic@.service"
+		test -x "$temporary/$root/wg-quic.openrc"
 	else
 		test -x "$temporary/$root/wg_quic"
 	fi

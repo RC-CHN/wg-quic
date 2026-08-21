@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/wg-quic-quick run %i
+ExecReload=/usr/local/bin/wg-quic-quick reload %i --json
 KillMode=control-group
 Restart=on-failure
 RestartSec=2s

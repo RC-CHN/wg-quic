@@ -26,6 +26,8 @@ load_rc_config "$name"
 start_cmd="wg_quic_start"
 stop_cmd="wg_quic_stop"
 status_cmd="wg_quic_status"
+extra_commands="reload"
+reload_cmd="wg_quic_reload"
 
 wg_quic_validate_interface()
 {
@@ -107,6 +109,23 @@ wg_quic_status()
 			echo "wg-quic interface ${interface} is running."
 		else
 			echo "wg-quic interface ${interface} is not running."
+			status=1
+		fi
+	done
+	return "$status"
+}
+
+wg_quic_reload()
+{
+	interfaces=$(wg_quic_each_interface "$@")
+	if [ -z "$interfaces" ]; then
+		err 1 "no interface supplied and wg_quic_interfaces is empty"
+	fi
+	status=0
+	for interface in $interfaces; do
+		wg_quic_validate_interface "$interface"
+		echo "Reloading wg-quic interface ${interface}."
+		if ! "$wg_quic_quick" reload "$interface" --json; then
 			status=1
 		fi
 	done

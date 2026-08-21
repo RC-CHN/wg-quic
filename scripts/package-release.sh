@@ -73,6 +73,7 @@ printf '%s\n' "$version" >"$package_dir/VERSION"
 case "$target_os" in
 linux)
 	install -m 0644 "$repo_dir/packaging/linux/wg-quic@.service" "$package_dir/wg-quic@.service"
+	install -m 0755 "$repo_dir/packaging/openrc/wg-quic" "$package_dir/wg-quic.openrc"
 	;;
 freebsd)
 	install -m 0755 "$repo_dir/packaging/freebsd/wg_quic" "$package_dir/wg_quic"

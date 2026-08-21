@@ -28,7 +28,7 @@ jobs:
       - name: Pinned WireGuard behavior over production ArmorBind
         run: go test -count=1 -run '^TestWireGuard' ./internal/bind
       - run: go test -race ./...
-      - run: shellcheck scripts/*.sh tests/container/*.sh tests/benchmark/*.sh tests/linux/*.sh tests/proton/*.sh tests/openwrt/*.sh packaging/openwrt/*.sh packaging/freebsd/wg_quic
+      - run: shellcheck scripts/*.sh tests/container/*.sh tests/benchmark/*.sh tests/linux/*.sh tests/linux/fixtures/* tests/proton/*.sh tests/openwrt/*.sh packaging/openwrt/*.sh packaging/freebsd/wg_quic packaging/openrc/wg-quic
       - run: make build-windows
       - name: Upload self-contained Windows test bundles
         uses: actions/upload-artifact@v7
@@ -100,4 +100,5 @@ jobs:
         with:
           go-version-file: go.mod
       - run: sudo modprobe tun
+      - run: ./tests/linux/openrc-smoke.sh
       - run: ./tests/container/test.sh

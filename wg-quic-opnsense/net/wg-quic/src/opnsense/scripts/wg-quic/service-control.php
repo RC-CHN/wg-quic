@@ -35,12 +35,17 @@ function wireguardquic_status_socket($interface)
     return wireguardquic_socket($interface) . '.status';
 }
 
+function wireguardquic_management_socket($interface)
+{
+    return WG_QUIC_RUN_DIR . '/' . $interface . '.manage.sock';
+}
+
 function wireguardquic_runtime_interfaces()
 {
     $interfaces = [];
-    foreach (['quic*.pid', 'quic*.sock', 'quic*.sock.status'] as $pattern) {
+    foreach (['quic*.pid', 'quic*.sock', 'quic*.sock.status', 'quic*.manage.sock'] as $pattern) {
         foreach (glob(WG_QUIC_RUN_DIR . '/' . $pattern) ?: [] as $path) {
-            if (preg_match('/^(quic[0-9]{1,3})\.(?:pid|sock(?:\.status)?)$/', basename($path), $matches)) {
+            if (preg_match('/^(quic[0-9]{1,3})\.(?:pid|sock(?:\.status)?|manage\.sock)$/', basename($path), $matches)) {
                 $interfaces[$matches[1]] = true;
             }
         }
@@ -74,6 +79,7 @@ function wireguardquic_stop_interface($interface)
     @unlink(wireguardquic_pidfile($interface));
     @unlink(wireguardquic_socket($interface));
     @unlink(wireguardquic_status_socket($interface));
+    @unlink(wireguardquic_management_socket($interface));
     if (does_interface_exist($interface)) {
         legacy_interface_destroy($interface);
     }
@@ -147,6 +153,7 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
         @unlink(wireguardquic_pidfile($interface));
         @unlink(wireguardquic_socket($interface));
         @unlink(wireguardquic_status_socket($interface));
+        @unlink(wireguardquic_management_socket($interface));
         $result = mwexecf(
             '/usr/sbin/daemon -f -S -p %s -T wg-quic %s run %s --name %s',
             [
@@ -165,7 +172,8 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
         if (
             does_interface_exist($interface) &&
             file_exists(wireguardquic_socket($interface)) &&
-            file_exists(wireguardquic_status_socket($interface))
+            file_exists(wireguardquic_status_socket($interface)) &&
+            file_exists(wireguardquic_management_socket($interface))
         ) {
             break;
         }
@@ -174,7 +182,8 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
     if (
         !does_interface_exist($interface) ||
         !file_exists(wireguardquic_socket($interface)) ||
-        !file_exists(wireguardquic_status_socket($interface))
+        !file_exists(wireguardquic_status_socket($interface)) ||
+        !file_exists(wireguardquic_management_socket($interface))
     ) {
         wireguardquic_stop_interface($interface);
         throw new RuntimeException("wg-quic did not create {$interface}");
@@ -185,6 +194,29 @@ function wireguardquic_start_instance($server, $interfaceFlag = 'up')
     interfaces_restart_by_device(false, [$interface]);
     mwexecf('/sbin/ifconfig %s %s', [$interface, $interfaceFlag]);
     syslog(LOG_NOTICE, "wg-quic instance {$server->name} ({$interface}) started");
+}
+
+function wireguardquic_reload_instance($server, $interfaceFlag = 'up')
+{
+    $interface = (string)$server->interface;
+    $config = (string)$server->cnfFilename;
+    if (!preg_match('/^quic[0-9]{1,3}$/', $interface)) {
+        throw new RuntimeException("Invalid wg-quic interface {$interface}");
+    }
+    if (!is_file($config) || filesize($config) === 0 || !chmod($config, 0600)) {
+        throw new RuntimeException("Unable to secure generated configuration for {$interface}");
+    }
+    if (!file_exists(wireguardquic_management_socket($interface))) {
+        throw new RuntimeException("Runtime management endpoint for {$interface} is unavailable");
+    }
+    $result = mwexecf(WG_QUIC_QUICK . ' reload %s --json', [$interface]);
+    if ($result !== 0) {
+        throw new RuntimeException(
+            "Runtime reconciliation failed for {$interface} (exit {$result}); the running interface was left intact"
+        );
+    }
+    mwexecf('/sbin/ifconfig %s %s', [$interface, $interfaceFlag]);
+    syslog(LOG_NOTICE, "wg-quic instance {$server->name} ({$interface}) reconciled");
 }
 
 function wireguardquic_servers($uuid = null)
@@ -269,19 +301,23 @@ try {
                 }
             }
             wireguardquic_stop_stale($enabledInterfaces);
-            foreach ($servers as $server) {
-                wireguardquic_stop_interface((string)$server->interface);
-            }
             if ((string)$general->enabled === '1') {
                 $carp = wireguardquic_carp_status();
                 foreach ($servers as $server) {
                     if ((string)$server->enabled !== '1') {
+                        wireguardquic_stop_interface((string)$server->interface);
                         continue;
                     }
                     $carpId = (string)$server->carp_depend_on;
                     $flag = !empty($carp[$carpId]) && $carp[$carpId]['status'] !== 'MASTER' ? 'down' : 'up';
-                    wireguardquic_start_instance($server, $flag);
+                    if (wireguardquic_pid((string)$server->interface) !== null) {
+                        wireguardquic_reload_instance($server, $flag);
+                    } else {
+                        wireguardquic_start_instance($server, $flag);
+                    }
                 }
+            } else {
+                wireguardquic_stop_stale();
             }
             break;
         case 'status':

@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+action=${1:-}
+interface=${2:-}
+case "$action" in
+check)
+	printf '%s\n' "check:$interface" >>/tmp/wg-quic-openrc-events
+	;;
+run)
+	printf '%s\n' "run:$interface" >>/tmp/wg-quic-openrc-events
+	trap 'exit 0' TERM INT
+	while :; do
+		sleep 1
+	done
+	;;
+reload)
+	printf '%s\n' "reload:$interface" >>/tmp/wg-quic-openrc-events
+	;;
+*)
+	exit 2
+	;;
+esac

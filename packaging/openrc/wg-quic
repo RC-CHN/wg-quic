@@ -1,0 +1,56 @@
+#!/sbin/openrc-run
+# shellcheck shell=sh disable=SC2034
+
+description="wg-quic userspace tunnel"
+
+: "${WG_QUIC_QUICK:=/usr/local/bin/wg-quic-quick}"
+: "${WG_QUIC_CONFIG_DIR:=/etc/wg-quic}"
+
+wg_quic_interface=${RC_SVCNAME#wg-quic.}
+command=$WG_QUIC_QUICK
+command_args="run ${wg_quic_interface}"
+command_user=root
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+pidfile="/run/wg-quic/${wg_quic_interface}.openrc.pid"
+output_log="/var/log/wg-quic/${wg_quic_interface}.log"
+error_log=$output_log
+
+extra_commands="reload"
+description_reload="Reconcile the canonical wg-quic profile without restarting the tunnel"
+
+depend()
+{
+	need net
+	after firewall
+}
+
+wg_quic_validate_interface()
+{
+	case "$wg_quic_interface" in
+	''|wg-quic|*[!A-Za-z0-9_=+.-]*|????????????????*)
+		eerror "invalid OpenRC wg-quic instance name: ${RC_SVCNAME}"
+		return 1
+		;;
+	esac
+}
+
+start_pre()
+{
+	wg_quic_validate_interface || return 1
+	if [ ! -r "$WG_QUIC_CONFIG_DIR/$wg_quic_interface.conf" ]; then
+		eerror "configuration is not readable: $WG_QUIC_CONFIG_DIR/$wg_quic_interface.conf"
+		return 1
+	fi
+	checkpath --directory --mode 0755 /run/wg-quic /var/log/wg-quic
+	"$WG_QUIC_QUICK" check "$wg_quic_interface"
+}
+
+reload()
+{
+	wg_quic_validate_interface || return 1
+	ebegin "Reconciling wg-quic tunnel ${wg_quic_interface}"
+	"$WG_QUIC_QUICK" reload "$wg_quic_interface" --json
+	eend $?
+}
