@@ -8,11 +8,13 @@ import (
 )
 
 type Endpoint struct {
-	owner    *Bind
-	addr     netip.AddrPort
-	mu       sync.Mutex
-	session  *session
-	fallback *Endpoint
+	owner           *Bind
+	addr            netip.AddrPort
+	receiveSequence uint64
+	fecPolicy       string
+	mu              sync.Mutex
+	session         *session
+	fallback        *Endpoint
 
 	configured          bool
 	activated           bool
@@ -43,5 +45,12 @@ func (e *Endpoint) DstToBytes() []byte {
 	b, _ := e.addr.MarshalBinary()
 	return b
 }
-func (e *Endpoint) DstIP() netip.Addr { return e.addr.Addr() }
-func (e *Endpoint) SrcIP() netip.Addr { return netip.Addr{} }
+func (e *Endpoint) DstIP() netip.Addr       { return e.addr.Addr() }
+func (e *Endpoint) SrcIP() netip.Addr       { return netip.Addr{} }
+func (e *Endpoint) ReceiveSequence() uint64 { return e.receiveSequence }
+func (e *Endpoint) SessionID() uint64 {
+	if e.session == nil {
+		return 0
+	}
+	return e.session.id
+}

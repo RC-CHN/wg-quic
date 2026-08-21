@@ -33,6 +33,14 @@ func (unsupportedHost) NewEndpointRouteLeaser(
 	return nil, errHostNotImplemented
 }
 
+func (unsupportedHost) NewPeerRouteManager(
+	context.Context,
+	string,
+	*config.Config,
+) (PeerRouteManager, error) {
+	return nil, errHostNotImplemented
+}
+
 func (unsupportedHost) ConfigureNetwork(context.Context, string, *config.Config) (Cleanup, error) {
 	return nil, errHostNotImplemented
 }

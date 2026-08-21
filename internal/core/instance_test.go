@@ -11,6 +11,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun/tuntest"
 	"golang.org/x/crypto/curve25519"
@@ -209,6 +210,16 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	if len(status.Peers) != 1 || status.Peers[0].Endpoint != update.Endpoint || status.Peers[0].Generation != 2 {
 		t.Fatalf("peer status = %#v, want endpoint update %#v", status.Peers, update)
 	}
+	var authenticatedPublic device.NoisePublicKey
+	copy(authenticatedPublic[:], remotePublic)
+	instance.recordAuthenticatedReceive(device.AuthenticatedReceive{
+		PublicKey: authenticatedPublic, Endpoint: update.Endpoint, ReceiveSequence: 1,
+	})
+	status = instance.status()
+	if status.Peers[0].AuthenticatedGeneration != update.Generation ||
+		status.Peers[0].AuthenticatedEndpoint != update.Endpoint {
+		t.Fatalf("authenticated endpoint generation = %#v", status.Peers[0])
+	}
 	uapi, err := instance.device.IpcGet()
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +239,30 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	conflict.Endpoint = "192.0.2.99:443"
 	if err := control.SetPeerEndpoint(host.controlPath, conflict); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("conflicting update error = %v, want generation conflict", err)
+	}
+	next := update
+	next.Endpoint = "192.0.2.100:443"
+	next.Generation = 3
+	if err := control.SetPeerEndpoint(host.controlPath, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(instance.peers[publicKey].obsoleteEndpoints); got != 2 {
+		t.Fatalf("obsolete endpoint resources = %d, want 2 before finalization", got)
+	}
+	if err := control.NewClient(host.controlPath).FinalizePeerEndpoint(
+		publicKey, next.Generation,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(instance.peers[publicKey].obsoleteEndpoints); got != 0 {
+		t.Fatalf("obsolete endpoint resources after finalization = %d", got)
+	}
+	instance.recordAuthenticatedReceive(device.AuthenticatedReceive{
+		PublicKey: authenticatedPublic, Endpoint: update.Endpoint, ReceiveSequence: 2,
+	})
+	status = instance.status()
+	if status.Peers[0].AuthenticatedGeneration != 0 || status.Peers[0].AuthenticatedEndpoint != "" {
+		t.Fatalf("old authenticated endpoint satisfied a new generation: %#v", status.Peers[0])
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -50,6 +51,24 @@ func (linuxHost) NewEndpointRouteLeaser(
 	// Linux full-tunnel routing excludes the marked outer socket, so it does
 	// not need per-endpoint host routes.
 	return noopEndpointRouteLeaser{}, nil
+}
+
+func (linuxHost) NewPeerRouteManager(
+	_ context.Context,
+	name string,
+	cfg *config.Config,
+) (PeerRouteManager, error) {
+	return newCommandPeerRouteManager(
+		cfg,
+		func(prefix netip.Prefix) ([]hostOperation, error) {
+			projection := cfg.Clone()
+			projection.Peers = []config.Peer{{AllowedIPs: []netip.Prefix{prefix}}}
+			return linuxRouteOperations(name, projection)
+		},
+		func(ctx context.Context, command hostCommand) error {
+			return run(ctx, command.name, command.args...)
+		},
+	)
 }
 
 func (linuxHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.Config) (Cleanup, error) {

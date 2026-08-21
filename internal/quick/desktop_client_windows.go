@@ -94,7 +94,7 @@ func runWindowsElevatedDesktopClient(
 		return "", errors.New("desktop operation context has no deadline")
 	}
 	var contents []byte
-	if action == "import" {
+	if action == "import" || action == "reconcile" {
 		var err error
 		contents, err = readWindowsDesktopConfig(source)
 		if err != nil {
@@ -194,7 +194,7 @@ func runWindowsElevatedDesktopClient(
 	if launchErr != nil {
 		return "", windowsDesktopLauncherError(launcherMessage, launchErr)
 	}
-	if action == "read" {
+	if windowsDesktopActionReturnsContents(action) {
 		return result.Contents, nil
 	}
 	return strings.TrimSpace(result.Message), nil
@@ -209,11 +209,11 @@ func validateWindowsDesktopRequest(
 		return err
 	}
 	switch action {
-	case "up", "down", "check", "delete", "read":
+	case "up", "down", "check", "delete", "read", "status", "reload", "refresh-endpoints":
 		if source != "" {
 			return fmt.Errorf("desktop %s does not accept a source path", action)
 		}
-	case "import":
+	case "import", "reconcile":
 		if source == "" {
 			return errors.New("desktop import source is required")
 		}
@@ -221,6 +221,15 @@ func validateWindowsDesktopRequest(
 		return fmt.Errorf("unsupported desktop helper action %q", action)
 	}
 	return nil
+}
+
+func windowsDesktopActionReturnsContents(action string) bool {
+	switch action {
+	case "read", "status", "reload", "refresh-endpoints", "reconcile":
+		return true
+	default:
+		return false
+	}
 }
 
 func randomWindowsDesktopPipePath() (string, error) {

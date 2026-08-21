@@ -187,6 +187,10 @@ func TestValidateWindowsDesktopRequest(t *testing.T) {
 	}{
 		{action: "up", name: "office", valid: true},
 		{action: "read", name: "office", valid: true},
+		{action: "status", name: "office", valid: true},
+		{action: "reload", name: "office", valid: true},
+		{action: "refresh-endpoints", name: "office", valid: true},
+		{action: "reconcile", name: "office", source: `C:\\office-next.conf`, valid: true},
 		{action: "import", name: "office", source: `C:\\office.conf`, valid: true},
 		{action: "delete", name: "office", valid: true},
 		{action: "import", name: "office"},

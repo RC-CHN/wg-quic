@@ -134,7 +134,7 @@ func runWindowsManagementClient(
 		Overwrite:          overwrite,
 		DeadlineUnixMillis: deadline.UnixMilli(),
 	}
-	if action == "import" {
+	if action == "import" || action == "reconcile" {
 		contents, err := readWindowsDesktopConfig(source)
 		if err != nil {
 			return "", err
@@ -217,7 +217,7 @@ func runWindowsManagementClient(
 				"management service returned an inconsistent success result",
 			)
 		}
-		if action == "read" {
+		if windowsDesktopActionReturnsContents(action) {
 			return result.Contents, nil
 		}
 		return message, nil
@@ -680,7 +680,7 @@ func validateWindowsManagementRequest(
 		return nil
 	}
 	source := ""
-	if request.Action == "import" {
+	if request.Action == "import" || request.Action == "reconcile" {
 		source = "config-bytes"
 	}
 	if err := validateWindowsDesktopRequest(
@@ -695,7 +695,7 @@ func validateWindowsManagementRequest(
 			"desktop %s does not accept overwrite", request.Action,
 		)
 	}
-	if request.Action == "import" {
+	if request.Action == "import" || request.Action == "reconcile" {
 		return validateWindowsManagementConfigBytes(request.Config)
 	}
 	if len(request.Config) != 0 {
@@ -717,6 +717,8 @@ func runWindowsManagementOperation(
 	}
 	if request.Action == "up" ||
 		request.Action == "down" ||
+		request.Action == "reload" ||
+		request.Action == "reconcile" ||
 		request.Action == "import" ||
 		request.Action == "delete" {
 		mutations.Lock()
@@ -743,6 +745,10 @@ func runWindowsManagementOperation(
 		return "", lease.Close()
 	case "read":
 		return windowsManagementReadStoredConfig(request.Name)
+	case "status", "reload", "refresh-endpoints":
+		return runWindowsForwardedRuntimeOperation(ctx, request.Action, request.Name)
+	case "reconcile":
+		return runWindowsCandidateReconcile(ctx, request.Name, request.Config)
 	case "import":
 		if err := validateWindowsManagementConfigBytes(
 			request.Config,

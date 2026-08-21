@@ -69,6 +69,9 @@ func writeWindowsDiagnostics(ctx context.Context, logger *log.Logger, name, phas
 		programData = `C:\ProgramData`
 	}
 	routeLedger := filepath.Join(programData, "wg-quic", "state", "routes-v1.json")
+	peerRouteLedgerPattern := filepath.Join(
+		programData, "wg-quic", "state", "peer-routes-v1-*",
+	)
 	script := strings.Join([]string{
 		"$ErrorActionPreference='Continue'",
 		"$ProgressPreference='SilentlyContinue'",
@@ -88,6 +91,10 @@ func writeWindowsDiagnostics(ctx context.Context, logger *log.Logger, name, phas
 		"$routeLedger=" + debugPowerShellQuote(routeLedger),
 		"Write-Output ('wg-quic route ledger: ' + $routeLedger)",
 		"if (Test-Path -LiteralPath $routeLedger) { $ledger=Get-Content -LiteralPath $routeLedger -Raw -ErrorAction Continue | ConvertFrom-Json -ErrorAction Continue; if ($null -ne $ledger) { $ledger.routes | Select-Object @{Name='DestinationPrefix';Expression={$_.key.destination}},@{Name='InterfaceLUID';Expression={$_.key.interfaceLuid}},InterfaceIndex,@{Name='NextHop';Expression={$_.key.nextHop}},RouteMetric,Ownership,State,Revision,@{Name='OwnerCount';Expression={@($_.owners).Count}},@{Name='References';Expression={($_.owners | Measure-Object -Property references -Sum).Sum}} | Format-Table -AutoSize | Out-String -Width 240 | Write-Output; foreach ($record in @($ledger.routes)) { Get-NetRoute -DestinationPrefix $record.key.destination -InterfaceIndex $record.interfaceIndex -ErrorAction Continue | Where-Object { $_.NextHop -eq $record.key.nextHop } | Format-Table AddressFamily,DestinationPrefix,NextHop,InterfaceAlias,InterfaceIndex,RouteMetric,Protocol,State -AutoSize | Out-String -Width 240 | Write-Output } } } else { Write-Output '(not present)' }",
+		"$peerRouteLedgerPattern=" + debugPowerShellQuote(peerRouteLedgerPattern),
+		"Write-Output ('wg-quic peer route journals: ' + $peerRouteLedgerPattern)",
+		"$peerRouteLedgers=Get-ChildItem -Path $peerRouteLedgerPattern -File -ErrorAction SilentlyContinue",
+		"if ($null -eq $peerRouteLedgers) { Write-Output '(not present)' } else { foreach ($peerRouteLedger in @($peerRouteLedgers)) { Write-Output $peerRouteLedger.FullName; $peerJournal=Get-Content -LiteralPath $peerRouteLedger.FullName -Raw -ErrorAction Continue | ConvertFrom-Json -ErrorAction Continue; if ($null -ne $peerJournal) { $peerJournal | Select-Object schema_version,generation,tunnel,transaction_id,interface_luid,compartment_id,phase,removals_applied,additions_applied,@{Name='BeforeCount';Expression={@($_.before).Count}},@{Name='AfterCount';Expression={@($_.after).Count}} | Format-List | Out-String -Width 240 | Write-Output } } }",
 		"Write-Output 'IP interface metrics:'",
 		"Get-NetIPInterface -ErrorAction Continue | Where-Object { $_.ConnectionState -eq 'Connected' -or ($null -ne $adapter -and $_.InterfaceIndex -eq $adapter.ifIndex) } | Sort-Object AddressFamily,InterfaceMetric,InterfaceIndex | Format-Table AddressFamily,InterfaceAlias,InterfaceIndex,InterfaceMetric,ConnectionState,NlMtu -AutoSize | Out-String -Width 240 | Write-Output",
 	}, ";")

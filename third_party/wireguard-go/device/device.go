@@ -92,6 +92,7 @@ type Device struct {
 	log      *Logger
 
 	tunEventStateTransitions atomic.Bool
+	authenticatedReceive     func(AuthenticatedReceive)
 }
 
 // deviceState represents the state of a Device.
@@ -288,6 +289,17 @@ type Options struct {
 	// DisableTUNEventStateTransitions leaves Up/Down lifecycle control to the
 	// embedding process while still processing MTU events.
 	DisableTUNEventStateTransitions bool
+	// AuthenticatedReceive runs after WireGuard has authenticated an inbound
+	// handshake or transport packet. ReceiveSequence is supplied by binds that
+	// stamp packets at carrier ingress; it is zero for legacy binds.
+	AuthenticatedReceive func(AuthenticatedReceive)
+}
+
+type AuthenticatedReceive struct {
+	PublicKey       NoisePublicKey
+	Endpoint        string
+	ReceiveSequence uint64
+	SessionID       uint64
 }
 
 func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
@@ -298,6 +310,7 @@ func NewDeviceWithOptions(tunDevice tun.Device, bind conn.Bind, logger *Logger, 
 	device := new(Device)
 	device.state.state.Store(uint32(deviceStateDown))
 	device.tunEventStateTransitions.Store(!options.DisableTUNEventStateTransitions)
+	device.authenticatedReceive = options.AuthenticatedReceive
 	device.closed = make(chan struct{})
 	device.log = logger
 	device.net.bind = bind
@@ -339,6 +352,28 @@ func NewDeviceWithOptions(tunDevice tun.Device, bind conn.Bind, logger *Logger, 
 	return device
 }
 
+func (device *Device) notifyAuthenticatedReceive(peer *Peer, endpoint conn.Endpoint) {
+	callback := device.authenticatedReceive
+	if callback == nil || peer == nil || endpoint == nil {
+		return
+	}
+	peer.handshake.mutex.RLock()
+	publicKey := peer.handshake.remoteStatic
+	peer.handshake.mutex.RUnlock()
+	var sequence uint64
+	if sequenced, ok := endpoint.(interface{ ReceiveSequence() uint64 }); ok {
+		sequence = sequenced.ReceiveSequence()
+	}
+	var sessionID uint64
+	if session, ok := endpoint.(interface{ SessionID() uint64 }); ok {
+		sessionID = session.SessionID()
+	}
+	callback(AuthenticatedReceive{
+		PublicKey: publicKey, Endpoint: endpoint.DstToString(), ReceiveSequence: sequence,
+		SessionID: sessionID,
+	})
+}
+
 // BatchSize returns the BatchSize for the device as a whole which is the max of
 // the bind batch size and the tun batch size. The batch size reported by device
 // is the size used to construct memory pools, and is the allowed batch size for
@@ -371,6 +406,26 @@ func (device *Device) ProbePeer(publicKey NoisePublicKey) error {
 		return errors.New("peer is not configured")
 	}
 	return peer.SendHandshakeInitiation(false)
+}
+
+// ClearPeerEndpoint removes only the configured endpoint for an existing
+// peer. Cryptographic identity, AllowedIPs, keepalive, and counters remain
+// unchanged.
+func (device *Device) ClearPeerEndpoint(publicKey NoisePublicKey) error {
+	device.ipcMutex.Lock()
+	defer device.ipcMutex.Unlock()
+	if device.isClosed() {
+		return errors.New("device is closed")
+	}
+	peer := device.LookupPeer(publicKey)
+	if peer == nil {
+		return errors.New("peer public key is not configured")
+	}
+	peer.endpoint.Lock()
+	peer.endpoint.val = nil
+	peer.endpoint.clearSrcOnTx = false
+	peer.endpoint.Unlock()
+	return nil
 }
 
 func (device *Device) RemovePeer(key NoisePublicKey) {

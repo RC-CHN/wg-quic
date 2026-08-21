@@ -23,6 +23,10 @@ func (Paths) ControlPath(name string) string {
 	return `\\.\pipe\wg-quic-` + name
 }
 
+func (Paths) ManagementPath(name string) string {
+	return `\\.\pipe\wg-quic-quick-` + name
+}
+
 func (Paths) ConfigPath(name string) string {
 	root := os.Getenv("ProgramData")
 	if root == "" {

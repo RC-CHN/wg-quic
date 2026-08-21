@@ -362,7 +362,11 @@ func loadWindowsRouteLedgerFile(path string) (windowsRouteLedger, error) {
 }
 
 func quarantineWindowsRouteLedger(path string) error {
-	target := fmt.Sprintf("%s.corrupt-%s", path, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	return quarantineWindowsRouteState(path, "corrupt")
+}
+
+func quarantineWindowsRouteState(path, reason string) error {
+	target := fmt.Sprintf("%s.%s-%s", path, reason, time.Now().UTC().Format("20060102T150405.000000000Z"))
 	from, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return err
@@ -372,7 +376,7 @@ func quarantineWindowsRouteLedger(path string) error {
 		return err
 	}
 	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH); err != nil {
-		return fmt.Errorf("quarantine corrupt Windows route ledger: %w", err)
+		return fmt.Errorf("quarantine %s Windows route state: %w", reason, err)
 	}
 	return nil
 }

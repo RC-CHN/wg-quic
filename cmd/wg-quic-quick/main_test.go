@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParseQuickRunArgs(t *testing.T) {
 	input, name, brokerSafe, err := parseQuickRunArgs([]string{
@@ -89,6 +92,32 @@ func TestParseDesktopClientReadArgs(t *testing.T) {
 	}
 }
 
+func TestParseDesktopClientRuntimeArgs(t *testing.T) {
+	for _, action := range []string{"status", "reload", "refresh-endpoints"} {
+		request, err := parseDesktopClientArgs([]string{action, "office"})
+		if err != nil {
+			t.Fatalf("parse %s: %v", action, err)
+		}
+		if request.action != action || request.name != "office" ||
+			request.source != "" || request.overwrite {
+			t.Fatalf("unexpected %s request: %#v", action, request)
+		}
+	}
+}
+
+func TestParseDesktopClientReconcileArgs(t *testing.T) {
+	request, err := parseDesktopClientArgs([]string{
+		"reconcile", "office", `C:\Users\me\office-next.conf`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.action != "reconcile" || request.name != "office" ||
+		request.source != `C:\Users\me\office-next.conf` || request.overwrite {
+		t.Fatalf("unexpected desktop reconcile request: %#v", request)
+	}
+}
+
 func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
@@ -100,6 +129,8 @@ func TestParseDesktopClientArgsRejectsInvalidInput(t *testing.T) {
 		{"delete"},
 		{"delete", "wg0", "extra"},
 		{"read", "wg0", "extra"},
+		{"reconcile", "wg0"},
+		{"reconcile", "wg0", "next.conf", "--overwrite"},
 	} {
 		if _, err := parseDesktopClientArgs(args); err == nil {
 			t.Fatalf("parseDesktopClientArgs(%q) accepted invalid input", args)
@@ -150,6 +181,46 @@ func TestParseDesktopImportArgsRejectsInvalidInput(t *testing.T) {
 	} {
 		if _, _, _, err := parseDesktopImportArgs(args); err == nil {
 			t.Fatalf("parseDesktopImportArgs(%q) accepted invalid input", args)
+		}
+	}
+}
+
+func TestParseRuntimeReconcileAndRefreshArgs(t *testing.T) {
+	reconcileArgs, err := parseRuntimeCommand("reconcile", []string{
+		"wg0", "/run/wg-quic/candidate.conf",
+		"--expected-epoch", "epoch", "--expected-generation", "7",
+		"--request-id", "request", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconcileArgs.name != "wg0" ||
+		reconcileArgs.candidatePath != "/run/wg-quic/candidate.conf" ||
+		reconcileArgs.expectedEpoch != "epoch" || reconcileArgs.expectedGeneration != 7 ||
+		reconcileArgs.requestID != "request" || !reconcileArgs.jsonOutput {
+		t.Fatalf("reconcile args = %#v", reconcileArgs)
+	}
+	refreshArgs, err := parseRuntimeCommand("refresh-endpoints", []string{
+		"wg0", "--peer", "public-key", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshArgs.name != "wg0" || refreshArgs.peer != "public-key" || !refreshArgs.jsonOutput {
+		t.Fatalf("refresh args = %#v", refreshArgs)
+	}
+}
+
+func TestParseRuntimeCommandRejectsMissingCASAndRequestID(t *testing.T) {
+	tests := [][]string{
+		{"reconcile", "wg0", "candidate.conf"},
+		{"reconcile", "wg0", "candidate.conf", "--expected-epoch", "epoch"},
+		{"transaction-status", "wg0"},
+		{"refresh-endpoints", "wg0", "--peer"},
+	}
+	for _, test := range tests {
+		if _, err := parseRuntimeCommand(test[0], test[1:]); err == nil {
+			t.Fatalf("accepted invalid runtime command %q", slices.Clone(test))
 		}
 	}
 }

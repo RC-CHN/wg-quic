@@ -54,7 +54,11 @@ func TestSalamanderWireGoldenVector(t *testing.T) {
 	plain := goldenHex(t, "c000000001080102030405060708")
 	encoded := goldenHex(t, "0102030405060708f71ea486b328242760d422732b002b7c9c103bb6db14")
 	output := make([]byte, len(plain))
-	connection := &SalamanderConn{keys: []Key{keyA}}
+	connection := &SalamanderConn{
+		keyRefs: make(map[Key]int), keyPairs: make(map[Key]*digestPair),
+	}
+	connection.addReceiveKeyLocked(keyA)
+	connection.publishReceiveKeysLocked()
 	n, selected, ok := connection.decode(encoded, output)
 	if !ok || n != len(plain) || selected != keyA {
 		t.Fatalf("decode golden packet: ok=%v n=%d key=%x", ok, n, selected)
@@ -62,6 +66,44 @@ func TestSalamanderWireGoldenVector(t *testing.T) {
 	if !bytes.Equal(output, plain) {
 		t.Fatalf("decoded Salamander payload = %x, want %x", output, plain)
 	}
+}
+
+func TestSalamanderReceiveKeyLeaseAddsAndRemovesDecoder(t *testing.T) {
+	connection, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := WrapKeyedSalamander(connection, nil)
+	if err != nil {
+		connection.Close()
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	key := Key{0x42}
+	payload := []byte("dynamic receive key")
+	packet := make([]byte, len(payload)+SalamanderHeaderSize)
+	if _, err := encode(payload, packet, key); err != nil {
+		t.Fatal(err)
+	}
+	output := make([]byte, len(payload))
+	if _, _, ok := wrapped.decode(packet, output); ok {
+		t.Fatal("packet decoded before receive key acquisition")
+	}
+	firstRelease := wrapped.AcquireReceiveKey(key)
+	secondRelease := wrapped.AcquireReceiveKey(key)
+	if n, decodedKey, ok := wrapped.decode(packet, output); !ok || n != len(payload) ||
+		decodedKey != key || !bytes.Equal(output, payload) {
+		t.Fatalf("dynamic decode = n:%d key:%x ok:%t output:%q", n, decodedKey, ok, output)
+	}
+	firstRelease()
+	if _, _, ok := wrapped.decode(packet, output); !ok {
+		t.Fatal("first reference release removed a multiply-owned key")
+	}
+	secondRelease()
+	if _, _, ok := wrapped.decode(packet, output); ok {
+		t.Fatal("last reference release retained the receive key")
+	}
+	secondRelease()
 }
 
 func goldenHex(t testing.TB, value string) []byte {

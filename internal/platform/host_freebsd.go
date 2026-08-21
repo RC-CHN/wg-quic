@@ -31,18 +31,41 @@ func Current() Host {
 func (freeBSDHost) Prepare(context.Context, *config.Config) error { return nil }
 
 func (freeBSDHost) NewEndpointRouteLeaser(
-	_ context.Context,
-	_ string,
+	ctx context.Context,
+	name string,
 	cfg *config.Config,
 ) (endpoint.RouteLeaser, error) {
 	need4, need6 := false, false
 	if usesFreeBSDAutomaticDefaultRoute(cfg) {
 		need4, need6 = freeBSDDefaultFamilies(cfg)
 	}
-	return &freeBSDEndpointRouteLeaser{
+	manager := &freeBSDEndpointRouteLeaser{
 		need4: need4, need6: need6,
 		entries: make(map[netip.Addr]*freeBSDEndpointRouteEntry),
-	}, nil
+		name:    name, ledgerPath: "/var/run/wg-quic/" + name + ".endpoint-routes.json",
+	}
+	if err := manager.recover(ctx); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+func (freeBSDHost) NewPeerRouteManager(
+	_ context.Context,
+	name string,
+	cfg *config.Config,
+) (PeerRouteManager, error) {
+	return newCommandPeerRouteManager(
+		cfg,
+		func(prefix netip.Prefix) ([]hostOperation, error) {
+			projection := cfg.Clone()
+			projection.Peers = []config.Peer{{AllowedIPs: []netip.Prefix{prefix}}}
+			return freeBSDRouteOperations(name, projection), nil
+		},
+		func(ctx context.Context, command hostCommand) error {
+			return run(ctx, command.name, command.args...)
+		},
+	)
 }
 
 func (freeBSDHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.Config) (Cleanup, error) {

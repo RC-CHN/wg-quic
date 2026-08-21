@@ -16,6 +16,9 @@ func TestWindowsHostPathsAndNames(t *testing.T) {
 	if got, want := host.ControlPath("wg0"), `\\.\pipe\wg-quic-wg0`; got != want {
 		t.Fatalf("ControlPath(wg0) = %q, want %q", got, want)
 	}
+	if got, want := host.ManagementPath("wg0"), `\\.\pipe\wg-quic-quick-wg0`; got != want {
+		t.Fatalf("ManagementPath(wg0) = %q, want %q", got, want)
+	}
 	t.Setenv("ProgramData", "")
 	if got, want := host.ConfigPath("wg0"), `C:\ProgramData\wg-quic\interfaces\wg0.conf`; got != want {
 		t.Fatalf("default ConfigPath(wg0) = %q, want %q", got, want)

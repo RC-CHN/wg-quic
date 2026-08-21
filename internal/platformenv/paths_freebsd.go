@@ -22,6 +22,10 @@ func (Paths) ControlPath(name string) string {
 	return "/var/run/wg-quic/" + name + ".sock"
 }
 
+func (Paths) ManagementPath(name string) string {
+	return "/var/run/wg-quic/" + name + ".manage.sock"
+}
+
 func (Paths) ConfigPath(name string) string {
 	return "/usr/local/etc/wg-quic/" + name + ".conf"
 }

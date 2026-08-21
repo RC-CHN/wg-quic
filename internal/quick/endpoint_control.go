@@ -23,6 +23,30 @@ func (c localCoreEndpointControl) SetPeerEndpoint(ctx context.Context, update en
 	})
 }
 
+func (c localCoreEndpointControl) ClearPeerEndpoint(
+	ctx context.Context,
+	publicKey string,
+	generation uint64,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.client.SetPeerEndpoint(control.SetPeerEndpointRequest{
+		PublicKey: publicKey, Generation: generation,
+	})
+}
+
+func (c localCoreEndpointControl) FinalizePeerEndpoint(
+	ctx context.Context,
+	publicKey string,
+	generation uint64,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.client.FinalizePeerEndpoint(publicKey, generation)
+}
+
 func (c localCoreEndpointControl) WaitPeerReady(ctx context.Context, update endpoint.PeerUpdate) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -41,7 +65,8 @@ func (c localCoreEndpointControl) WaitPeerReady(ctx context.Context, update endp
 				}
 				if peer.Generation == update.Generation &&
 					peer.Endpoint == update.Endpoint.String() &&
-					peer.Session == "established" {
+					peer.AuthenticatedGeneration == update.Generation &&
+					peer.AuthenticatedEndpoint == update.Endpoint.String() {
 					return nil
 				}
 			}
@@ -69,4 +94,25 @@ func (c localCoreEndpointControl) Activate(ctx context.Context) error {
 		return err
 	}
 	return c.client.Activate()
+}
+
+func (c localCoreEndpointControl) PeerHealth(
+	ctx context.Context,
+	publicKey string,
+) (endpoint.PeerHealth, error) {
+	if err := ctx.Err(); err != nil {
+		return endpoint.PeerHealth{}, err
+	}
+	status, err := c.client.Status()
+	if err != nil {
+		return endpoint.PeerHealth{}, err
+	}
+	for _, peer := range status.Peers {
+		if peer.PublicKey == publicKey {
+			return endpoint.PeerHealth{
+				ConsecutiveReconnectFailures: peer.ConsecutiveReconnectFailures,
+			}, nil
+		}
+	}
+	return endpoint.PeerHealth{}, errors.New("peer public key is not configured")
 }

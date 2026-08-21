@@ -10,6 +10,10 @@ func (Paths) ControlPath(string) string {
 	return ""
 }
 
+func (Paths) ManagementPath(string) string {
+	return ""
+}
+
 func (Paths) ConfigPath(string) string {
 	return ""
 }

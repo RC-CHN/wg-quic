@@ -44,11 +44,13 @@ func TestTransportConfigDerivesMatchingKeysFromWireGuardConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(configA.Bind.ObfsKeys) != 1 || len(configB.Bind.ObfsKeys) != 1 || configA.Bind.ObfsKeys[0] != configB.Bind.ObfsKeys[0] {
+	keyA := configA.PeerKeys[a.Peers[0].PublicKey]
+	keyB := configB.PeerKeys[b.Peers[0].PublicKey]
+	if keyA != keyB {
 		t.Fatal("two WireGuard configurations did not derive the same transport key")
 	}
-	if configA.PeerKeys[a.Peers[0].PublicKey] != configA.Bind.ObfsKeys[0] {
-		t.Fatal("peer public key was not associated with its derived transport key")
+	if len(configA.Bind.ObfsKeys) != 0 || len(configB.Bind.ObfsKeys) != 0 {
+		t.Fatal("peer receive keys bypassed the reference-counted runtime registry")
 	}
 }
 

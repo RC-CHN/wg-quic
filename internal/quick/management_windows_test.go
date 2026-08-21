@@ -202,6 +202,21 @@ func TestValidateWindowsManagementReadIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestValidateWindowsManagementReconcileCarriesProtectedConfigBytes(t *testing.T) {
+	const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	request := windowsManagementRequest{
+		Action: "reconcile", Name: "office",
+		Config: []byte("[Interface]\nPrivateKey = " + key + "\n"),
+	}
+	if err := validateWindowsManagementRequest(request); err != nil {
+		t.Fatalf("valid management reconcile: %v", err)
+	}
+	request.Overwrite = true
+	if err := validateWindowsManagementRequest(request); err == nil {
+		t.Fatal("management reconcile accepted overwrite flag")
+	}
+}
+
 func TestWindowsManagementRejectsHooksWithElevationFallback(t *testing.T) {
 	const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	for _, hook := range []string{"PreUp", "PostUp", "PreDown", "PostDown"} {

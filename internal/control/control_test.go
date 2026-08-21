@@ -35,6 +35,8 @@ func TestControlCommands(t *testing.T) {
 	var got SetPeerEndpointRequest
 	var redial string
 	var activated bool
+	var prepared PeerSetRequest
+	var committed, rolledBack, finalized string
 	server, err := StartHandler(ctx, path, Handler{
 		Status: func() Status {
 			return Status{Interface: "wg0", State: "up"}
@@ -49,6 +51,22 @@ func TestControlCommands(t *testing.T) {
 		},
 		Activate: func() error {
 			activated = true
+			return nil
+		},
+		PreparePeerSet: func(request PeerSetRequest) error {
+			prepared = request
+			return nil
+		},
+		CommitPeerSet: func(transactionID string) error {
+			committed = transactionID
+			return nil
+		},
+		RollbackPeerSet: func(transactionID string) error {
+			rolledBack = transactionID
+			return nil
+		},
+		FinalizePeerSet: func(transactionID string) error {
+			finalized = transactionID
 			return nil
 		},
 	})
@@ -77,6 +95,31 @@ func TestControlCommands(t *testing.T) {
 	}
 	if !activated {
 		t.Fatal("activate handler was not called")
+	}
+	peerSet := PeerSetRequest{
+		TransactionID: "transaction-1",
+		Mutations: []PeerMutation{{
+			Operation: "add", PublicKey: "peer", AllowedIPs: []string{"10.0.0.2/32"},
+		}},
+	}
+	client := NewClient(path)
+	if err := client.PreparePeerSet(peerSet); err != nil {
+		t.Fatal(err)
+	}
+	if prepared.TransactionID != peerSet.TransactionID || len(prepared.Mutations) != 1 {
+		t.Fatalf("prepared peer set = %#v", prepared)
+	}
+	if err := client.CommitPeerSet(peerSet.TransactionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RollbackPeerSet(peerSet.TransactionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.FinalizePeerSet(peerSet.TransactionID); err != nil {
+		t.Fatal(err)
+	}
+	if committed != peerSet.TransactionID || rolledBack != peerSet.TransactionID || finalized != peerSet.TransactionID {
+		t.Fatalf("peer set transitions = %q/%q/%q", committed, rolledBack, finalized)
 	}
 }
 

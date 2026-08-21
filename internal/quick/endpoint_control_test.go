@@ -18,7 +18,10 @@ func TestLocalCoreEndpointControlWaitsForExactReadyGeneration(t *testing.T) {
 			Interface: "wg0", State: "up",
 			Peers: []control.PeerStatus{{
 				PublicKey: update.PublicKey, Endpoint: update.Endpoint.String(),
-				Generation: update.Generation, Session: "established",
+				Generation:              update.Generation,
+				AuthenticatedGeneration: update.Generation,
+				AuthenticatedEndpoint:   update.Endpoint.String(),
+				Session:                 "established",
 			}},
 		}
 	})

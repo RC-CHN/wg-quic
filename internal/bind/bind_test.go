@@ -51,6 +51,34 @@ func TestRuntimeEndpointKeyLeasesAreReferenceCounted(t *testing.T) {
 	}
 }
 
+func TestRuntimeReceiveKeyLeasesAreReferenceCountedBeforeOpen(t *testing.T) {
+	bind := New(Config{ObfsMode: "salamander"})
+	key := obfs.Key{0x44}
+	first := bind.AcquireReceiveKey(key)
+	second := bind.AcquireReceiveKey(key)
+	bind.mu.Lock()
+	refs := bind.obfsReceive[key].refs
+	bind.mu.Unlock()
+	if refs != 2 {
+		t.Fatalf("receive key refs = %d, want 2", refs)
+	}
+	first()
+	bind.mu.Lock()
+	refs = bind.obfsReceive[key].refs
+	bind.mu.Unlock()
+	if refs != 1 {
+		t.Fatalf("receive key refs after first release = %d, want 1", refs)
+	}
+	second()
+	bind.mu.Lock()
+	_, exists := bind.obfsReceive[key]
+	bind.mu.Unlock()
+	if exists {
+		t.Fatal("last receive key release retained registry entry")
+	}
+	second()
+}
+
 func TestBindRejectsHostnameResolution(t *testing.T) {
 	bind := New(DefaultConfig())
 	if _, err := bind.ParseEndpoint("localhost:443"); err == nil ||
@@ -516,8 +544,16 @@ func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
 	if migrated.fallback != configured {
 		t.Fatal("migrated endpoint lost its configured fallback")
 	}
-	if got := sess.endpointForAddrPort(accepted.addr); got != accepted {
-		t.Fatal("unchanged QUIC path did not reuse its endpoint")
+	unchanged := sess.endpointForAddrPort(accepted.addr)
+	if unchanged == accepted || unchanged.addr != accepted.addr || unchanged.session != sess ||
+		unchanged.fallback != configured {
+		t.Fatalf("unchanged QUIC path snapshot = %#v", unchanged)
+	}
+	if migrated.ReceiveSequence() == 0 || unchanged.ReceiveSequence() <= migrated.ReceiveSequence() {
+		t.Fatalf(
+			"path snapshot sequences = migrated %d, unchanged %d",
+			migrated.ReceiveSequence(), unchanged.ReceiveSequence(),
+		)
 	}
 }
 
@@ -745,5 +781,24 @@ func waitForCondition(t *testing.T, description string, ready func() bool) {
 			t.Fatalf("timed out waiting for %s", description)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReceivedEndpointsCarryImmutableIngressSequence(t *testing.T) {
+	bind := New(DefaultConfig())
+	configured := &Endpoint{
+		owner: bind, addr: netip.MustParseAddrPort("192.0.2.10:443"), configured: true,
+	}
+	session := &session{endpoint: configured}
+	first := session.endpointForAddrPort(configured.addr)
+	second := session.endpointForAddrPort(configured.addr)
+	if first == configured || second == configured {
+		t.Fatal("received packet reused mutable configured endpoint identity")
+	}
+	if first.ReceiveSequence() != 1 || second.ReceiveSequence() != 2 || bind.ReceiveSequence() != 2 {
+		t.Fatalf(
+			"receive sequences = %d, %d, bind %d",
+			first.ReceiveSequence(), second.ReceiveSequence(), bind.ReceiveSequence(),
+		)
 	}
 }

@@ -167,7 +167,7 @@ func runWindowsDesktopHelper(
 	request windowsDesktopRequest,
 ) (string, error) {
 	source := ""
-	if request.Action == "import" && len(request.Config) != 0 {
+	if (request.Action == "import" || request.Action == "reconcile") && len(request.Config) != 0 {
 		source = "config-bytes"
 	}
 	if err := validateWindowsDesktopRequest(
@@ -180,8 +180,12 @@ func runWindowsDesktopHelper(
 			"desktop %s does not accept overwrite", request.Action,
 		)
 	}
-	if request.Action == "import" {
-		if err := validateWindowsDesktopConfigBytes(request.Config); err != nil {
+	if request.Action == "import" || request.Action == "reconcile" {
+		validate := validateWindowsDesktopConfigBytes
+		if request.Action == "reconcile" {
+			validate = validateWindowsManagementConfigBytes
+		}
+		if err := validate(request.Config); err != nil {
 			return "", err
 		}
 	} else if len(request.Config) != 0 {
@@ -207,6 +211,10 @@ func runWindowsDesktopHelper(
 		return "", err
 	case "read":
 		return windowsDesktopReadStoredConfig(request.Name)
+	case "status", "reload", "refresh-endpoints":
+		return runWindowsForwardedRuntimeOperation(ctx, request.Action, request.Name)
+	case "reconcile":
+		return runWindowsCandidateReconcile(ctx, request.Name, request.Config)
 	case "import":
 		host := platform.Current()
 		return "", importWindowsDesktopConfigBytes(

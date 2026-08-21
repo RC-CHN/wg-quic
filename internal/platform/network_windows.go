@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
@@ -45,20 +46,11 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	})
 	if table != "off" {
 		for _, prefix := range uniqueAllowedPrefixes(cfg) {
-			nextHop := "0.0.0.0"
-			if prefix.Addr().Is6() {
-				nextHop = "::"
+			operation, err := windowsPeerRouteOperation(name, cfg, prefix)
+			if err != nil {
+				return nil, err
 			}
-			destination := prefix.String()
-			operations = append(operations, windowsOperation{
-				apply: base +
-					"New-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
-					" -NextHop " + powerShellQuote(nextHop) +
-					" -RouteMetric 0 -PolicyStore ActiveStore -ErrorAction Stop | Out-Null",
-				undo: base +
-					"Get-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
-					" -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
-			})
+			operations = append(operations, operation)
 		}
 	}
 	dnsOperation, err := windowsDNSOperation(base, cfg.Interface.DNS)
@@ -69,6 +61,39 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 		operations = append(operations, dnsOperation)
 	}
 	return operations, nil
+}
+
+func windowsPeerRouteOperation(
+	name string,
+	cfg *config.Config,
+	prefix netip.Prefix,
+) (windowsOperation, error) {
+	if cfg == nil {
+		return windowsOperation{}, fmt.Errorf("configuration is required")
+	}
+	table := strings.ToLower(strings.TrimSpace(cfg.Interface.Table))
+	if table != "" && table != "auto" && table != "off" {
+		return windowsOperation{}, fmt.Errorf("Windows does not support explicit route table %q", cfg.Interface.Table)
+	}
+	if !prefix.IsValid() {
+		return windowsOperation{}, fmt.Errorf("route prefix is invalid")
+	}
+	prefix = prefix.Masked()
+	nextHop := "0.0.0.0"
+	if prefix.Addr().Is6() {
+		nextHop = "::"
+	}
+	destination := prefix.String()
+	base := windowsPowerShellBase(name)
+	return windowsOperation{
+		apply: base +
+			"New-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
+			" -NextHop " + powerShellQuote(nextHop) +
+			" -RouteMetric 0 -PolicyStore ActiveStore -ErrorAction Stop | Out-Null",
+		undo: base +
+			"Get-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
+			" -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
+	}, nil
 }
 
 func windowsDNSOperation(base string, values []string) (windowsOperation, error) {

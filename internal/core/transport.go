@@ -36,25 +36,28 @@ func buildTransportConfiguration(cfg *config.Config) (transportConfiguration, er
 		return result, fmt.Errorf("decode local WireGuard private key: %w", err)
 	}
 	for i, peer := range cfg.Peers {
-		remotePublic, err := decodeWireGuardKey(peer.PublicKey)
-		if err != nil {
-			return result, fmt.Errorf("decode Peer %d WireGuard public key: %w", i+1, err)
-		}
-		var preshared []byte
-		if peer.PresharedKey != "" {
-			preshared, err = decodeWireGuardKey(peer.PresharedKey)
-			if err != nil {
-				return result, fmt.Errorf("decode Peer %d WireGuard preshared key: %w", i+1, err)
-			}
-		}
-		key, err := obfs.DeriveWireGuardKey(localPrivate, remotePublic, preshared)
+		key, err := deriveTransportPeerKey(localPrivate, peer)
 		if err != nil {
 			return result, fmt.Errorf("derive Peer %d obfuscation key: %w", i+1, err)
 		}
-		result.Bind.ObfsKeys = append(result.Bind.ObfsKeys, key)
 		result.PeerKeys[peer.PublicKey] = key
 	}
 	return result, nil
+}
+
+func deriveTransportPeerKey(localPrivate []byte, peer config.Peer) (obfs.Key, error) {
+	remotePublic, err := decodeWireGuardKey(peer.PublicKey)
+	if err != nil {
+		return obfs.Key{}, fmt.Errorf("decode WireGuard public key: %w", err)
+	}
+	var preshared []byte
+	if peer.PresharedKey != "" {
+		preshared, err = decodeWireGuardKey(peer.PresharedKey)
+		if err != nil {
+			return obfs.Key{}, fmt.Errorf("decode WireGuard preshared key: %w", err)
+		}
+	}
+	return obfs.DeriveWireGuardKey(localPrivate, remotePublic, preshared)
 }
 
 func decodeWireGuardKey(value string) ([]byte, error) {

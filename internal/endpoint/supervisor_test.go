@@ -111,6 +111,19 @@ type fakeCoreControl struct {
 	activated    bool
 	redialPeers  []string
 	redialErrors []error
+	health       map[string]PeerHealth
+	finalized    []PeerUpdate
+}
+
+func (c *fakeCoreControl) FinalizePeerEndpoint(
+	_ context.Context,
+	publicKey string,
+	generation uint64,
+) error {
+	c.mu.Lock()
+	c.finalized = append(c.finalized, PeerUpdate{PublicKey: publicKey, Generation: generation})
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *fakeCoreControl) SetPeerEndpoint(_ context.Context, update PeerUpdate) error {
@@ -118,6 +131,16 @@ func (c *fakeCoreControl) SetPeerEndpoint(_ context.Context, update PeerUpdate) 
 	c.updates = append(c.updates, update)
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *fakeCoreControl) ClearPeerEndpoint(
+	_ context.Context,
+	publicKey string,
+	generation uint64,
+) error {
+	return c.SetPeerEndpoint(context.Background(), PeerUpdate{
+		PublicKey: publicKey, Generation: generation,
+	})
 }
 
 func (c *fakeCoreControl) WaitPeerReady(_ context.Context, update PeerUpdate) error {
@@ -143,6 +166,12 @@ func (c *fakeCoreControl) Activate(context.Context) error {
 	c.activated = true
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *fakeCoreControl) PeerHealth(_ context.Context, publicKey string) (PeerHealth, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.health[publicKey], nil
 }
 
 func testSupervisor(
@@ -208,6 +237,43 @@ func TestSupervisorInitializesOneCanonicalEndpointOwner(t *testing.T) {
 	}
 	if !routes.leases[0].released || !routes.closed {
 		t.Fatal("supervisor did not release route ownership")
+	}
+}
+
+func TestSupervisorRefreshAllUsesEachDynamicPeerTransaction(t *testing.T) {
+	resolver := &fakeResolver{responses: map[string][]Resolution{
+		"one.example": {{Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.10")}, RefreshAfter: time.Minute}},
+		"two.example": {{Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.20")}, RefreshAfter: time.Minute}},
+	}}
+	routes := &fakeRouteLeaser{}
+	core := &fakeCoreControl{waitError: map[netip.AddrPort]error{}}
+	supervisor, err := NewSupervisor(
+		[]PeerSpec{
+			{PublicKey: "one", Endpoint: "one.example:443"},
+			{PublicKey: "two", Endpoint: "two.example:443"},
+			{PublicKey: "numeric", Endpoint: "192.0.2.30:443"},
+		},
+		resolver, routes, core,
+		Options{MinRefresh: time.Millisecond, MaxRefresh: time.Hour},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	resolver.mu.Lock()
+	resolver.calls = nil
+	resolver.mu.Unlock()
+	if err := supervisor.RefreshAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	resolver.mu.Lock()
+	calls := slices.Clone(resolver.calls)
+	resolver.mu.Unlock()
+	if !slices.Equal(calls, []string{"one.example", "two.example"}) {
+		t.Fatalf("refresh calls = %#v", calls)
 	}
 }
 
@@ -293,6 +359,71 @@ func TestSupervisorKeepsCurrentAddressWhenDNSOrderChanges(t *testing.T) {
 	if len(core.updates) != 1 || len(routes.acquired) != 1 {
 		t.Fatalf("DNS answer reordering caused a switch: updates=%v routes=%v", core.updates, routes.acquired)
 	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorHealthRotationSkipsStillPublishedAddress(t *testing.T) {
+	first := netip.MustParseAddr("192.0.2.10")
+	second := netip.MustParseAddr("192.0.2.20")
+	resolver := &fakeResolver{responses: map[string][]Resolution{
+		"peer.example": {
+			{Addresses: []netip.Addr{first, second}, RefreshAfter: time.Hour},
+			{Addresses: []netip.Addr{first, second}, RefreshAfter: time.Hour},
+		},
+	}}
+	routes := &fakeRouteLeaser{}
+	core := &fakeCoreControl{waitError: make(map[netip.AddrPort]error)}
+	supervisor := testSupervisor(t, resolver, routes, core, "peer.example:443")
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.RotatePeer(context.Background(), "peer"); err != nil {
+		t.Fatal(err)
+	}
+	if got := supervisor.Selected()["peer"]; got != netip.AddrPortFrom(second, 443) {
+		t.Fatalf("health rotation selected %s", got)
+	}
+	if routes.leases[0].released != true || routes.leases[1].released {
+		t.Fatal("health rotation did not transfer outer-route ownership")
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorHealthWorkerRotatesAfterConsecutiveReconnectFailures(t *testing.T) {
+	first := netip.MustParseAddr("192.0.2.30")
+	second := netip.MustParseAddr("192.0.2.40")
+	resolver := &fakeResolver{responses: map[string][]Resolution{
+		"peer.example": {
+			{Addresses: []netip.Addr{first, second}, RefreshAfter: time.Hour},
+			{Addresses: []netip.Addr{first, second}, RefreshAfter: time.Hour},
+		},
+	}}
+	routes := &fakeRouteLeaser{}
+	core := &fakeCoreControl{
+		waitError: make(map[netip.AddrPort]error),
+		health: map[string]PeerHealth{
+			"peer": {ConsecutiveReconnectFailures: 3},
+		},
+	}
+	supervisor := testSupervisor(t, resolver, routes, core, "peer.example:443")
+	supervisor.options.HealthPoll = time.Millisecond
+	supervisor.options.HealthFailureThreshold = 3
+	if _, err := supervisor.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := netip.AddrPortFrom(second, 443)
+	waitForSupervisorCondition(t, "health-triggered endpoint rotation", func() bool {
+		return supervisor.Selected()["peer"] == want
+	})
 	if err := supervisor.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

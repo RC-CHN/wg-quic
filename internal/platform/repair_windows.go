@@ -43,6 +43,15 @@ func repairWindowsAdapter(
 		)
 	}
 	var errs []error
+	if journal, journalErr := newWindowsPeerRouteJournal(
+		name,
+		adapter.LUID(),
+		windowsNativeRouteSystem{},
+	); journalErr != nil {
+		errs = append(errs, fmt.Errorf("open Windows peer route journal: %w", journalErr))
+	} else if journalErr := journal.forceCleanup(ctx); journalErr != nil {
+		errs = append(errs, fmt.Errorf("repair Windows peer route journal: %w", journalErr))
+	}
 	if cfg != nil {
 		operations, planErr := windowsNetworkOperations(name, cfg)
 		if planErr != nil {

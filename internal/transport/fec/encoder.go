@@ -78,6 +78,28 @@ func (e *Encoder) SetInterleave(n int) error {
 	return err
 }
 
+// Reconfigure changes the encoder's grouping profile after returning every
+// packet needed to close the old in-flight groups. The caller must transmit
+// the returned packets before adding frames with the new profile. Decoders do
+// not need a matching configuration because dimensions are carried on wire.
+func (e *Encoder) Reconfigure(maxData, interleave int) ([][]byte, error) {
+	if maxData <= 0 || maxData > MaxDataShards {
+		return nil, errors.New("invalid FEC data shard count")
+	}
+	if interleave < 1 || interleave > MaxInterleave {
+		return nil, errors.New("invalid FEC interleave")
+	}
+	flushed, err := e.flushAll()
+	if err != nil {
+		return nil, err
+	}
+	e.maxData = maxData
+	e.controller.SetDataShards(maxData)
+	e.interleave = interleave
+	e.initGroups(interleave)
+	return flushed, nil
+}
+
 // setInterleave swaps the group set to n and returns any flushed packets so
 // the caller can send them before continuing.
 func (e *Encoder) setInterleave(n int) ([][]byte, error) {

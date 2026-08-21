@@ -25,7 +25,8 @@ const (
 
 // Repair stops a Windows tunnel service, forcibly terminating only the exact
 // service process if the explicit repair grace period expires, then reconciles
-// recoverable Wintun and endpoint-route state for the named tunnel.
+// recoverable Wintun, endpoint-route, and runtime peer-route state for the
+// named tunnel.
 func Repair(ctx context.Context, name string) (RepairResult, error) {
 	var result RepairResult
 	host := platform.Current()

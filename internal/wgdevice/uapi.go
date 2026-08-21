@@ -49,6 +49,14 @@ func SetPeerEndpoint(dev *device.Device, publicKey string, endpoint netip.AddrPo
 	return dev.IpcSet(uapi)
 }
 
+func ClearPeerEndpoint(dev *device.Device, publicKey string) error {
+	key, err := decodePeerPublicKey(publicKey)
+	if err != nil {
+		return err
+	}
+	return dev.ClearPeerEndpoint(key)
+}
+
 func ProbePeer(dev *device.Device, publicKey string) error {
 	key, err := decodePeerPublicKey(publicKey)
 	if err != nil {

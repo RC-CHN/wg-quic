@@ -630,3 +630,26 @@ func BenchmarkDecoderRecovery(b *testing.B) {
 		}
 	}
 }
+
+func TestEncoderReconfigureFlushesOldGroups(t *testing.T) {
+	controller := NewController()
+	controller.setParity(2)
+	encoder := NewEncoder(8, controller)
+	if _, err := encoder.Add([]byte("old profile")); err != nil {
+		t.Fatal(err)
+	}
+	if !encoder.Pending() {
+		t.Fatal("test did not create an in-flight FEC group")
+	}
+	flushed, err := encoder.Reconfigure(4, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flushed) == 0 || encoder.Pending() {
+		t.Fatalf("reconfigure flush = %d packets, pending=%t", len(flushed), encoder.Pending())
+	}
+	if encoder.maxData != 4 || encoder.interleave != 2 || len(encoder.groups) != 2 {
+		t.Fatalf("reconfigured encoder = maxData %d, interleave %d, groups %d",
+			encoder.maxData, encoder.interleave, len(encoder.groups))
+	}
+}

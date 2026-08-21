@@ -18,6 +18,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
+	"github.com/RC-CHN/wg-quic/internal/management"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 )
 
@@ -53,8 +54,16 @@ func (h *testHost) ControlPath(name string) string {
 	return testControlPath(h.controlRoot, name)
 }
 
+func (h *testHost) ManagementPath(name string) string {
+	return testControlPath(h.controlRoot, name+".manage")
+}
+
 func (h *testHost) ConfigPath(name string) string {
 	return filepath.Join(h.configRoot, name+".conf")
+}
+
+func (*testHost) LoadConfigSnapshot(path string) (*config.Config, error) {
+	return config.ParseFile(path)
 }
 
 func (h *testHost) Prepare(context.Context, *config.Config) error {
@@ -70,6 +79,32 @@ func (h *testHost) NewEndpointRouteLeaser(
 	h.record("route-leaser")
 	return &testEndpointRouteLeaser{host: h}, nil
 }
+
+func (h *testHost) NewPeerRouteManager(
+	context.Context,
+	string,
+	*config.Config,
+) (platform.PeerRouteManager, error) {
+	return &testPeerRouteManager{}, nil
+}
+
+type testPeerRouteManager struct{}
+
+func (*testPeerRouteManager) Prepare(
+	context.Context,
+	platform.PeerRoutePlan,
+) (platform.PreparedPeerRoutes, error) {
+	return &testPreparedPeerRoutes{}, nil
+}
+
+type testPreparedPeerRoutes struct{}
+
+func (*testPreparedPeerRoutes) CommitRemovals(context.Context) error    { return nil }
+func (*testPreparedPeerRoutes) CommitAdditions(context.Context) error   { return nil }
+func (*testPreparedPeerRoutes) RollbackAdditions(context.Context) error { return nil }
+func (*testPreparedPeerRoutes) RollbackRemovals(context.Context) error  { return nil }
+func (*testPreparedPeerRoutes) Rollback(context.Context) error          { return nil }
+func (*testPreparedPeerRoutes) Finalize(context.Context) error          { return nil }
 
 func (h *testHost) ConfigureNetwork(_ context.Context, _ string, cfg *config.Config) (platform.Cleanup, error) {
 	h.runtimeCfg = cfg.Clone()
@@ -252,8 +287,9 @@ Endpoint = [::ffff:192.0.2.10]:443
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
+	ready := make(chan struct{})
 	go func() {
-		result <- runWithHost(ctx, path, "wg0", host, func(launch coreLaunch) (coreProcess, error) {
+		result <- runWithHostReady(ctx, path, "wg0", host, func(launch coreLaunch) (coreProcess, error) {
 			if !launch.DeferEndpoints {
 				return nil, errors.New("quick did not defer core endpoints")
 			}
@@ -267,10 +303,23 @@ Endpoint = [::ffff:192.0.2.10]:443
 				return nil, errors.New("quick did not pass its parsed configuration snapshot to core")
 			}
 			return &testCoreProcess{host: host, name: launch.Name, done: make(chan struct{})}, nil
-		})
+		}, func() { close(ready) })
 	}()
 	select {
-	case <-host.postUp:
+	case <-ready:
+		status, err := management.NewClient(host.ManagementPath("wg0")).Status(
+			context.Background(), "wg0",
+		)
+		if err != nil {
+			cancel()
+			t.Fatalf("read quick management status: %v", err)
+		}
+		if status.DesiredGeneration != 1 ||
+			!slices.Contains(status.Capabilities, "management_protocol_v1") ||
+			slices.Contains(status.Capabilities, "peer_reconcile_v1") {
+			cancel()
+			t.Fatalf("quick management status = %#v", status)
+		}
 		cancel()
 	case err := <-result:
 		cancel()

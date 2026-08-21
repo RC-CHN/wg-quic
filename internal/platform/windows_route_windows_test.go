@@ -3,8 +3,10 @@
 package platform
 
 import (
+	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -28,6 +30,137 @@ func TestWindowsRawRouteAddressRoundTrip(t *testing.T) {
 		if roundTrip != address {
 			t.Fatalf("route address round trip = %s, want %s", roundTrip, address)
 		}
+	}
+}
+
+func TestWindowsPeerRouteKeyPreservesCanonicalPrefix(t *testing.T) {
+	for _, value := range []string{"10.20.0.9/16", "2001:db8:1::9/48"} {
+		prefix := netip.MustParsePrefix(value)
+		key, err := windowsPeerRouteKey(1, 77, prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key.Destination != prefix.Masked().String() ||
+			key.InterfaceLUID != 77 || key.CompartmentID != 1 {
+			t.Fatalf("peer route key = %#v", key)
+		}
+		row, err := windowsRouteRow(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := int(row.DestinationPrefix.PrefixLength); got != prefix.Bits() {
+			t.Fatalf("route prefix length = %d, want %d", got, prefix.Bits())
+		}
+	}
+}
+
+func TestWindowsPeerRouteJournalRecoversProvenAndRetainsPendingAdd(t *testing.T) {
+	root := t.TempDir()
+	store := &windowsDiskRouteStore{
+		stateDirectory:  filepath.Join(root, "state"),
+		ownersDirectory: filepath.Join(root, "state", "owners"),
+		ledgerPath:      filepath.Join(root, "state", windowsRouteLedgerFile),
+		backupPath:      filepath.Join(root, "state", windowsRouteBackupFile),
+		lockPath:        filepath.Join(root, "state", windowsRouteLockFile),
+	}
+	if err := store.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	before := netip.MustParsePrefix("10.1.0.0/16")
+	after := netip.MustParsePrefix("10.2.0.0/16")
+	beforeKey, _ := windowsPeerRouteKey(1, 77, before)
+	afterKey, _ := windowsPeerRouteKey(1, 77, after)
+	system := &fakeWindowsRouteSystem{
+		selected: make(map[netip.Addr]windowsSelectedRoute),
+		routes: map[windowsRouteKey]windowsSelectedRoute{
+			beforeKey: {Key: beforeKey},
+			afterKey:  {Key: afterKey},
+		},
+	}
+	path := filepath.Join(store.stateDirectory, "peer-routes-test.json")
+	journal := &windowsPeerRouteJournal{
+		tunnel: "office", interfaceLUID: 77, compartmentID: 1,
+		path: path, store: store, system: system,
+		recovery: RecoveryStatus{State: "clean"},
+	}
+	if err := journal.Begin(t.Context(), "epoch:request", []netip.Prefix{before}, []netip.Prefix{after}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Mark(t.Context(), peerRouteJournalAdding, true, false); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered := &windowsPeerRouteJournal{
+		tunnel: "office", interfaceLUID: 77, compartmentID: 1,
+		path: path, store: store, system: system,
+		recovery: RecoveryStatus{State: "clean"},
+	}
+	if err := recovered.recover(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := system.routes[beforeKey]; exists {
+		t.Fatal("recovery retained a proven pre-transaction route")
+	}
+	if _, exists := system.routes[afterKey]; !exists {
+		t.Fatal("recovery deleted an ambiguous pending-add route")
+	}
+	status := recovered.RecoveryStatus()
+	if status.State != "degraded" || status.RetainedAmbiguousObjects != 1 {
+		t.Fatalf("recovery status = %#v", status)
+	}
+}
+
+func TestWindowsPeerRouteJournalQuarantinesIdentityMismatch(t *testing.T) {
+	root := t.TempDir()
+	store := &windowsDiskRouteStore{
+		stateDirectory:  filepath.Join(root, "state"),
+		ownersDirectory: filepath.Join(root, "state", "owners"),
+		ledgerPath:      filepath.Join(root, "state", windowsRouteLedgerFile),
+		backupPath:      filepath.Join(root, "state", windowsRouteBackupFile),
+		lockPath:        filepath.Join(root, "state", windowsRouteLockFile),
+	}
+	if err := store.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	prefix := netip.MustParsePrefix("10.3.0.0/16")
+	oldKey, _ := windowsPeerRouteKey(1, 77, prefix)
+	system := &fakeWindowsRouteSystem{
+		selected: make(map[netip.Addr]windowsSelectedRoute),
+		routes: map[windowsRouteKey]windowsSelectedRoute{
+			oldKey: {Key: oldKey},
+		},
+	}
+	path := filepath.Join(store.stateDirectory, "peer-routes-mismatch.json")
+	journal := &windowsPeerRouteJournal{
+		tunnel: "office", interfaceLUID: 77, compartmentID: 1,
+		path: path, store: store, system: system,
+		recovery: RecoveryStatus{State: "clean"},
+	}
+	if err := journal.Active(t.Context(), []netip.Prefix{prefix}); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered := &windowsPeerRouteJournal{
+		tunnel: "office", interfaceLUID: 88, compartmentID: 1,
+		path: path, store: store, system: system,
+		recovery: RecoveryStatus{State: "clean"},
+	}
+	if err := recovered.recover(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("active mismatch journal still exists: %v", err)
+	}
+	matches, err := filepath.Glob(path + ".identity-mismatch-*")
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("identity-mismatch quarantine files = %#v, err = %v", matches, err)
+	}
+	if _, exists := system.routes[oldKey]; !exists {
+		t.Fatal("identity mismatch recovery deleted an unproven old-LUID route")
+	}
+	status := recovered.RecoveryStatus()
+	if status.State != "degraded" || status.RetainedAmbiguousObjects != 1 {
+		t.Fatalf("recovery status = %#v", status)
 	}
 }
 

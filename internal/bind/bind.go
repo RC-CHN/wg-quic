@@ -112,15 +112,35 @@ type Bind struct {
 	sessionRestored func(netip.AddrPort)
 	nextPacket      atomic.Uint64
 	nextSession     atomic.Uint64
+	receiveSequence atomic.Uint64
 	mark            atomic.Uint32
 	stats           bindStats
 	obfsResolved    map[netip.AddrPort]obfs.Key
 	obfsDynamic     map[netip.AddrPort]endpointKeyLease
+	obfsReceive     map[obfs.Key]receiveKeyLease
+	fecPolicies     map[netip.AddrPort]endpointFECPolicyLease
+}
+
+// ReceiveSequence returns the last carrier-ingress sequence assigned to a
+// WireGuard packet. Core snapshots it after installing an endpoint generation
+// so already-queued authenticated packets cannot satisfy new readiness.
+func (b *Bind) ReceiveSequence() uint64 {
+	return b.receiveSequence.Load()
 }
 
 type endpointKeyLease struct {
 	key  obfs.Key
 	refs int
+}
+
+type receiveKeyLease struct {
+	refs    int
+	release func()
+}
+
+type endpointFECPolicyLease struct {
+	policy string
+	refs   int
 }
 
 var _ conn.Bind = (*Bind)(nil)
@@ -146,9 +166,10 @@ type bindStats struct {
 type EndpointSessionState string
 
 type EndpointReconnectStatus struct {
-	Attempts      uint64
-	Failures      uint64
-	NextReconnect int64
+	Attempts            uint64
+	Failures            uint64
+	ConsecutiveFailures uint32
+	NextReconnect       int64
 }
 
 const (
@@ -206,6 +227,8 @@ func New(cfg Config) *Bind {
 	return &Bind{
 		cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key),
 		obfsDynamic: make(map[netip.AddrPort]endpointKeyLease),
+		obfsReceive: make(map[obfs.Key]receiveKeyLease),
+		fecPolicies: make(map[netip.AddrPort]endpointFECPolicyLease),
 	}
 }
 
@@ -250,6 +273,10 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		cancel()
 		return nil, 0, err
 	}
+	for key, lease := range b.obfsReceive {
+		lease.release = carrier.AcquireReceiveKey(key)
+		b.obfsReceive[key] = lease
+	}
 	state := &runState{
 		ctx: ctx, cancel: cancel, carrier: carrier,
 		recv: make(chan receivedPacket, b.cfg.QueueSize), cfg: b.cfg,
@@ -269,6 +296,10 @@ func (b *Bind) Close() error {
 	b.mu.Lock()
 	state := b.state
 	b.state = nil
+	for key, lease := range b.obfsReceive {
+		lease.release = nil
+		b.obfsReceive[key] = lease
+	}
 	b.mu.Unlock()
 	if state == nil {
 		return nil
@@ -289,6 +320,45 @@ func (b *Bind) Close() error {
 		stats.QueueDrops, stats.FECRecovered, stats.FECUnrecovered,
 	)
 	return carrierErr
+}
+
+// AcquireReceiveKey makes one Salamander key available to the inbound decoder
+// before a peer is committed. The returned release is reference-counted and
+// remains valid across bind close/reopen cycles.
+func (b *Bind) AcquireReceiveKey(key obfs.Key) func() {
+	b.mu.Lock()
+	lease := b.obfsReceive[key]
+	lease.refs++
+	if lease.refs == 1 && b.state != nil {
+		lease.release = b.state.carrier.AcquireReceiveKey(key)
+	}
+	b.obfsReceive[key] = lease
+	b.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() { b.releaseReceiveKey(key) })
+	}
+}
+
+func (b *Bind) releaseReceiveKey(key obfs.Key) {
+	b.mu.Lock()
+	lease, exists := b.obfsReceive[key]
+	if !exists {
+		b.mu.Unlock()
+		return
+	}
+	lease.refs--
+	if lease.refs > 0 {
+		b.obfsReceive[key] = lease
+		b.mu.Unlock()
+		return
+	}
+	delete(b.obfsReceive, key)
+	release := lease.release
+	b.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 func (b *Bind) SetMark(mark uint32) error {
@@ -462,8 +532,9 @@ func (b *Bind) EndpointReconnectStatus(endpoint netip.AddrPort) EndpointReconnec
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 	result := EndpointReconnectStatus{
-		Attempts: ep.reconnectAttempts,
-		Failures: ep.reconnectFailures,
+		Attempts:            ep.reconnectAttempts,
+		Failures:            ep.reconnectFailures,
+		ConsecutiveFailures: ep.consecutiveFailures,
 	}
 	if !ep.nextReconnect.IsZero() {
 		result.NextReconnect = ep.nextReconnect.Unix()
@@ -483,8 +554,10 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 	}
 	b.mu.Lock()
 	_, associated := b.obfsResolved[ep.addr]
+	policy := b.fecPolicies[ep.addr].policy
 	state := b.state
 	b.mu.Unlock()
+	ep.fecPolicy = policy
 	if state != nil {
 		state.mu.Lock()
 		if existing := state.endpoints[ep.addr]; existing != nil {
@@ -492,6 +565,7 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 			ep.mu.Lock()
 			ep.configured = true
 			ep.retired = false
+			ep.fecPolicy = policy
 			ep.mu.Unlock()
 		} else {
 			state.endpoints[ep.addr] = ep
@@ -552,6 +626,152 @@ func (b *Bind) releaseEndpointKey(endpoint netip.AddrPort, key obfs.Key) {
 		state.carrier.DisassociateEndpoint(endpoint, key)
 	}
 	b.mu.Unlock()
+}
+
+func normalizeFECPolicy(policy string) (string, error) {
+	if policy == "" {
+		policy = "balanced"
+	}
+	switch policy {
+	case "latency", "balanced", "throughput":
+		return policy, nil
+	default:
+		return "", fmt.Errorf("unsupported peer FEC policy %q", policy)
+	}
+}
+
+// AcquireEndpointFECPolicy associates an outbound endpoint with one peer FEC
+// encoder policy. Different policies cannot share one configured endpoint,
+// because WireGuard's outbound endpoint does not carry peer identity into the
+// bind interface.
+func (b *Bind) AcquireEndpointFECPolicy(
+	endpoint netip.AddrPort,
+	policy string,
+) (func(), error) {
+	endpoint, err := peerendpoint.Canonical(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("valid numeric endpoint is required: %w", err)
+	}
+	policy, err = normalizeFECPolicy(policy)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	lease := b.fecPolicies[endpoint]
+	if lease.refs != 0 && lease.policy != policy {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("endpoint %s is already associated with FEC policy %q", endpoint, lease.policy)
+	}
+	lease.policy = policy
+	lease.refs++
+	b.fecPolicies[endpoint] = lease
+	state := b.state
+	b.mu.Unlock()
+	b.applyEndpointFECPolicy(state, endpoint, policy)
+	return b.endpointFECPolicyRelease(endpoint, policy), nil
+}
+
+// ReplaceEndpointFECPolicy atomically changes the sole policy lease for an
+// endpoint. The send worker flushes the old group before applying it.
+func (b *Bind) ReplaceEndpointFECPolicy(
+	endpoint netip.AddrPort,
+	oldPolicy string,
+	newPolicy string,
+) (func(), error) {
+	endpoint, err := peerendpoint.Canonical(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	oldPolicy, err = normalizeFECPolicy(oldPolicy)
+	if err != nil {
+		return nil, err
+	}
+	newPolicy, err = normalizeFECPolicy(newPolicy)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	lease := b.fecPolicies[endpoint]
+	if lease.refs != 1 || lease.policy != oldPolicy {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("endpoint %s FEC policy lease changed concurrently", endpoint)
+	}
+	lease.policy = newPolicy
+	b.fecPolicies[endpoint] = lease
+	state := b.state
+	b.mu.Unlock()
+	b.applyEndpointFECPolicy(state, endpoint, newPolicy)
+	return b.endpointFECPolicyRelease(endpoint, newPolicy), nil
+}
+
+func (b *Bind) endpointFECPolicyRelease(endpoint netip.AddrPort, policy string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			lease := b.fecPolicies[endpoint]
+			if lease.refs == 0 || lease.policy != policy {
+				b.mu.Unlock()
+				return
+			}
+			lease.refs--
+			if lease.refs == 0 {
+				delete(b.fecPolicies, endpoint)
+			} else {
+				b.fecPolicies[endpoint] = lease
+			}
+			b.mu.Unlock()
+		})
+	}
+}
+
+func (b *Bind) applyEndpointFECPolicy(
+	state *runState,
+	endpoint netip.AddrPort,
+	policy string,
+) {
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	ep := state.endpoints[endpoint]
+	if ep == nil {
+		state.mu.Unlock()
+		return
+	}
+	ep.mu.Lock()
+	ep.fecPolicy = policy
+	sess := ep.session
+	ep.mu.Unlock()
+	state.mu.Unlock()
+	if sess != nil {
+		sess.setFECPolicy(policy)
+	}
+}
+
+// SetAuthenticatedSessionFECPolicy binds an accepted/roamed connection only
+// after WireGuard identifies the peer that authenticated on that path.
+func (b *Bind) SetAuthenticatedSessionFECPolicy(sessionID uint64, policy string) error {
+	if sessionID == 0 {
+		return nil
+	}
+	policy, err := normalizeFECPolicy(policy)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return nil
+	}
+	state.mu.Lock()
+	sess := state.sessions[sessionID]
+	state.mu.Unlock()
+	if sess != nil {
+		sess.setFECPolicy(policy)
+	}
+	return nil
 }
 
 // RetireEndpoint closes the configured outbound session for an old endpoint.
@@ -937,13 +1157,17 @@ func (b *Bind) newSessionLocked(
 		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
 		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
 		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
-		remoteAddr: ep.addr,
+		fecPolicyUpdates: make(chan string, 1),
+		remoteAddr:       ep.addr,
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
-		sess.fecEncoder = fec.NewEncoder(state.cfg.FECDataShards, fec.NewController())
+		profile := fecPolicyProfileFor(state.cfg, ep.fecPolicy)
+		sess.fecPolicy = profile.name
+		sess.fecFlushDeadline = profile.flushDeadline
+		sess.fecEncoder = fec.NewEncoder(profile.dataShards, fec.NewController())
 		// SetInterleave cannot fail at construction: no groups are in flight.
-		_ = sess.fecEncoder.SetInterleave(state.cfg.FECInterleave)
+		_ = sess.fecEncoder.SetInterleave(profile.interleave)
 	}
 	state.sessions[sess.id] = sess
 	b.stats.activeSessions.Add(1)
@@ -1032,6 +1256,61 @@ type session struct {
 	fecEncoder          *fec.Encoder
 	fecDecoder          *fec.Decoder
 	fecPathSampleFrames uint32
+	fecPolicy           string
+	fecPolicyUpdates    chan string
+	fecFlushDeadline    time.Duration
+}
+
+type fecPolicyProfile struct {
+	name          string
+	dataShards    int
+	interleave    int
+	flushDeadline time.Duration
+}
+
+func fecPolicyProfileFor(cfg Config, policy string) fecPolicyProfile {
+	policy, err := normalizeFECPolicy(policy)
+	if err != nil {
+		policy = "balanced"
+	}
+	profile := fecPolicyProfile{
+		name: policy, dataShards: cfg.FECDataShards,
+		interleave: cfg.FECInterleave, flushDeadline: cfg.FECFlushDeadline,
+	}
+	switch policy {
+	case "latency":
+		profile.dataShards = min(profile.dataShards, 4)
+		profile.interleave = 1
+		profile.flushDeadline = min(profile.flushDeadline, time.Millisecond)
+	case "throughput":
+		profile.interleave = max(profile.interleave, 2)
+		profile.flushDeadline = max(profile.flushDeadline, 4*time.Millisecond)
+	}
+	if profile.flushDeadline <= 0 {
+		profile.flushDeadline = time.Millisecond
+	}
+	return profile
+}
+
+func (s *session) setFECPolicy(policy string) {
+	if s.fecPolicyUpdates == nil || s.closed.Load() {
+		return
+	}
+	select {
+	case s.fecPolicyUpdates <- policy:
+		return
+	default:
+	}
+	// Only the newest requested profile matters. The send worker is the sole
+	// encoder owner and will still flush whichever profile is active there.
+	select {
+	case <-s.fecPolicyUpdates:
+	default:
+	}
+	select {
+	case s.fecPolicyUpdates <- policy:
+	default:
+	}
 }
 
 func (s *session) setConn(qconn *quiccarrier.Connection) {
@@ -1153,8 +1432,25 @@ func (s *session) sendLoop() {
 	}
 	resetTimer := func() {
 		stopTimer()
-		timer.Reset(s.state.cfg.FECFlushDeadline)
+		timer.Reset(s.fecFlushDeadline)
 		timerActive = true
+	}
+	applyFECPolicy := func(policy string) bool {
+		if s.fecEncoder == nil {
+			return true
+		}
+		profile := fecPolicyProfileFor(s.state.cfg, policy)
+		if profile.name == s.fecPolicy {
+			return true
+		}
+		stopTimer()
+		packets, err := s.fecEncoder.Reconfigure(profile.dataShards, profile.interleave)
+		if err != nil || !sendPackets(packets) {
+			return false
+		}
+		s.fecPolicy = profile.name
+		s.fecFlushDeadline = profile.flushDeadline
+		return true
 	}
 	sendFrame := func(frame []byte) bool {
 		if s.fecEncoder == nil {
@@ -1204,8 +1500,20 @@ func (s *session) sendLoop() {
 
 	for {
 		select {
+		case policy := <-s.fecPolicyUpdates:
+			if !applyFECPolicy(policy) {
+				return
+			}
+			continue
+		default:
+		}
+		select {
 		case control := <-s.control:
 			if !sendPacket(control) {
+				return
+			}
+		case policy := <-s.fecPolicyUpdates:
+			if !applyFECPolicy(policy) {
 				return
 			}
 			continue
@@ -1346,9 +1654,6 @@ func (s *session) receiveLoop() {
 // changing the session's configured/reconnect identity.
 func (s *session) endpointForAddrPort(remote netip.AddrPort) *Endpoint {
 	remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-	if remote == s.endpoint.addr {
-		return s.endpoint
-	}
 	s.endpoint.mu.Lock()
 	fallback := s.endpoint.fallback
 	if s.endpoint.configured {
@@ -1356,10 +1661,9 @@ func (s *session) endpointForAddrPort(remote netip.AddrPort) *Endpoint {
 	}
 	s.endpoint.mu.Unlock()
 	return &Endpoint{
-		owner:    s.endpoint.owner,
-		addr:     remote,
-		session:  s,
-		fallback: fallback,
+		owner: s.endpoint.owner, addr: remote,
+		receiveSequence: s.endpoint.owner.receiveSequence.Add(1),
+		session:         s, fallback: fallback,
 	}
 }
 

@@ -13,14 +13,16 @@ import (
 )
 
 type Options struct {
-	MinRefresh       time.Duration
-	MaxRefresh       time.Duration
-	RetryMin         time.Duration
-	RetryMax         time.Duration
-	ReadinessTimeout time.Duration
-	NetworkDebounce  time.Duration
-	Jitter           func(time.Duration) time.Duration
-	Logf             func(string, ...any)
+	MinRefresh             time.Duration
+	MaxRefresh             time.Duration
+	RetryMin               time.Duration
+	RetryMax               time.Duration
+	ReadinessTimeout       time.Duration
+	NetworkDebounce        time.Duration
+	HealthPoll             time.Duration
+	HealthFailureThreshold uint32
+	Jitter                 func(time.Duration) time.Duration
+	Logf                   func(string, ...any)
 }
 
 type Supervisor struct {
@@ -29,29 +31,54 @@ type Supervisor struct {
 	core     CoreControl
 	options  Options
 
-	opMu        sync.Mutex
-	mu          sync.RWMutex
-	peers       map[string]*peerState
-	order       []string
-	initialized bool
-	started     bool
-	closed      bool
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	extraLeases []RouteLease
+	opMu          sync.Mutex
+	mu            sync.RWMutex
+	peers         map[string]*peerState
+	order         []string
+	initialized   bool
+	started       bool
+	closed        bool
+	cancel        context.CancelFunc
+	runCtx        context.Context
+	workers       map[string]context.CancelFunc
+	reserved      map[string]string
+	activePeerSet string
+	wg            sync.WaitGroup
+	extraLeases   []RouteLease
 }
 
 type peerState struct {
-	spec               PeerSpec
-	host               string
-	port               uint16
-	address            netip.Addr
-	dynamic            bool
-	active             netip.AddrPort
-	generation         uint64
-	lease              RouteLease
-	routeRedialPending bool
-	refreshAfter       time.Duration
+	spec                PeerSpec
+	host                string
+	port                uint16
+	address             netip.Addr
+	dynamic             bool
+	active              netip.AddrPort
+	generation          uint64
+	lease               RouteLease
+	routeRedialPending  bool
+	refreshAfter        time.Duration
+	failedCandidates    map[netip.Addr]candidateFailure
+	dnsCandidates       []netip.Addr
+	lastResolvedAt      time.Time
+	nextRefreshAt       time.Time
+	lastResolutionError string
+}
+
+type Status struct {
+	PublicKey           string
+	ConfiguredEndpoint  string
+	SelectedEndpoint    string
+	DNSCandidates       []string
+	LastResolvedAt      time.Time
+	NextRefreshAt       time.Time
+	LastResolutionError string
+	Generation          uint64
+}
+
+type candidateFailure struct {
+	attempts   int
+	retryAfter time.Time
 }
 
 func NewSupervisor(
@@ -73,8 +100,10 @@ func NewSupervisor(
 	options = withDefaults(options)
 	result := &Supervisor{
 		resolver: resolver, routes: routes, core: core, options: options,
-		peers: make(map[string]*peerState, len(specs)),
-		order: make([]string, 0, len(specs)),
+		peers:    make(map[string]*peerState, len(specs)),
+		order:    make([]string, 0, len(specs)),
+		workers:  make(map[string]context.CancelFunc),
+		reserved: make(map[string]string),
 	}
 	for index, spec := range specs {
 		if spec.PublicKey == "" {
@@ -118,6 +147,12 @@ func withDefaults(options Options) Options {
 	}
 	if options.NetworkDebounce <= 0 {
 		options.NetworkDebounce = 500 * time.Millisecond
+	}
+	if options.HealthPoll <= 0 {
+		options.HealthPoll = 5 * time.Second
+	}
+	if options.HealthFailureThreshold == 0 {
+		options.HealthFailureThreshold = 3
 	}
 	if options.Jitter == nil {
 		options.Jitter = func(value time.Duration) time.Duration {
@@ -221,13 +256,9 @@ func (s *Supervisor) Activate(ctx context.Context) error {
 	}
 	s.started = true
 	s.cancel = cancel
+	s.runCtx = runCtx
 	for _, publicKey := range s.order {
-		state := s.peers[publicKey]
-		if !state.dynamic {
-			continue
-		}
-		s.wg.Add(1)
-		go s.refreshLoop(runCtx, publicKey)
+		s.startRefreshWorkerLocked(publicKey)
 	}
 	if s.routes.Changes() != nil {
 		s.wg.Add(1)
@@ -237,10 +268,54 @@ func (s *Supervisor) Activate(ctx context.Context) error {
 	return nil
 }
 
+func (s *Supervisor) startRefreshWorkerLocked(publicKey string) {
+	state := s.peers[publicKey]
+	if !s.started || s.runCtx == nil || state == nil || !state.dynamic ||
+		s.workers[publicKey] != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(s.runCtx)
+	s.workers[publicKey] = cancel
+	s.wg.Add(1)
+	go s.refreshLoop(ctx, publicKey)
+}
+
+func (s *Supervisor) stopRefreshWorkerLocked(publicKey string) {
+	if cancel := s.workers[publicKey]; cancel != nil {
+		cancel()
+		delete(s.workers, publicKey)
+	}
+}
+
 func (s *Supervisor) Selected() map[string]netip.AddrPort {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.selectedLocked()
+}
+
+func (s *Supervisor) Status() []Status {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	result := make([]Status, 0, len(s.order))
+	for _, publicKey := range s.order {
+		state := s.peers[publicKey]
+		if state == nil {
+			continue
+		}
+		status := Status{
+			PublicKey: publicKey, ConfiguredEndpoint: state.spec.Endpoint,
+			LastResolvedAt: state.lastResolvedAt, NextRefreshAt: state.nextRefreshAt,
+			LastResolutionError: state.lastResolutionError, Generation: state.generation,
+		}
+		if state.active.IsValid() {
+			status.SelectedEndpoint = state.active.String()
+		}
+		for _, address := range state.dnsCandidates {
+			status.DNSCandidates = append(status.DNSCandidates, address.String())
+		}
+		result = append(result, status)
+	}
+	return result
 }
 
 func (s *Supervisor) selectedLocked() map[string]netip.AddrPort {
@@ -257,6 +332,17 @@ func (s *Supervisor) selectedLocked() map[string]netip.AddrPort {
 // used by tests and administrative triggers; scheduled refreshes call the same
 // implementation.
 func (s *Supervisor) RefreshPeer(ctx context.Context, publicKey string) error {
+	return s.refreshPeer(ctx, publicKey, false)
+}
+
+// RotatePeer resolves the configured hostname but deliberately excludes the
+// currently selected address. It is used after repeated transport recovery
+// failures even when DNS still returns the unhealthy address.
+func (s *Supervisor) RotatePeer(ctx context.Context, publicKey string) error {
+	return s.refreshPeer(ctx, publicKey, true)
+}
+
+func (s *Supervisor) refreshPeer(ctx context.Context, publicKey string, rotate bool) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.RLock()
@@ -269,6 +355,12 @@ func (s *Supervisor) RefreshPeer(ctx context.Context, publicKey string) error {
 	if !ok {
 		return errors.New("peer public key is not configured")
 	}
+	s.mu.RLock()
+	reserved := s.reserved[publicKey]
+	s.mu.RUnlock()
+	if reserved != "" {
+		return errors.New("peer endpoint is reserved by a reconciliation transaction")
+	}
 	if !state.dynamic {
 		return nil
 	}
@@ -278,20 +370,55 @@ func (s *Supervisor) RefreshPeer(ctx context.Context, publicKey string) error {
 	}
 	state.refreshAfter = s.refreshDelay(resolution.RefreshAfter)
 	for _, address := range resolution.Addresses {
-		if address == state.active.Addr() {
+		if !rotate && address == state.active.Addr() {
 			return nil
 		}
 	}
 
 	var candidateErrors []error
 	for _, address := range resolution.Addresses {
+		if rotate && address == state.active.Addr() {
+			continue
+		}
+		if failure := state.failedCandidates[address]; !failure.retryAfter.IsZero() &&
+			time.Now().Before(failure.retryAfter) {
+			continue
+		}
 		if err := s.switchPeer(ctx, state, address); err == nil {
+			delete(state.failedCandidates, address)
 			return nil
 		} else {
 			candidateErrors = append(candidateErrors, err)
+			if state.failedCandidates == nil {
+				state.failedCandidates = make(map[netip.Addr]candidateFailure)
+			}
+			failure := state.failedCandidates[address]
+			failure.attempts++
+			failure.retryAfter = time.Now().Add(exponentialBackoff(
+				s.options.RetryMin, s.options.RetryMax, failure.attempts-1,
+			))
+			state.failedCandidates[address] = failure
 		}
 	}
+	if len(candidateErrors) == 0 {
+		return errors.New("no alternate endpoint candidate is currently eligible")
+	}
 	return fmt.Errorf("no refreshed endpoint became ready: %w", errors.Join(candidateErrors...))
+}
+
+// RefreshAll performs one administrative DNS refresh for every dynamic peer.
+// Each peer uses the same endpoint transaction as its scheduled worker.
+func (s *Supervisor) RefreshAll(ctx context.Context) error {
+	var errs []error
+	for _, publicKey := range s.dynamicPeerKeys() {
+		if err := s.RefreshPeer(ctx, publicKey); err != nil {
+			errs = append(errs, fmt.Errorf(
+				"refresh peer %s endpoint: %w",
+				peerIdentifier(publicKey), err,
+			))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address netip.Addr) error {
@@ -317,6 +444,14 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 		state.active = newEndpoint
 		state.generation = newGeneration
 		state.lease = lease
+		if finalizeErr := s.core.FinalizePeerEndpoint(
+			ctx, state.spec.PublicKey, newGeneration,
+		); finalizeErr != nil {
+			if oldLease != nil {
+				s.extraLeases = append(s.extraLeases, oldLease)
+			}
+			return fmt.Errorf("finalize migrated peer endpoint: %w", finalizeErr)
+		}
 		if oldLease != nil {
 			if releaseErr := oldLease.Release(context.Background()); releaseErr != nil {
 				s.options.Logf("release old endpoint route lease: %v", releaseErr)
@@ -346,6 +481,12 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 		return errors.Join(err, fmt.Errorf("rollback peer endpoint: %w", rollbackErr))
 	}
 	state.generation = rollback.Generation
+	if finalizeErr := s.core.FinalizePeerEndpoint(
+		ctx, state.spec.PublicKey, rollback.Generation,
+	); finalizeErr != nil {
+		s.extraLeases = append(s.extraLeases, lease)
+		return errors.Join(err, fmt.Errorf("finalize rolled-back peer endpoint: %w", finalizeErr))
+	}
 	if releaseErr := lease.Release(context.Background()); releaseErr != nil {
 		// Keep the failed release reachable so Close can retry it. RouteLease
 		// implementations are idempotent and only mark themselves released
@@ -371,6 +512,12 @@ func (s *Supervisor) RefreshRoutes(ctx context.Context) error {
 	var errs []error
 	for _, publicKey := range s.order {
 		state := s.peers[publicKey]
+		s.mu.RLock()
+		reserved := s.reserved[publicKey]
+		s.mu.RUnlock()
+		if reserved != "" {
+			continue
+		}
 		lease, ok := state.lease.(RefreshableRouteLease)
 		if !ok || lease == nil {
 			continue
@@ -408,10 +555,13 @@ func peerIdentifier(publicKey string) string {
 
 func (s *Supervisor) resolve(ctx context.Context, state *peerState) (Resolution, error) {
 	if !state.dynamic {
+		state.dnsCandidates = []netip.Addr{state.address}
+		state.lastResolutionError = ""
 		return Resolution{Addresses: []netip.Addr{state.address}}, nil
 	}
 	resolution, err := s.resolver.Resolve(ctx, state.host)
 	if err != nil {
+		state.lastResolutionError = err.Error()
 		return Resolution{}, err
 	}
 	seen := make(map[netip.Addr]struct{}, len(resolution.Addresses))
@@ -429,33 +579,84 @@ func (s *Supervisor) resolve(ctx context.Context, state *peerState) (Resolution,
 	}
 	resolution.Addresses = filtered
 	if len(resolution.Addresses) == 0 {
-		return Resolution{}, errors.New("resolver returned no usable IP address")
+		err := errors.New("resolver returned no usable IP address")
+		state.lastResolutionError = err.Error()
+		return Resolution{}, err
 	}
+	state.dnsCandidates = append(state.dnsCandidates[:0], resolution.Addresses...)
+	state.lastResolvedAt = time.Now()
+	state.lastResolutionError = ""
 	return resolution, nil
 }
 
 func (s *Supervisor) refreshLoop(ctx context.Context, publicKey string) {
 	defer s.wg.Done()
-	failures := 0
-	for {
+	dnsFailures := 0
+	dnsDelay := func() (time.Duration, bool) {
 		s.opMu.Lock()
-		delay := s.peers[publicKey].refreshAfter
-		s.opMu.Unlock()
-		if failures > 0 {
-			delay = exponentialBackoff(s.options.RetryMin, s.options.RetryMax, failures-1)
+		defer s.opMu.Unlock()
+		state := s.peers[publicKey]
+		if state == nil {
+			return 0, false
 		}
-		timer := time.NewTimer(s.options.Jitter(delay))
+		delay := state.refreshAfter
+		if dnsFailures > 0 {
+			delay = exponentialBackoff(s.options.RetryMin, s.options.RetryMax, dnsFailures-1)
+		}
+		delay = s.options.Jitter(delay)
+		state.nextRefreshAt = time.Now().Add(delay)
+		return delay, true
+	}
+	delay, exists := dnsDelay()
+	if !exists {
+		return
+	}
+	dnsTimer := time.NewTimer(delay)
+	healthTimer := time.NewTimer(s.options.Jitter(s.options.HealthPoll))
+	defer dnsTimer.Stop()
+	defer healthTimer.Stop()
+	resetTimer := func(timer *time.Timer, delay time.Duration) {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(delay)
+	}
+	for {
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
-		}
-		if err := s.RefreshPeer(ctx, publicKey); err != nil {
-			failures++
-			s.options.Logf("refresh peer endpoint: %v", err)
-		} else {
-			failures = 0
+		case <-dnsTimer.C:
+			if err := s.RefreshPeer(ctx, publicKey); err != nil {
+				dnsFailures++
+				s.options.Logf("refresh peer endpoint: %v", err)
+			} else {
+				dnsFailures = 0
+			}
+			delay, exists := dnsDelay()
+			if !exists {
+				return
+			}
+			resetTimer(dnsTimer, delay)
+		case <-healthTimer.C:
+			health, err := s.core.PeerHealth(ctx, publicKey)
+			if err != nil {
+				s.options.Logf("inspect peer endpoint health: %v", err)
+			} else if health.ConsecutiveReconnectFailures >= s.options.HealthFailureThreshold {
+				if err := s.RotatePeer(ctx, publicKey); err != nil {
+					s.options.Logf("rotate unhealthy peer endpoint: %v", err)
+				} else {
+					dnsFailures = 0
+					delay, exists := dnsDelay()
+					if !exists {
+						return
+					}
+					resetTimer(dnsTimer, delay)
+				}
+			}
+			resetTimer(healthTimer, s.options.Jitter(s.options.HealthPoll))
 		}
 	}
 }
@@ -616,6 +817,7 @@ func (s *Supervisor) StopContext(ctx context.Context) error {
 	s.mu.Lock()
 	cancel := s.cancel
 	s.cancel = nil
+	s.runCtx = nil
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -627,6 +829,9 @@ func (s *Supervisor) StopContext(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
+		s.mu.Lock()
+		clear(s.workers)
+		s.mu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("wait for endpoint refresh workers: %w", ctx.Err())

@@ -39,6 +39,14 @@ func (windowsHost) NewEndpointRouteLeaser(
 	return newWindowsRouteManager(name)
 }
 
+func (windowsHost) NewPeerRouteManager(
+	ctx context.Context,
+	name string,
+	cfg *config.Config,
+) (PeerRouteManager, error) {
+	return newWindowsPeerRouteManager(ctx, name, cfg)
+}
+
 func (windowsHost) ConfigureNetwork(ctx context.Context, name string, cfg *config.Config) (Cleanup, error) {
 	operations, err := windowsNetworkOperations(name, cfg)
 	if err != nil {

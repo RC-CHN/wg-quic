@@ -49,9 +49,16 @@ type PeerUpdate struct {
 // in-process test double.
 type CoreControl interface {
 	SetPeerEndpoint(context.Context, PeerUpdate) error
+	ClearPeerEndpoint(context.Context, string, uint64) error
+	FinalizePeerEndpoint(context.Context, string, uint64) error
 	WaitPeerReady(context.Context, PeerUpdate) error
 	RedialPeer(context.Context, string) error
 	Activate(context.Context) error
+	PeerHealth(context.Context, string) (PeerHealth, error)
+}
+
+type PeerHealth struct {
+	ConsecutiveReconnectFailures uint32
 }
 
 type PeerSpec struct {

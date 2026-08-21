@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/curve25519"
@@ -88,21 +89,29 @@ func DeriveWireGuardKey(localPrivate, remotePublic, preshared []byte) (Key, erro
 type SalamanderConn struct {
 	*net.UDPConn
 
-	keys     []Key
 	outbound map[netip.AddrPort]Key
+	keyMu    sync.Mutex
+	keyRefs  map[Key]int
+	keyOrder []Key
+	keyPairs map[Key]*digestPair
+	keySet   atomic.Pointer[[]receiveKey]
 
 	cacheMu sync.RWMutex
 	learned map[netip.AddrPort]Key
 
 	readMu        sync.Mutex
 	readBuf       []byte
-	readDigests   map[Key]*digestPair // guarded by readMu
 	batchConn     *ipv4.PacketConn
 	batchMessages []ipv4.Message
 	batchBuffers  [][]byte
 	writeMu       sync.Mutex
 	writeBuf      []byte
 	writeDigests  map[Key]*digestPair // guarded by writeMu
+}
+
+type receiveKey struct {
+	key  Key
+	pair *digestPair
 }
 
 // WrapKeyedSalamander wraps a UDP socket without adding configuration secrets.
@@ -115,9 +124,10 @@ func WrapKeyedSalamander(connection *net.UDPConn, peers []PeerKey) (*SalamanderC
 	result := &SalamanderConn{
 		UDPConn:      connection,
 		outbound:     make(map[netip.AddrPort]Key),
+		keyRefs:      make(map[Key]int),
+		keyPairs:     make(map[Key]*digestPair),
 		learned:      make(map[netip.AddrPort]Key),
 		readBuf:      make([]byte, maxUDPPayload),
-		readDigests:  make(map[Key]*digestPair),
 		batchConn:    ipv4.NewPacketConn(connection),
 		writeBuf:     make([]byte, maxUDPPayload),
 		writeDigests: make(map[Key]*digestPair),
@@ -126,13 +136,66 @@ func WrapKeyedSalamander(connection *net.UDPConn, peers []PeerKey) (*SalamanderC
 	for _, peer := range peers {
 		if _, ok := seen[peer.Key]; !ok {
 			seen[peer.Key] = struct{}{}
-			result.keys = append(result.keys, peer.Key)
+			result.addReceiveKeyLocked(peer.Key)
 		}
 		if peer.Endpoint.IsValid() {
 			result.outbound[canonicalAddrPort(peer.Endpoint)] = peer.Key
 		}
 	}
+	result.publishReceiveKeysLocked()
 	return result, nil
+}
+
+// AcquireReceiveKey registers one key for inbound Salamander decoding. The
+// immutable atomic snapshot lets blocked UDP readers observe additions and
+// removals without taking a lock held across ReadFrom.
+func (c *SalamanderConn) AcquireReceiveKey(key Key) func() {
+	c.keyMu.Lock()
+	c.addReceiveKeyLocked(key)
+	c.publishReceiveKeysLocked()
+	c.keyMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() { c.releaseReceiveKey(key) })
+	}
+}
+
+func (c *SalamanderConn) addReceiveKeyLocked(key Key) {
+	if c.keyRefs[key] == 0 {
+		c.keyOrder = append(c.keyOrder, key)
+		c.keyPairs[key] = newDigestPair(key)
+	}
+	c.keyRefs[key]++
+}
+
+func (c *SalamanderConn) releaseReceiveKey(key Key) {
+	c.keyMu.Lock()
+	defer c.keyMu.Unlock()
+	refs := c.keyRefs[key]
+	if refs <= 1 {
+		delete(c.keyRefs, key)
+		delete(c.keyPairs, key)
+		for index, candidate := range c.keyOrder {
+			if candidate == key {
+				c.keyOrder = append(c.keyOrder[:index], c.keyOrder[index+1:]...)
+				break
+			}
+		}
+	} else {
+		c.keyRefs[key] = refs - 1
+	}
+	c.publishReceiveKeysLocked()
+}
+
+func (c *SalamanderConn) publishReceiveKeysLocked() {
+	snapshot := make([]receiveKey, 0, len(c.keyOrder))
+	for _, key := range c.keyOrder {
+		if c.keyRefs[key] == 0 {
+			continue
+		}
+		snapshot = append(snapshot, receiveKey{key: key, pair: c.keyPairs[key]})
+	}
+	c.keySet.Store(&snapshot)
 }
 
 func (c *SalamanderConn) ReadFrom(output []byte) (int, net.Addr, error) {
@@ -321,8 +384,9 @@ func (c *SalamanderConn) keyForAddress(addr *net.UDPAddr) (Key, error) {
 	if found {
 		return key, nil
 	}
-	if len(c.keys) == 1 {
-		return c.keys[0], nil
+	keys := c.keySet.Load()
+	if keys != nil && len(*keys) == 1 {
+		return (*keys)[0].key, nil
 	}
 	return zero, fmt.Errorf("no Salamander key for destination %s", addrPort)
 }
@@ -374,16 +438,19 @@ func (c *SalamanderConn) decode(packet, output []byte) (int, Key, bool) {
 	}
 	salt := packet[:SalamanderSaltSize]
 	hint := packet[SalamanderSaltSize:SalamanderHeaderSize]
-	for _, key := range c.keys {
-		pair := digestPairFor(&c.readDigests, key)
-		expected := pair.deriveHint(salt)
+	keys := c.keySet.Load()
+	if keys == nil {
+		return 0, zero, false
+	}
+	for _, decoder := range *keys {
+		expected := decoder.pair.deriveHint(salt)
 		if subtle.ConstantTimeCompare(hint, expected[:]) != 1 {
 			continue
 		}
-		stream := pair.deriveStream(salt)
+		stream := decoder.pair.deriveStream(salt)
 		payload := packet[SalamanderHeaderSize:]
 		xorWords(output, payload, &stream)
-		return len(payload), key, true
+		return len(payload), decoder.key, true
 	}
 	return 0, zero, false
 }

@@ -167,6 +167,16 @@ AllowedIPs = 10.0.0.2/32
 	}
 }
 
+func TestMalformedDirectiveErrorDoesNotEchoCandidateText(t *testing.T) {
+	const secret = "candidate-secret-must-not-be-echoed"
+	input := "[Interface]\nPrivateKey = " + testKey(1) +
+		"\n# wg-quic: malformed " + secret + "\n"
+	_, err := Parse(strings.NewReader(input))
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("malformed directive error leaked candidate text: %v", err)
+	}
+}
+
 func TestRejectsUnknownWireGuardKey(t *testing.T) {
 	input := `[Interface]
 PrivateKey = ` + testKey(1) + `

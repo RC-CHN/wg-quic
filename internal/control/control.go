@@ -15,32 +15,37 @@ import (
 const requestTimeout = 5 * time.Second
 
 type Status struct {
-	Interface  string          `json:"interface"`
-	State      string          `json:"state"`
-	ListenPort uint16          `json:"listen_port"`
-	Carrier    string          `json:"carrier"`
-	FECMode    string          `json:"fec_mode"`
-	ObfsMode   string          `json:"obfs_mode"`
-	Addresses  []string        `json:"addresses,omitempty"`
-	Peers      []PeerStatus    `json:"peers,omitempty"`
-	Stats      telemetry.Stats `json:"stats"`
+	Interface    string          `json:"interface"`
+	State        string          `json:"state"`
+	ListenPort   uint16          `json:"listen_port"`
+	Carrier      string          `json:"carrier"`
+	FECMode      string          `json:"fec_mode"`
+	ObfsMode     string          `json:"obfs_mode"`
+	Addresses    []string        `json:"addresses,omitempty"`
+	Peers        []PeerStatus    `json:"peers,omitempty"`
+	Capabilities []string        `json:"capabilities,omitempty"`
+	Stats        telemetry.Stats `json:"stats"`
 }
 
 type PeerStatus struct {
-	PublicKey         string `json:"public_key"`
-	Endpoint          string `json:"endpoint,omitempty"`
-	Generation        uint64 `json:"generation"`
-	Session           string `json:"session"`
-	LatestHandshake   int64  `json:"latest_handshake,omitempty"`
-	LastRx            int64  `json:"last_rx,omitempty"`
-	LastTx            int64  `json:"last_tx,omitempty"`
-	LastActivity      int64  `json:"last_activity,omitempty"`
-	LastDirection     string `json:"last_activity_direction,omitempty"`
-	ReconnectAttempts uint64 `json:"reconnect_attempts,omitempty"`
-	ReconnectFailures uint64 `json:"reconnect_failures,omitempty"`
-	NextReconnect     int64  `json:"next_reconnect,omitempty"`
-	TransferRx        uint64 `json:"transfer_rx,omitempty"`
-	TransferTx        uint64 `json:"transfer_tx,omitempty"`
+	PublicKey                    string `json:"public_key"`
+	Endpoint                     string `json:"endpoint,omitempty"`
+	Generation                   uint64 `json:"generation"`
+	AuthenticatedGeneration      uint64 `json:"authenticated_endpoint_generation,omitempty"`
+	AuthenticatedEndpoint        string `json:"authenticated_endpoint,omitempty"`
+	Session                      string `json:"session"`
+	LatestHandshake              int64  `json:"latest_handshake,omitempty"`
+	LastRx                       int64  `json:"last_rx,omitempty"`
+	LastTx                       int64  `json:"last_tx,omitempty"`
+	LastActivity                 int64  `json:"last_activity,omitempty"`
+	LastDirection                string `json:"last_activity_direction,omitempty"`
+	ReconnectAttempts            uint64 `json:"reconnect_attempts,omitempty"`
+	ReconnectFailures            uint64 `json:"reconnect_failures,omitempty"`
+	ConsecutiveReconnectFailures uint32 `json:"consecutive_reconnect_failures,omitempty"`
+	NextReconnect                int64  `json:"next_reconnect,omitempty"`
+	TransferRx                   uint64 `json:"transfer_rx,omitempty"`
+	TransferTx                   uint64 `json:"transfer_tx,omitempty"`
+	FECPolicy                    string `json:"fec_policy,omitempty"`
 }
 
 type SetPeerEndpointRequest struct {
@@ -49,11 +54,31 @@ type SetPeerEndpointRequest struct {
 	Generation uint64 `json:"generation"`
 }
 
+type PeerMutation struct {
+	Operation           string   `json:"operation"`
+	PublicKey           string   `json:"public_key"`
+	PresharedKey        string   `json:"preshared_key,omitempty"`
+	AllowedIPs          []string `json:"allowed_ips,omitempty"`
+	Endpoint            string   `json:"endpoint,omitempty"`
+	PersistentKeepalive uint16   `json:"persistent_keepalive"`
+	FECPolicy           string   `json:"fec_policy,omitempty"`
+}
+
+type PeerSetRequest struct {
+	TransactionID string         `json:"transaction_id"`
+	Mutations     []PeerMutation `json:"mutations,omitempty"`
+}
+
 type Handler struct {
-	Status          func() Status
-	SetPeerEndpoint func(SetPeerEndpointRequest) error
-	RedialPeer      func(string) error
-	Activate        func() error
+	Status           func() Status
+	SetPeerEndpoint  func(SetPeerEndpointRequest) error
+	RedialPeer       func(string) error
+	Activate         func() error
+	PreparePeerSet   func(PeerSetRequest) error
+	CommitPeerSet    func(string) error
+	RollbackPeerSet  func(string) error
+	FinalizePeerSet  func(string) error
+	FinalizeEndpoint func(string, uint64) error
 }
 
 // Client is the transport-independent core control surface used by quick.
@@ -63,6 +88,11 @@ type Client interface {
 	SetPeerEndpoint(SetPeerEndpointRequest) error
 	RedialPeer(publicKey string) error
 	Activate() error
+	PreparePeerSet(PeerSetRequest) error
+	CommitPeerSet(transactionID string) error
+	RollbackPeerSet(transactionID string) error
+	FinalizePeerSet(transactionID string) error
+	FinalizePeerEndpoint(publicKey string, generation uint64) error
 }
 
 type LocalClient struct {
@@ -77,6 +107,9 @@ type request struct {
 	Operation       string                  `json:"operation"`
 	SetPeerEndpoint *SetPeerEndpointRequest `json:"set_peer_endpoint,omitempty"`
 	PublicKey       string                  `json:"public_key,omitempty"`
+	PeerSet         *PeerSetRequest         `json:"peer_set,omitempty"`
+	TransactionID   string                  `json:"transaction_id,omitempty"`
+	Generation      uint64                  `json:"generation,omitempty"`
 }
 
 type response struct {
@@ -214,9 +247,47 @@ func dispatch(handler Handler, req request) response {
 			return response{Error: err.Error()}
 		}
 		return response{}
+	case "prepare_peer_set":
+		if req.PeerSet == nil {
+			return response{Error: "peer_set payload is required"}
+		}
+		if handler.PreparePeerSet == nil {
+			return response{Error: "prepare_peer_set is not supported"}
+		}
+		if err := handler.PreparePeerSet(*req.PeerSet); err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{}
+	case "commit_peer_set":
+		return dispatchPeerSetTransition(handler.CommitPeerSet, req.TransactionID, "commit_peer_set")
+	case "rollback_peer_set":
+		return dispatchPeerSetTransition(handler.RollbackPeerSet, req.TransactionID, "rollback_peer_set")
+	case "finalize_peer_set":
+		return dispatchPeerSetTransition(handler.FinalizePeerSet, req.TransactionID, "finalize_peer_set")
+	case "finalize_peer_endpoint":
+		if handler.FinalizeEndpoint == nil {
+			return response{Error: "finalize_peer_endpoint is not supported"}
+		}
+		if err := handler.FinalizeEndpoint(req.PublicKey, req.Generation); err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{}
 	default:
 		return response{Error: fmt.Sprintf("unsupported control operation %q", req.Operation)}
 	}
+}
+
+func dispatchPeerSetTransition(handler func(string) error, transactionID, operation string) response {
+	if transactionID == "" {
+		return response{Error: "transaction_id is required"}
+	}
+	if handler == nil {
+		return response{Error: operation + " is not supported"}
+	}
+	if err := handler(transactionID); err != nil {
+		return response{Error: err.Error()}
+	}
+	return response{}
 }
 
 func (s *Server) Close() error {
@@ -280,6 +351,35 @@ func (c *LocalClient) RedialPeer(publicKey string) error {
 func (c *LocalClient) Activate() error {
 	var resp response
 	return c.call(request{Operation: "activate"}, &resp)
+}
+
+func (c *LocalClient) PreparePeerSet(peerSet PeerSetRequest) error {
+	var resp response
+	return c.call(request{Operation: "prepare_peer_set", PeerSet: &peerSet}, &resp)
+}
+
+func (c *LocalClient) CommitPeerSet(transactionID string) error {
+	return c.peerSetTransition("commit_peer_set", transactionID)
+}
+
+func (c *LocalClient) RollbackPeerSet(transactionID string) error {
+	return c.peerSetTransition("rollback_peer_set", transactionID)
+}
+
+func (c *LocalClient) FinalizePeerSet(transactionID string) error {
+	return c.peerSetTransition("finalize_peer_set", transactionID)
+}
+
+func (c *LocalClient) FinalizePeerEndpoint(publicKey string, generation uint64) error {
+	var resp response
+	return c.call(request{
+		Operation: "finalize_peer_endpoint", PublicKey: publicKey, Generation: generation,
+	}, &resp)
+}
+
+func (c *LocalClient) peerSetTransition(operation, transactionID string) error {
+	var resp response
+	return c.call(request{Operation: operation, TransactionID: transactionID}, &resp)
 }
 
 func (c *LocalClient) call(req request, resp *response) error {

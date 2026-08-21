@@ -270,7 +270,7 @@ func parsePeer(peer *Peer, key, value string) error {
 func parseDirective(cfg *Config, peer *Peer, directive string) error {
 	key, value, ok := strings.Cut(directive, "=")
 	if !ok {
-		return fmt.Errorf("invalid wg-quic directive %q", directive)
+		return errors.New("invalid wg-quic directive; expected key = value")
 	}
 	key, value = strings.TrimSpace(key), strings.TrimSpace(value)
 	if value == "" {

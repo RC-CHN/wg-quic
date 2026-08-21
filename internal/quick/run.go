@@ -10,7 +10,9 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/endpoint"
+	"github.com/RC-CHN/wg-quic/internal/management"
 	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/reconcile"
 )
 
 func Run(ctx context.Context, input, requestedName string) error {
@@ -92,6 +94,14 @@ func runWithHostReadyProgress(
 
 type quickConfigPolicy func(*config.Config) error
 
+type configSnapshotLoader interface {
+	LoadConfigSnapshot(string) (*config.Config, error)
+}
+
+type runtimePeerRouteCleaner interface {
+	Cleanup(context.Context) error
+}
+
 func runWithHostReadyProgressPolicy(
 	ctx context.Context,
 	input, requestedName string,
@@ -125,7 +135,11 @@ func runWithHostReadyLog(
 	if err != nil {
 		return err
 	}
-	cfg, err := config.ParseFile(configPath)
+	loadConfig := openSecureConfigSnapshot
+	if loader, ok := host.(configSnapshotLoader); ok {
+		loadConfig = loader.LoadConfigSnapshot
+	}
+	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
 	}
@@ -140,6 +154,10 @@ func runWithHostReadyLog(
 	// Resolve the automatic value once before creating the immutable core
 	// snapshot and applying host policy.
 	cfg.Interface.MTU = cfg.EffectiveMTU()
+	initialDesired, err := reconcile.FromConfig(cfg, nil)
+	if err != nil {
+		return fmt.Errorf("build initial desired state: %w", err)
+	}
 	runLogger.debugf(
 		"quick configuration: interface=%q config=%q addresses=%v dns=%v mtu=%d table=%q peers=%d hooks=%d/%d/%d/%d",
 		name, configPath, cfg.Interface.Addresses, cfg.Interface.DNS, cfg.Interface.MTU,
@@ -230,9 +248,24 @@ func runWithHostReadyLog(
 	if _, err := supervisor.Initialize(ctx); err != nil {
 		return err
 	}
+	peerRoutes, err := host.NewPeerRouteManager(ctx, name, cfg)
+	if err != nil {
+		return fmt.Errorf("create runtime peer route manager: %w", err)
+	}
 	runLogger.debugf("applying platform address, route, MTU, and DNS policy")
 	hostCleanupArmed = true
 	networkCleanup, err = host.ConfigureNetwork(ctx, name, cfg)
+	if cleaner, ok := peerRoutes.(runtimePeerRouteCleaner); ok {
+		platformCleanup := networkCleanup
+		networkCleanup = func(cleanupCtx context.Context) error {
+			routeErr := cleaner.Cleanup(cleanupCtx)
+			var platformErr error
+			if platformCleanup != nil {
+				platformErr = platformCleanup(cleanupCtx)
+			}
+			return errors.Join(routeErr, platformErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -247,6 +280,46 @@ func runWithHostReadyLog(
 			return fmt.Errorf("PostUp: %w", err)
 		}
 	}
+	coreClient := control.NewClient(host.ControlPath(name))
+	reconcileActive, missingCoreCapabilities, err := coreReconcileCapabilities(coreClient)
+	if err != nil {
+		return fmt.Errorf("negotiate core runtime capabilities: %w", err)
+	}
+	if !reconcileActive {
+		runLogger.logger.Printf(
+			"wg-quic-quick runtime peer reconciliation disabled for %s; core is missing capabilities %v",
+			name, missingCoreCapabilities,
+		)
+	}
+	executor, err := newReconcileExecutor(
+		ctx,
+		coreClient,
+		peerRoutes,
+		supervisorPeerEndpointTransactions{supervisor: supervisor},
+	)
+	if err != nil {
+		return fmt.Errorf("create runtime reconciliation executor: %w", err)
+	}
+	managementRuntime, err := startRuntimeManagement(
+		ctx,
+		host.ManagementPath(name),
+		name,
+		initialDesired,
+		supervisor,
+		runtimeManagementOptions{
+			CanonicalPath: configPath, Executor: executor,
+			ReconcileActive: reconcileActive, Core: coreClient,
+			Recovery: mergeRuntimeRecoveryStatus(routeLeaser, peerRoutes),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("start quick management endpoint: %w", err)
+	}
+	defer func() {
+		if err := managementRuntime.Close(); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close quick management endpoint: %w", err))
+		}
+	}()
 	if ready != nil {
 		ready()
 	}
@@ -260,6 +333,52 @@ func runWithHostReadyLog(
 		}
 		return errors.New("wg-quic core exited unexpectedly")
 	}
+}
+
+func mergeRuntimeRecoveryStatus(values ...any) management.RecoveryStatus {
+	result := management.RecoveryStatus{State: "clean"}
+	for _, value := range values {
+		provider, ok := value.(platform.RecoveryStatusProvider)
+		if !ok {
+			continue
+		}
+		status := provider.RecoveryStatus()
+		result.RetainedAmbiguousObjects += status.RetainedAmbiguousObjects
+		if status.State != "" && status.State != "clean" {
+			result.State = status.State
+		}
+		if status.Message != "" {
+			if result.Message != "" {
+				result.Message += "; "
+			}
+			result.Message += status.Message
+		}
+	}
+	return result
+}
+
+func coreReconcileCapabilities(client control.Client) (bool, []string, error) {
+	status, err := client.Status()
+	if err != nil {
+		return false, nil, err
+	}
+	available := make(map[string]struct{}, len(status.Capabilities))
+	for _, capability := range status.Capabilities {
+		available[capability] = struct{}{}
+	}
+	required := []string{
+		"typed_peer_transactions_v1",
+		"dynamic_obfs_keys",
+		"authenticated_endpoint_generation",
+		"dynamic_peer_fec_policy",
+	}
+	var missing []string
+	for _, capability := range required {
+		if _, exists := available[capability]; !exists {
+			missing = append(missing, capability)
+		}
+	}
+	return len(missing) == 0, missing, nil
 }
 
 func shutdownQuickRuntime(
