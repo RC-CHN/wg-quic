@@ -53,9 +53,52 @@ wg-quic-quick show wg0 --json
 sudo wg-quic-quick down wg0
 ```
 
-`show` 会显示当前数字端点、QUIC 会话状态、最近一次 WireGuard 握手、已认证
-收发活动、流量统计和传输/FEC 计数器。由于尚未实现运行时配置写回，
-`SaveConfig = true` 会被明确拒绝。
+当前开发版的 `show` 会优先读取 quick 管理端点，显示 desired generation/digest、
+持久配置漂移、配置域名与当前数字端点、DDNS 候选、已认证 endpoint generation、
+QUIC/WireGuard 活动、每 peer FEC 策略、待清理资源和传输计数；连接旧实例时会
+自动回退到 core-only 状态。
+
+运行时 peer reconciliation 以配置文件为持久来源，并由 capability 控制。以下
+命令存在于当前开发树；这并不表示已经发布的 v0.3.1 二进制一定声明了
+`peer_reconcile_v1`：
+
+```sh
+# 先原子替换 /etc/wg-quic/wg0.conf，再同步运行状态。
+sudo wg-quic-quick reload wg0 --json
+
+# 应用受保护的候选文件，成功后再由外部控制器提升为正式文件。
+sudo wg-quic-quick reconcile wg0 /protected/staging/wg0.conf \
+  --expected-epoch EPOCH --expected-generation N --request-id ID --json
+
+sudo wg-quic-quick refresh-endpoints wg0 --json
+wg-quic-quick transaction-status wg0 --request-id ID --json
+```
+
+状态 capability 允许时，peer 增删、普通 AllowedIPs、keepalive、endpoint、DDNS
+选择和每 peer FEC 策略都可热更新。接口密钥/地址/MTU/DNS/hooks/全局传输策略、
+PresharedKey 轮换和自动全隧道切换会在任何 mutation 前返回
+`restart_required`。`SaveConfig = true` 仍明确拒绝：运行时提交与配置文件持久化
+被刻意拆开，wg-quic 不会隐式重写含密钥的配置。完整契约见
+[`docs/RUNTIME-PEER-RECONCILIATION.md`](docs/RUNTIME-PEER-RECONCILIATION.md)。
+
+这里的“全平台”指同一协议和事务语义，不代表每种 CPU 都已经完成原生验收：
+
+| 运行平台族 | 热更新路径 | 跨进程所有权恢复 | 支持声明门槛 |
+|---|---|---|---|
+| Linux/systemd 或 OpenRC/直接 supervisor | root-only Unix 管理 socket 与增量 `ip` 路由 | 普通 peer 路由随 TUN 消失；自动策略路由切换需重启 | amd64 特权生命周期；arm64 需原生或全系统模拟后才能声明 runtime-verified |
+| OpenWrt ARM64/x86_64 | 由 procd reload 调用同一 Linux runtime | 同一 TUN 边界 | 两个实际安装的 APK 必须分别通过 QEMU reload/reboot/traffic fixture |
+| FreeBSD/OPNsense | Unix socket 与增量 `route` 操作 | root-only、带校验和的外层 endpoint 路由账本；peer 路由随 TUN 消失 | rc.d/configd 与每条 FreeBSD release train 分开验收 |
+| Windows amd64/arm64 | ACL 保护的 named pipe、typed core 事务和 IP Helper peer 路由 | endpoint 账本，加按 compartment/interface LUID 标识的每隧道 before/after/phase 日志 | x64 安装态 SCM/MSI 生命周期；arm64 在通过原生服务 fixture 前仅为 build/unit |
+
+当前开发树已经包含这四类适配器。Release notes 必须针对准确的 OS/架构使用
+`build-supported`、`unit-verified`、`runtime-verified` 或
+`integration-verified`；仅交叉编译绝不能提升支持等级。
+
+当前开发二进制已经在 OpenWrt 25.12.5 的 `armsr/armv8` 与 `x86/64` QEMU
+guest 中通过 `runtime-smoke`：包括 TUN 创建、procd 生命周期、hooks 顺序、peer
+增删、generation 推进以及 supervisor epoch 保持不变。该轮验证把本地构建的
+二进制安装到包路径，并未安装新构建的 APK，因此每个 target 的 APK
+安装/流量/重启 fixture 仍是正式 Release 支持声明的门槛。
 
 ## 创建第一个配置
 
@@ -148,6 +191,25 @@ sudo apt install ./wg-quic-desktop-v0.3.1-linux-amd64.deb
 
 Linux 需要可用的 TUN 设备和 `CAP_NET_ADMIN`。随包提供的 systemd unit 会授予
 所需 capability 和 `/dev/net/tun` 访问权限。
+
+运行时本身不依赖 systemd。使用 OpenRC、runit、s6、dinit、SysV 或自定义
+supervisor 时，以 root 运行 `wg-quic-quick run wg0`，然后仍通过同一 root-only
+Unix socket 使用 `show`、`reload`、`reconcile` 和 `refresh-endpoints`。systemd
+只是生命周期适配器之一，它的 `ExecReload` 同样调用与管理器无关的 CLI。
+v0.3.1 之后由当前开发树构建的 Linux 压缩包也包含 OpenRC 实例脚本：
+
+```sh
+sudo install -m 0755 wg-quic.openrc /etc/init.d/wg-quic
+sudo ln -s wg-quic /etc/init.d/wg-quic.wg0
+sudo rc-update add wg-quic.wg0 default
+sudo rc-service wg-quic.wg0 start
+sudo rc-service wg-quic.wg0 reload
+```
+
+使用 runit/s6/dinit 时，让它以前台方式监管 `wg-quic-quick run wg0`，并在服务
+控制钩子中调用 `wg-quic-quick reload wg0 --json`。supervisor 必须以 root
+运行（或提供等价的 TUN/网络策略权限）、转发终止信号，并且只在进程真正失败时
+重启；reload 返回 `restart_required` 时不能擅自重启。
 
 ## Windows
 
@@ -317,8 +379,8 @@ network/dnsmasq 中管理 DNS，不要在 profile 中添加 `DNS =`。隧道流�
 
 UCI/procd 和脱敏 JSON 状态接口已为未来 LuCI 应用准备好，但**当前尚未包含
 LuCI UI**。防火墙 hooks、SDK 和打包细节见
-[`packaging/openwrt/README.md`](packaging/openwrt/README.md)，ARM64 QEMU 流程见
-[`tests/openwrt/README.md`](tests/openwrt/README.md)。
+[`packaging/openwrt/README.md`](packaging/openwrt/README.md)，ARM64 与 x86_64
+QEMU 流程见 [`tests/openwrt/README.md`](tests/openwrt/README.md)。
 
 ## 架构和协议说明
 

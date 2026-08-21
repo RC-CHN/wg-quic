@@ -57,10 +57,59 @@ wg-quic-quick show wg0 --json
 sudo wg-quic-quick down wg0
 ```
 
-`show` reports the numeric peer endpoint, QUIC session state, latest WireGuard
-handshake, authenticated traffic activity, transfer totals, and transport/FEC
-counters. `SaveConfig = true` is rejected because runtime configuration
-mutation is not implemented.
+For a current development build, `show` first uses the quick management
+endpoint and reports desired generation/digests, persistent drift, configured
+and selected endpoints, DDNS candidates, authenticated endpoint generation,
+QUIC/WireGuard activity, per-peer FEC policy, cleanup work, and transport
+counters. It falls back to the legacy core-only view for an older instance.
+
+Runtime peer reconciliation is file-owned and capability-gated. These commands
+are present in the current development tree; their presence here is not a claim
+that the already-published v0.3.1 binaries expose `peer_reconcile_v1`:
+
+```sh
+# Atomically replace /etc/wg-quic/wg0.conf first, then reconcile it.
+sudo wg-quic-quick reload wg0 --json
+
+# Apply a protected candidate without promoting the file yet.
+sudo wg-quic-quick reconcile wg0 /protected/staging/wg0.conf \
+  --expected-epoch EPOCH --expected-generation N --request-id ID --json
+
+sudo wg-quic-quick refresh-endpoints wg0 --json
+wg-quic-quick transaction-status wg0 --request-id ID --json
+```
+
+Peer add/remove, ordinary AllowedIPs, keepalive, endpoint, DDNS selection, and
+per-peer FEC policy are live mutations when the status capability list permits
+them. Interface keys/addresses/MTU/DNS/hooks/global transport policy,
+preshared-key rotation, and automatic full-tunnel transitions return
+`restart_required` before mutation. `SaveConfig = true` remains rejected:
+runtime commit and durable file promotion are deliberately separate, and
+wg-quic never rewrites a secret-bearing profile implicitly. See
+[`docs/RUNTIME-PEER-RECONCILIATION.md`](docs/RUNTIME-PEER-RECONCILIATION.md)
+for the complete contract.
+
+“All-platform” here means the same protocol and transaction semantics, not an
+undifferentiated claim that every CPU has already completed native acceptance:
+
+| Runtime family | Live peer path | Crash-persistent ownership | Claim boundary |
+|---|---|---|---|
+| Linux/systemd or OpenRC/direct supervisor | Unix management socket plus incremental `ip` routes | ordinary peer routes disappear with the TUN; automatic policy-routing transitions require restart | amd64 privileged lifecycle; arm64 requires native/emulated lifecycle for a runtime claim |
+| OpenWrt ARM64/x86_64 | the same Linux runtime through procd reload | the same TUN boundary | each installed APK must pass its own QEMU reload/reboot/traffic fixture |
+| FreeBSD/OPNsense | Unix socket plus incremental `route` operations | root-owned/checksummed outer endpoint-route ledger; TUN peer routes disappear with the interface | rc.d/configd and each carried FreeBSD release train are tested separately |
+| Windows amd64/arm64 | ACL-protected named pipe, typed core transaction, and IP Helper peer routes | protected endpoint ledger plus a per-tunnel before/after/phase journal keyed by compartment and interface LUID | x64 installed SCM/MSI lifecycle; arm64 remains build/unit-only until a native service fixture passes |
+
+The current development tree contains all four adapters. Release notes must use
+`build-supported`, `unit-verified`, `runtime-verified`, or
+`integration-verified` per exact OS/architecture; cross-compilation alone never
+raises that label.
+
+The current development binaries have passed the OpenWrt 25.12.5
+`runtime-smoke` fixture in both `armsr/armv8` and `x86/64` QEMU guests: TUN
+creation, procd lifecycle, hook ordering, peer add/remove, generation advance,
+and unchanged supervisor epoch. Because that run installed locally built
+binaries into the package paths instead of installing a newly built APK, the
+per-target APK install/traffic/reboot fixture remains the release claim gate.
 
 ## Create a first profile
 
@@ -159,6 +208,27 @@ implementation.
 
 Linux requires a working TUN device and `CAP_NET_ADMIN`. The packaged systemd
 unit grants the required capability and access to `/dev/net/tun`.
+
+The runtime does not depend on systemd. Under OpenRC, runit, s6, dinit, SysV,
+or a custom supervisor, run `wg-quic-quick run wg0` as root and use the same
+`show`, `reload`, `reconcile`, and `refresh-endpoints` CLI against its root-only
+Unix socket. systemd is only one lifecycle adapter; its `ExecReload` invokes
+the same manager-neutral CLI. Development archives built after v0.3.1 also
+include an OpenRC instance script:
+
+```sh
+sudo install -m 0755 wg-quic.openrc /etc/init.d/wg-quic
+sudo ln -s wg-quic /etc/init.d/wg-quic.wg0
+sudo rc-update add wg-quic.wg0 default
+sudo rc-service wg-quic.wg0 start
+sudo rc-service wg-quic.wg0 reload
+```
+
+For runit/s6/dinit, supervise `wg-quic-quick run wg0` in the foreground and
+invoke `wg-quic-quick reload wg0 --json` from the service's control hook. The
+supervisor must run it as root (or supply equivalent TUN and network-policy
+privileges), forward termination signals, and restart only after an actual
+process failure—not when reload returns `restart_required`.
 
 ## Windows
 
@@ -330,7 +400,8 @@ The UCI/procd and redacted JSON status boundary is ready for a future LuCI
 application, but **no LuCI UI is included yet**. See
 [`packaging/openwrt/README.md`](packaging/openwrt/README.md) for firewall-hook,
 SDK, and package details, and
-[`tests/openwrt/README.md`](tests/openwrt/README.md) for the ARM64 QEMU fixture.
+[`tests/openwrt/README.md`](tests/openwrt/README.md) for the ARM64 and x86_64
+QEMU fixtures.
 
 ## Architecture and protocol notes
 
