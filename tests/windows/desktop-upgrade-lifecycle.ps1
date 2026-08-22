@@ -370,25 +370,22 @@ PersistentKeepalive = 1
         Get-FileHash -LiteralPath $installedConfig -Algorithm SHA256
     ).Hash
     if ($migratedConfigHash -ne $legacyConfigHash) {
-        throw "post-shutdown ProgramData migration changed the existing profile"
+        throw "post-shutdown ProgramData security changed the existing profile"
     }
-    $migratedConfigAcl = Get-Acl -LiteralPath $installedConfig
-    $migratedOwnerSid = (
-        [Security.Principal.NTAccount] $migratedConfigAcl.Owner
+    $securedConfigAcl = Get-Acl -LiteralPath $installedConfig
+    $securedOwnerSid = (
+        [Security.Principal.NTAccount] $securedConfigAcl.Owner
     ).Translate([Security.Principal.SecurityIdentifier]).Value
-    if (-not $migratedConfigAcl.AreAccessRulesProtected -or
-        $migratedOwnerSid -ne "S-1-5-18") {
+    if (-not $securedConfigAcl.AreAccessRulesProtected -or
+        $securedOwnerSid -ne "S-1-5-18") {
         throw (
-            "post-shutdown migrated profile is not protected/System-owned: " +
-            "protected=$($migratedConfigAcl.AreAccessRulesProtected) " +
-            "owner=$migratedOwnerSid"
+            "post-shutdown secured profile is not protected/System-owned: " +
+            "protected=$($securedConfigAcl.AreAccessRulesProtected) " +
+            "owner=$securedOwnerSid"
         )
     }
     $rootIdentityMigrated = Invoke-Native -FilePath "fsutil.exe" `
         -Arguments @("file", "queryFileID", $programDataRoot)
-    if ($rootIdentityMigrated -eq $rootIdentityBefore) {
-        throw "post-shutdown ProgramData migration did not replace legacy root"
-    }
     $quarantineMigrated = @(
         Get-ChildItem -LiteralPath $env:ProgramData -Directory `
             -Filter ".wg-quic-quarantine-*" -ErrorAction SilentlyContinue |
@@ -399,10 +396,56 @@ PersistentKeepalive = 1
         Compare-Object $quarantineBefore $quarantineMigrated |
             Where-Object { $_.SideIndicator -eq "=>" }
     )
-    if ($newQuarantines.Count -ne 1) {
+    if ($rootIdentityMigrated -ne $rootIdentityBefore -and
+        $newQuarantines.Count -ne 1) {
         throw (
             "post-shutdown migration created " +
             "$($newQuarantines.Count) quarantine roots; expected one"
+        )
+    }
+    if ($rootIdentityMigrated -eq $rootIdentityBefore) {
+        if ($newQuarantines.Count -ne 0) {
+            throw (
+                "trusted in-place ProgramData root unexpectedly created " +
+                "$($newQuarantines.Count) quarantine roots"
+            )
+        }
+        $rootAcl = Get-Acl -LiteralPath $programDataRoot
+        $rootOwnerSid = (
+            [Security.Principal.NTAccount] $rootAcl.Owner
+        ).Translate([Security.Principal.SecurityIdentifier]).Value
+        $rootRules = @($rootAcl.GetAccessRules(
+            $true,
+            $false,
+            [Security.Principal.SecurityIdentifier]
+        ))
+        $expectedRootSids = @("S-1-5-18", "S-1-5-32-544")
+        $invalidRootRules = @($rootRules | Where-Object {
+            $_.IdentityReference.Value -notin $expectedRootSids -or
+            $_.AccessControlType -ne
+                [Security.AccessControl.AccessControlType]::Allow -or
+            $_.FileSystemRights -ne
+                [Security.AccessControl.FileSystemRights]::FullControl -or
+            $_.InheritanceFlags -ne (
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [Security.AccessControl.InheritanceFlags]::ObjectInherit
+            ) -or
+            $_.PropagationFlags -ne
+                [Security.AccessControl.PropagationFlags]::None
+        })
+        if (-not $rootAcl.AreAccessRulesProtected -or
+            $rootOwnerSid -ne "S-1-5-18" -or
+            $rootRules.Count -ne 2 -or
+            $invalidRootRules.Count -ne 0) {
+            throw (
+                "in-place ProgramData root is not the strict trusted root: " +
+                "protected=$($rootAcl.AreAccessRulesProtected) " +
+                "owner=$rootOwnerSid rules=$($rootRules.Count) " +
+                "invalid=$($invalidRootRules.Count)"
+            )
+        }
+        Write-Host (
+            "post-shutdown profile reused an already strict ProgramData root"
         )
     }
 
