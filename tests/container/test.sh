@@ -50,6 +50,46 @@ start_iperf_server() {
 	done
 }
 
+wait_background_result() {
+	service=$1
+	result_path=$2
+	description=$3
+	attempt=0
+	while :; do
+		result=$($compose exec -T "$service" sh -c \
+			"test -f '$result_path' && cat '$result_path'" 2>/dev/null || true)
+		case "$result" in
+		passed) return 0 ;;
+		failed) fail_with_logs "$description" ;;
+		esac
+		attempt=$((attempt + 1))
+		if [ "$attempt" -ge 90 ]; then
+			fail_with_logs "$description did not finish"
+		fi
+		sleep 0.5
+	done
+}
+
+assert_unrelated_peer_stable() {
+	status=$($compose exec -T a wg-quic-quick show wg0 --json)
+	if [ "$(printf '%s\n' "$status" | jq -r '.supervisor_epoch')" != "$continuity_epoch" ]; then
+		fail_with_logs "peer reconciliation replaced the supervisor"
+	fi
+	peer=$(printf '%s\n' "$status" | jq -c --arg key "$continuity_peer_key" \
+		'.peers[] | select(.public_key == $key)')
+	if [ -z "$peer" ] || [ "$(printf '%s\n' "$peer" | jq -r '.session')" != established ]; then
+		fail_with_logs "unrelated peer lost its established session during reconciliation"
+	fi
+	if [ "$(printf '%s\n' "$peer" | jq -r '.authenticated_endpoint_generation')" != \
+		"$continuity_endpoint_generation" ]; then
+		fail_with_logs "unrelated peer endpoint generation changed during reconciliation"
+	fi
+	if [ "$(printf '%s\n' "$peer" | jq -r '.reconnect_attempts')" != \
+		"$continuity_reconnect_attempts" ]; then
+		fail_with_logs "unrelated peer reconnected during reconciliation"
+	fi
+}
+
 mkdir -p "$script_dir/build"
 (cd "$repo_dir" && CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic" ./cmd/wg-quic)
 (cd "$repo_dir" && CGO_ENABLED=0 go build -trimpath -o "$script_dir/build/wg-quic-quick" ./cmd/wg-quic-quick)
@@ -59,8 +99,10 @@ $compose up -d
 
 netns_a=$($compose exec -T a readlink /proc/1/ns/net)
 netns_b=$($compose exec -T b readlink /proc/1/ns/net)
-if [ "$netns_a" = "$netns_b" ]; then
-	fail_with_logs "A and B unexpectedly share a network namespace"
+netns_c=$($compose exec -T c readlink /proc/1/ns/net)
+if [ "$netns_a" = "$netns_b" ] || [ "$netns_a" = "$netns_c" ] ||
+	[ "$netns_b" = "$netns_c" ]; then
+	fail_with_logs "interoperability peers unexpectedly share a network namespace"
 fi
 
 wait_ping a 10.77.0.2 "" "A to B IPv4 tunnel ping did not become ready"
@@ -96,6 +138,104 @@ start_iperf_server a 10.77.0.1 5203
 $compose exec -T b iperf3 -c 10.77.0.1 -p 5203 -u -b 10M -t 2
 start_iperf_server b fd00:77::2 5204
 $compose exec -T a iperf3 -6 -c fd00:77::2 -p 5204 -u -b 10M -t 2
+
+# Reconcile a second peer while unrelated TCP and UDP flows remain active.
+# This is the privileged acceptance path for the guarantee that an add,
+# update, or removal preserves the existing peer object and QUIC session.
+continuity_peer_key=IMmmkZOkcoM8nTU8QQPTEreFZj0CIjIGvkQRxrk6sjA=
+continuity_status=$($compose exec -T a wg-quic-quick show wg0 --json)
+continuity_epoch=$(printf '%s\n' "$continuity_status" | jq -r '.supervisor_epoch')
+continuity_endpoint_generation=$(printf '%s\n' "$continuity_status" |
+	jq -r --arg key "$continuity_peer_key" \
+		'.peers[] | select(.public_key == $key) | .authenticated_endpoint_generation')
+continuity_reconnect_attempts=$(printf '%s\n' "$continuity_status" |
+	jq -r --arg key "$continuity_peer_key" \
+		'.peers[] | select(.public_key == $key) | .reconnect_attempts')
+test -n "$continuity_epoch"
+test "$continuity_endpoint_generation" -gt 0
+
+start_iperf_server b 10.77.0.2 5210
+start_iperf_server b 10.77.0.2 5211
+$compose exec -T a sh -c \
+	'rm -f /tmp/reconcile-tcp.result /tmp/reconcile-udp.result;
+	(iperf3 -c 10.77.0.2 -p 5210 -t 20 --get-server-output &&
+	 printf passed > /tmp/reconcile-tcp.result ||
+	 printf failed > /tmp/reconcile-tcp.result) >/tmp/reconcile-tcp.log 2>&1 &
+	(iperf3 -c 10.77.0.2 -p 5211 -u -b 5M -t 20 --get-server-output &&
+	 printf passed > /tmp/reconcile-udp.result ||
+	 printf failed > /tmp/reconcile-udp.result) >/tmp/reconcile-udp.log 2>&1 &'
+
+$compose exec -T a sh -ec \
+	'cp /run/wg-quic-test/a-with-c.conf /etc/wg-quic/reconcile.conf;
+	chown 0:0 /etc/wg-quic/reconcile.conf;
+	chmod 0600 /etc/wg-quic/reconcile.conf'
+add_result=$($compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 1 --request-id container-add-c --json)
+printf '%s\n' "$add_result" | jq -e \
+	'.result.state == "committed" and .result.generation == 2' >/dev/null
+wait_ping a 10.77.1.2 "" "newly reconciled peer did not pass traffic"
+assert_unrelated_peer_stable
+
+# The same request ID and content returns the cached terminal result even
+# though its original CAS generation is now old. Different content with the
+# same ID and an ordinary stale request must both fail without mutation.
+cached_add=$($compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 1 --request-id container-add-c --json)
+printf '%s\n' "$cached_add" | jq -e \
+	'.result.state == "committed" and .result.generation == 2' >/dev/null
+$compose exec -T a sh -ec \
+	'cp /run/wg-quic-test/a-update-c.conf /etc/wg-quic/reconcile.conf;
+	chown 0:0 /etc/wg-quic/reconcile.conf;
+	chmod 0600 /etc/wg-quic/reconcile.conf'
+if $compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 2 --request-id container-add-c --json >/dev/null 2>&1; then
+	fail_with_logs "request ID collision accepted different desired content"
+fi
+if $compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 1 --request-id container-stale-c --json >/dev/null 2>&1; then
+	fail_with_logs "stale desired generation mutated the running interface"
+fi
+test "$($compose exec -T a wg-quic-quick show wg0 --json |
+	jq -r '.desired_generation')" = 2
+assert_unrelated_peer_stable
+
+update_result=$($compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 2 --request-id container-update-c --json)
+printf '%s\n' "$update_result" | jq -e \
+	'.result.state == "committed" and .result.generation == 3' >/dev/null
+$compose exec -T a wg-quic-quick show wg0 --json | jq -e \
+	'.peers[] | select(.public_key == "4k+Xrgxvp1aRW7v4fZaoh2Bmgea6jQEpMIYSlnWU0Es=") |
+	 .fec_policy == "throughput" and (.configured_endpoint == "172.29.0.6:51820")' \
+	>/dev/null
+wait_ping a 10.77.1.2 "" "updated peer stopped passing traffic"
+assert_unrelated_peer_stable
+
+$compose exec -T a sh -ec \
+	'cp /run/wg-quic-test/wg0.conf /etc/wg-quic/reconcile.conf;
+	chown 0:0 /etc/wg-quic/reconcile.conf;
+	chmod 0600 /etc/wg-quic/reconcile.conf'
+remove_result=$($compose exec -T a wg-quic-quick reconcile wg0 \
+	/etc/wg-quic/reconcile.conf --expected-epoch "$continuity_epoch" \
+	--expected-generation 3 --request-id container-remove-c --json)
+printf '%s\n' "$remove_result" | jq -e \
+	'.result.state == "committed" and .result.generation == 4' >/dev/null
+test "$($compose exec -T a wg-quic-quick show wg0 --json |
+	jq '[.peers[]] | length')" = 1
+test "$($compose exec -T a wg-quic-quick show wg0 --json |
+	jq -r '.persistent_drift')" = false
+assert_unrelated_peer_stable
+
+wait_background_result a /tmp/reconcile-tcp.result \
+	"unrelated TCP flow failed during peer reconciliation"
+wait_background_result a /tmp/reconcile-udp.result \
+	"unrelated UDP flow failed during peer reconciliation"
+$compose exec -T a grep -Eq '0/[1-9][0-9]* \(0%\)' /tmp/reconcile-udp.log ||
+	fail_with_logs "unrelated UDP flow lost packets during peer reconciliation"
 
 # The imported suite raises the interface MTU far beyond Ethernet MTU. Verify
 # that a single large inner packet survives WireGuard encryption plus wg-quic

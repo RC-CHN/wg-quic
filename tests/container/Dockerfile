@@ -1,6 +1,6 @@
 FROM alpine:3.21
 
-RUN apk add --no-cache conntrack-tools iperf3 iproute2 iptables iputils
+RUN apk add --no-cache conntrack-tools iperf3 iproute2 iptables iputils jq
 
 COPY tests/container/build/wg-quic /usr/local/bin/wg-quic
 COPY tests/container/build/wg-quic-quick /usr/local/bin/wg-quic-quick

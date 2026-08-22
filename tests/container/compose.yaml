@@ -4,9 +4,12 @@ services:
     privileged: true
     volumes:
       - ./a.conf:/run/wg-quic-test/wg0.conf:ro
+      - ./a-with-c.conf:/run/wg-quic-test/a-with-c.conf:ro
+      - ./a-update-c.conf:/run/wg-quic-test/a-update-c.conf:ro
     networks:
       outer:
         ipv4_address: 172.29.0.2
+        ipv6_address: fd00:29::2
 
   b:
     image: wg-quic-e2e:local
@@ -37,6 +40,16 @@ services:
       outer:
         ipv4_address: 172.29.0.5
         ipv6_address: fd00:29::5
+
+  c:
+    image: wg-quic-e2e:local
+    privileged: true
+    volumes:
+      - ./c.conf:/run/wg-quic-test/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.6
+        ipv6_address: fd00:29::6
 
 networks:
   outer:

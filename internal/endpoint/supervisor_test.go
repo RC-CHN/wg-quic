@@ -11,15 +11,21 @@ import (
 )
 
 type fakeResolver struct {
-	mu        sync.Mutex
-	responses map[string][]Resolution
-	calls     []string
+	mu         sync.Mutex
+	responses  map[string][]Resolution
+	nextErrors []error
+	calls      []string
 }
 
 func (r *fakeResolver) Resolve(_ context.Context, host string) (Resolution, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, host)
+	if len(r.nextErrors) != 0 {
+		err := r.nextErrors[0]
+		r.nextErrors = r.nextErrors[1:]
+		return Resolution{}, err
+	}
 	responses := r.responses[host]
 	if len(responses) == 0 {
 		return Resolution{}, errors.New("no fake DNS response")
@@ -361,6 +367,50 @@ func TestSupervisorKeepsCurrentAddressWhenDNSOrderChanges(t *testing.T) {
 	}
 	if err := supervisor.Close(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSupervisorRetainsEstablishedEndpointWhenDNSRefreshFails(t *testing.T) {
+	for name, failure := range map[string]error{
+		"nxdomain": errors.New("lookup peer.example: no such host"),
+		"timeout":  context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			address := netip.MustParseAddr("192.0.2.10")
+			resolver := &fakeResolver{responses: map[string][]Resolution{
+				"peer.example": {{
+					Addresses: []netip.Addr{address}, RefreshAfter: time.Minute,
+				}},
+			}}
+			routes := &fakeRouteLeaser{}
+			core := &fakeCoreControl{}
+			supervisor := testSupervisor(
+				t, resolver, routes, core, "peer.example:443",
+			)
+			if _, err := supervisor.Initialize(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			resolver.mu.Lock()
+			resolver.nextErrors = []error{failure}
+			resolver.mu.Unlock()
+			if err := supervisor.RefreshPeer(context.Background(), "peer"); err == nil {
+				t.Fatalf("%s refresh unexpectedly succeeded", name)
+			}
+			want := netip.AddrPortFrom(address, 443)
+			if got := supervisor.Selected()["peer"]; got != want {
+				t.Fatalf("selected endpoint after %s = %s, want %s", name, got, want)
+			}
+			if len(core.updates) != 1 || len(routes.leases) != 1 ||
+				routes.leases[0].released {
+				t.Fatalf(
+					"%s refresh changed active ownership: updates=%#v leases=%#v",
+					name, core.updates, routes.leases,
+				)
+			}
+			if err := supervisor.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
