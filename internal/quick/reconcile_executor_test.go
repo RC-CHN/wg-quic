@@ -210,6 +210,111 @@ func TestReconcileExecutorRollsBackInReverseSafeOrder(t *testing.T) {
 	}
 }
 
+func TestReconcileExecutorFailureInjectionCoversEveryMutationBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		call string
+		code string
+	}{
+		{name: "route preparation", call: "routes.prepare", code: "route_lease_failed"},
+		{name: "core preparation", call: "core.prepare", code: "peer_prepare_failed"},
+		{name: "endpoint switch", call: "endpoints.prepare", code: "endpoint_resolution_failed"},
+		{name: "route removal commit", call: "routes.commit_removals", code: "commit_failed"},
+		{name: "core commit", call: "core.commit", code: "commit_failed"},
+		{name: "endpoint publication", call: "endpoints.commit", code: "commit_failed"},
+		{name: "route addition commit", call: "routes.commit_additions", code: "commit_failed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := &executorRecorder{fail: map[string]error{
+				test.call: errors.New("injected " + test.name + " failure"),
+			}}
+			executor, _ := newFakeReconcileExecutor(t, recorder)
+			result := executor.Execute(context.Background(), executorTransaction(t))
+			if result.State != reconcile.StateRolledBack || result.Failure == nil ||
+				result.Failure.Code != test.code || result.Failure.Committed ||
+				result.CleanupPending {
+				t.Fatalf("result = %#v", result)
+			}
+			if slices.Contains(recorder.calls, "endpoints.finalize") ||
+				slices.Contains(recorder.calls, "core.finalize") ||
+				slices.Contains(recorder.calls, "routes.finalize") {
+				t.Fatalf("failed transaction ran commit finalizers: %#v", recorder.calls)
+			}
+		})
+	}
+}
+
+func TestReconcileExecutorReportsEveryRollbackBoundaryAsDegraded(t *testing.T) {
+	tests := []struct {
+		name       string
+		trigger    string
+		rollback   string
+		mustNotRun string
+	}{
+		{
+			name: "endpoint rollback", trigger: "endpoints.prepare",
+			rollback: "endpoints.rollback",
+		},
+		{
+			name: "core rollback", trigger: "endpoints.prepare",
+			rollback: "core.rollback",
+		},
+		{
+			name: "route removal rollback", trigger: "endpoints.prepare",
+			rollback: "routes.rollback_removals",
+		},
+		{
+			name: "route addition rollback", trigger: "routes.commit_additions",
+			rollback: "routes.rollback_additions", mustNotRun: "core.rollback",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := &executorRecorder{fail: map[string]error{
+				test.trigger:  errors.New("trigger rollback"),
+				test.rollback: errors.New("injected " + test.name + " failure"),
+			}}
+			executor, _ := newFakeReconcileExecutor(t, recorder)
+			result := executor.Execute(context.Background(), executorTransaction(t))
+			if result.State != reconcile.StateDegraded || result.Failure == nil ||
+				result.Failure.Code != "rollback_failed" || !result.Failure.Degraded ||
+				result.Failure.Committed {
+				t.Fatalf("result = %#v", result)
+			}
+			if test.mustNotRun != "" && slices.Contains(recorder.calls, test.mustNotRun) {
+				t.Fatalf("unsafe rollback continued after %s failed: %#v", test.rollback, recorder.calls)
+			}
+		})
+	}
+}
+
+func TestReconcileExecutorQueuesEveryFinalizationBoundary(t *testing.T) {
+	for _, call := range []string{
+		"endpoints.finalize", "core.finalize", "routes.finalize",
+	} {
+		t.Run(call, func(t *testing.T) {
+			recorder := &executorRecorder{fail: map[string]error{
+				call: errors.New("injected finalization failure"),
+			}}
+			executor, _ := newFakeReconcileExecutor(t, recorder)
+			result := executor.Execute(context.Background(), executorTransaction(t))
+			if result.State != reconcile.StateCommitted || !result.CleanupPending ||
+				result.Failure == nil || result.Failure.Code != "cleanup_pending" ||
+				!result.Failure.Committed || executor.CleanupPending() != 1 {
+				t.Fatalf("result = %#v, cleanup=%d", result, executor.CleanupPending())
+			}
+			for _, finalizer := range []string{
+				"endpoints.finalize", "core.finalize", "routes.finalize",
+			} {
+				if !slices.Contains(recorder.calls, finalizer) {
+					t.Fatalf("%s failure skipped %s: %#v", call, finalizer, recorder.calls)
+				}
+			}
+		})
+	}
+}
+
 func TestReconcileExecutorRetainsCoreWhenNewRouteCannotBeWithdrawn(t *testing.T) {
 	recorder := &executorRecorder{fail: map[string]error{
 		"routes.commit_additions":   errors.New("route add failed"),

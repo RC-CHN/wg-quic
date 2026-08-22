@@ -110,6 +110,146 @@ func TestWindowsPeerRouteJournalRecoversProvenAndRetainsPendingAdd(t *testing.T)
 	}
 }
 
+func TestWindowsPeerRouteJournalRecoversEveryDurableTransactionPhase(t *testing.T) {
+	tests := []struct {
+		name             string
+		phase            peerRouteJournalPhase
+		removalsApplied  bool
+		additionsApplied bool
+		wantAfter        bool
+		wantAmbiguous    int
+	}{
+		{name: "prepared", phase: peerRouteJournalPrepared, wantAfter: true, wantAmbiguous: 1},
+		{name: "removing", phase: peerRouteJournalRemoving, wantAfter: true, wantAmbiguous: 1},
+		{name: "removed", phase: peerRouteJournalRemoved, removalsApplied: true, wantAfter: true, wantAmbiguous: 1},
+		{name: "adding", phase: peerRouteJournalAdding, removalsApplied: true, wantAfter: true, wantAmbiguous: 1},
+		{name: "committed", phase: peerRouteJournalCommitted, removalsApplied: true, additionsApplied: true},
+		{name: "rollback additions", phase: peerRouteJournalRollbackAdditions, removalsApplied: true, additionsApplied: true},
+		{name: "rollback removals", phase: peerRouteJournalRollbackRemovals, removalsApplied: true, wantAfter: true, wantAmbiguous: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := testWindowsPeerRouteStore(t, root)
+			before := netip.MustParsePrefix("10.11.0.0/16")
+			after := netip.MustParsePrefix("10.12.0.0/16")
+			beforeKey, _ := windowsPeerRouteKey(1, 77, before)
+			afterKey, _ := windowsPeerRouteKey(1, 77, after)
+			system := &fakeWindowsRouteSystem{
+				selected: make(map[netip.Addr]windowsSelectedRoute),
+				routes: map[windowsRouteKey]windowsSelectedRoute{
+					beforeKey: {Key: beforeKey},
+					afterKey:  {Key: afterKey},
+				},
+			}
+			path := filepath.Join(store.stateDirectory, "peer-routes-phases.json")
+			journal := testWindowsPeerRouteJournal(path, store, system)
+			if err := journal.Begin(
+				t.Context(), "old-epoch:request", []netip.Prefix{before}, []netip.Prefix{after},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if test.phase != peerRouteJournalPrepared {
+				if err := journal.Mark(
+					t.Context(), test.phase, test.removalsApplied, test.additionsApplied,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			recovered := testWindowsPeerRouteJournal(path, store, system)
+			if err := recovered.recover(t.Context(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := system.routes[beforeKey]; exists {
+				t.Fatal("recovery retained the proven pre-transaction route")
+			}
+			if _, exists := system.routes[afterKey]; exists != test.wantAfter {
+				t.Fatalf("post-transaction route exists=%t, want %t", exists, test.wantAfter)
+			}
+			status := recovered.RecoveryStatus()
+			if status.RetainedAmbiguousObjects != test.wantAmbiguous {
+				t.Fatalf("recovery status = %#v", status)
+			}
+			wantState := "clean"
+			if test.wantAmbiguous != 0 {
+				wantState = "degraded"
+			}
+			if status.State != wantState {
+				t.Fatalf("recovery state = %q, want %q", status.State, wantState)
+			}
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("terminal recovery retained the active journal: %v", err)
+			}
+		})
+	}
+}
+
+func TestWindowsPeerRouteJournalAdoptsCanonicalInterruptedAdd(t *testing.T) {
+	root := t.TempDir()
+	store := testWindowsPeerRouteStore(t, root)
+	before := netip.MustParsePrefix("10.21.0.0/16")
+	after := netip.MustParsePrefix("10.22.0.0/16")
+	beforeKey, _ := windowsPeerRouteKey(1, 77, before)
+	afterKey, _ := windowsPeerRouteKey(1, 77, after)
+	system := &fakeWindowsRouteSystem{
+		selected: make(map[netip.Addr]windowsSelectedRoute),
+		routes: map[windowsRouteKey]windowsSelectedRoute{
+			beforeKey: {Key: beforeKey},
+			afterKey:  {Key: afterKey},
+		},
+	}
+	path := filepath.Join(store.stateDirectory, "peer-routes-adopt.json")
+	journal := testWindowsPeerRouteJournal(path, store, system)
+	if err := journal.Begin(
+		t.Context(), "old-epoch:request", []netip.Prefix{before}, []netip.Prefix{after},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Mark(t.Context(), peerRouteJournalAdding, true, false); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered := testWindowsPeerRouteJournal(path, store, system)
+	if err := recovered.recover(t.Context(), []netip.Prefix{after}); err != nil {
+		t.Fatal(err)
+	}
+	if len(system.routes) != 0 {
+		t.Fatalf("canonical adoption did not clear the old projection before reapply: %#v", system.routes)
+	}
+	if status := recovered.RecoveryStatus(); status.State != "clean" ||
+		status.RetainedAmbiguousObjects != 0 {
+		t.Fatalf("canonical adoption recovery status = %#v", status)
+	}
+}
+
+func testWindowsPeerRouteStore(t *testing.T, root string) *windowsDiskRouteStore {
+	t.Helper()
+	store := &windowsDiskRouteStore{
+		stateDirectory:  filepath.Join(root, "state"),
+		ownersDirectory: filepath.Join(root, "state", "owners"),
+		ledgerPath:      filepath.Join(root, "state", windowsRouteLedgerFile),
+		backupPath:      filepath.Join(root, "state", windowsRouteBackupFile),
+		lockPath:        filepath.Join(root, "state", windowsRouteLockFile),
+	}
+	if err := store.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func testWindowsPeerRouteJournal(
+	path string,
+	store *windowsDiskRouteStore,
+	system windowsRouteSystem,
+) *windowsPeerRouteJournal {
+	return &windowsPeerRouteJournal{
+		tunnel: "office", interfaceLUID: 77, compartmentID: 1,
+		path: path, store: store, system: system,
+		recovery: RecoveryStatus{State: "clean"},
+	}
+}
+
 func TestWindowsPeerRouteJournalQuarantinesIdentityMismatch(t *testing.T) {
 	root := t.TempDir()
 	store := &windowsDiskRouteStore{
