@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## v0.3.2 - 2026-08-22
+
+Transactional runtime reconciliation and cross-platform recovery release.
+
+- Added transactional live peer reconciliation so complete desired profiles
+  can add, update, and remove peers without restarting the supervisor or TUN;
+  epoch/generation compare-and-swap, request IDs, transaction recovery, and
+  protected snapshots make retries deterministic.
+- Added automatic and administrative DDNS endpoint refresh, candidate and
+  generation tracking, authenticated endpoint reporting, and roaming-aware
+  status so inbound or migrated sessions remain visible as established.
+- Added a manager-neutral privileged management protocol and CLI operations
+  for status, reload, reconcile, transaction lookup, and endpoint refresh on
+  Unix sockets and ACL-protected Windows named pipes.
+- Integrated in-place reload with systemd, OpenRC, FreeBSD rc.d, OpenWrt
+  procd, OPNsense configd, and Windows services, including crash-safe route
+  journals, rollback, startup recovery, and shutdown lifetime ordering.
+- Hardened Windows runtime migration, trusted installed roots, named-pipe
+  ownership, route persistence, and cross-process recovery invariants.
+- Expanded the OpenWrt ARM64 and x86_64 QEMU fixtures to install exact CI APKs
+  and verify TUN dependencies, procd, PostUp/PostDown, encrypted bidirectional
+  traffic, live peer changes, reboot recovery, and uninstall cleanup.
+- Made OPNsense QEMU validation accept exact CI packages, wait for all peer
+  readiness boundaries, keep test profiles out of world-writable directories,
+  and verify Web/API, uninstall, syslog-route cleanup, and reinstall on 26.1
+  and 26.7.
+- Worked around the OPNsense 26.1 first-install syslog reload race by explicitly
+  refreshing routes after package installation and removal.
+- Added the cross-platform reconciliation and recovery design, full local API
+  and DDNS usage documentation, and admission evidence for each supported
+  service manager.
+
 ## v0.3.1 - 2026-08-20
 
 OpenWrt packaging and supervised host-policy correction release.
