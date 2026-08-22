@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
@@ -18,11 +19,24 @@ type RunOptions struct {
 	Debug          bool
 	DeferEndpoints bool
 	Snapshot       io.Reader
+	// SupervisorFD is an internal inherited descriptor whose writer is owned
+	// by wg-quic-quick. EOF means the privileged supervisor disappeared, so
+	// the core must release its TUN and process-local transaction state.
+	SupervisorFD uintptr
 }
 
 // Run starts only the userspace data plane. It does not assign addresses,
 // install routes or DNS, execute hooks, or invoke a service manager.
 func Run(ctx context.Context, configPath string, options RunOptions) error {
+	if options.SupervisorFD != 0 {
+		lifetime := os.NewFile(options.SupervisorFD, "wg-quic-supervisor-lifetime")
+		if lifetime == nil {
+			return errors.New("supervisor lifetime descriptor is unavailable")
+		}
+		var stopSupervisorWatch context.CancelFunc
+		ctx, stopSupervisorWatch = supervisorLifetimeContext(ctx, lifetime)
+		defer stopSupervisorWatch()
+	}
 	cfg, err := loadConfiguration(configPath, options)
 	if err != nil {
 		return err

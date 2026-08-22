@@ -100,10 +100,19 @@ $compose up -d
 netns_a=$($compose exec -T a readlink /proc/1/ns/net)
 netns_b=$($compose exec -T b readlink /proc/1/ns/net)
 netns_c=$($compose exec -T c readlink /proc/1/ns/net)
+netns_lifetime=$($compose exec -T lifetime readlink /proc/1/ns/net)
 if [ "$netns_a" = "$netns_b" ] || [ "$netns_a" = "$netns_c" ] ||
-	[ "$netns_b" = "$netns_c" ]; then
+	[ "$netns_b" = "$netns_c" ] || [ "$netns_a" = "$netns_lifetime" ]; then
 	fail_with_logs "interoperability peers unexpectedly share a network namespace"
 fi
+
+# Kill only wg-quic-quick while leaving the container/init process alive. The
+# core must observe EOF on its inherited supervisor descriptor, exit, and
+# release wg0 without relying on a service-manager cgroup.
+$compose exec -T lifetime sh -ec \
+	'test -s /tmp/wg-quic-quick.pid; xargs kill -KILL </tmp/wg-quic-quick.pid'
+wait_background_result lifetime /tmp/parent-death.result \
+	"core or TUN survived abrupt quick supervisor termination"
 
 wait_ping a 10.77.0.2 "" "A to B IPv4 tunnel ping did not become ready"
 wait_ping a fd00:77::2 6 "A to B IPv6 tunnel ping did not become ready"

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 )
 
 type coreLaunch struct {
@@ -14,6 +15,7 @@ type coreLaunch struct {
 	Snapshot       []byte
 	DeferEndpoints bool
 	Debug          bool
+	SupervisorFD   uintptr
 }
 
 func coreCommand(executable string, launch coreLaunch) (*exec.Cmd, error) {
@@ -30,6 +32,9 @@ func coreCommand(executable string, launch coreLaunch) (*exec.Cmd, error) {
 	}
 	if launch.Debug {
 		args = append(args, "--debug")
+	}
+	if launch.SupervisorFD != 0 {
+		args = append(args, "--supervisor-fd", strconv.FormatUint(uint64(launch.SupervisorFD), 10))
 	}
 	cmd := exec.Command(executable, args...)
 	cmd.Stdin = bytes.NewReader(launch.Snapshot)

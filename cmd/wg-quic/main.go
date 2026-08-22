@@ -102,7 +102,7 @@ func parseRunArgs(args []string) (string, core.RunOptions, error) {
 			}
 			options.Snapshot = os.Stdin
 			i++
-		case "--name", "--fwmark":
+		case "--name", "--fwmark", "--supervisor-fd":
 			if i+1 >= len(args) {
 				return "", core.RunOptions{}, fmt.Errorf("%s requires a value", args[i])
 			}
@@ -116,11 +116,23 @@ func parseRunArgs(args []string) (string, core.RunOptions, error) {
 				}
 				mark := uint32(value)
 				options.FwMark = &mark
+			case "--supervisor-fd":
+				value, err := strconv.ParseUint(args[i+1], 10, 31)
+				if err != nil || value < 3 {
+					return "", core.RunOptions{}, errors.New("invalid --supervisor-fd")
+				}
+				if options.SupervisorFD != 0 {
+					return "", core.RunOptions{}, errors.New("--supervisor-fd was specified more than once")
+				}
+				options.SupervisorFD = uintptr(value)
 			}
 			i += 2
 		default:
 			return "", core.RunOptions{}, fmt.Errorf("unknown option %q", args[i])
 		}
+	}
+	if options.SupervisorFD != 0 && options.Snapshot == nil {
+		return "", core.RunOptions{}, errors.New("--supervisor-fd requires --config-snapshot-stdin")
 	}
 	return configPath, options, nil
 }

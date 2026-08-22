@@ -51,6 +51,18 @@ services:
         ipv4_address: 172.29.0.6
         ipv6_address: fd00:29::6
 
+  lifetime:
+    image: wg-quic-e2e:local
+    privileged: true
+    environment:
+      WG_QUIC_TEST_PARENT_DEATH: "1"
+    volumes:
+      - ./lifetime.conf:/run/wg-quic-test/wg0.conf:ro
+    networks:
+      outer:
+        ipv4_address: 172.29.0.7
+        ipv6_address: fd00:29::7
+
 networks:
   outer:
     enable_ipv6: true

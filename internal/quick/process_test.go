@@ -11,7 +11,7 @@ func TestCoreCommandCarriesSnapshotOnlyOnStdin(t *testing.T) {
 	snapshot := []byte(`{"private_key":"must-not-appear-in-argv"}`)
 	cmd, err := coreCommand("wg-quic", coreLaunch{
 		ConfigPath: "wg0.conf", Name: "wg0", Snapshot: snapshot,
-		DeferEndpoints: true, Debug: true,
+		DeferEndpoints: true, Debug: true, SupervisorFD: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -19,6 +19,7 @@ func TestCoreCommandCarriesSnapshotOnlyOnStdin(t *testing.T) {
 	wantArgs := []string{
 		"wg-quic", "run", "wg0.conf", "--name", "wg0",
 		"--config-snapshot-stdin", "--defer-endpoints", "--debug",
+		"--supervisor-fd", "3",
 	}
 	if !slices.Equal(cmd.Args, wantArgs) {
 		t.Fatalf("core command args = %#v, want %#v", cmd.Args, wantArgs)

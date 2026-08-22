@@ -6,13 +6,25 @@ func TestParseRunArgsSupportsDebugAnywhereAfterConfig(t *testing.T) {
 	path, options, err := parseRunArgs([]string{
 		`C:\ProgramData\wg-quic\interfaces\wg0.conf`,
 		"--debug", "--defer-endpoints", "--config-snapshot-stdin", "--name", "wg0", "--fwmark", "17",
+		"--supervisor-fd", "3",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path == "" || options.Name != "wg0" || options.FwMark == nil || *options.FwMark != 17 ||
-		!options.Debug || !options.DeferEndpoints || options.Snapshot == nil {
+		!options.Debug || !options.DeferEndpoints || options.Snapshot == nil || options.SupervisorFD != 3 {
 		t.Fatalf("unexpected parsed arguments: path=%q options=%+v", path, options)
+	}
+}
+
+func TestParseRunArgsRestrictsSupervisorFDToSnapshotChild(t *testing.T) {
+	if _, _, err := parseRunArgs([]string{"wg0.conf", "--supervisor-fd", "3"}); err == nil {
+		t.Fatal("accepted a supervisor descriptor for a direct core invocation")
+	}
+	if _, _, err := parseRunArgs([]string{
+		"wg0.conf", "--config-snapshot-stdin", "--supervisor-fd", "2",
+	}); err == nil {
+		t.Fatal("accepted a standard descriptor as the supervisor lifetime pipe")
 	}
 }
 
