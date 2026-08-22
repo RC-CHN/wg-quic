@@ -122,6 +122,10 @@ type Coordinator struct {
 	mu          sync.Mutex
 	ctx         context.Context
 	cancel      context.CancelFunc
+	closeOnce   sync.Once
+	closeDone   chan struct{}
+	closeErr    error
+	workers     sync.WaitGroup
 	executor    Executor
 	options     Options
 	epoch       string
@@ -131,6 +135,8 @@ type Coordinator struct {
 	entries     map[string]*requestEntry
 	active      string
 	last        *Result
+	closed      bool
+	shutdownID  string
 }
 
 type requestEntry struct {
@@ -181,6 +187,7 @@ func NewCoordinator(
 		ctx: runCtx, cancel: cancel, executor: executor, options: options,
 		epoch: epoch, fingerprint: fingerprintKey, generation: 1,
 		current: initial.clone(), entries: make(map[string]*requestEntry),
+		closeDone: make(chan struct{}),
 	}, nil
 }
 
@@ -203,8 +210,34 @@ func defaultCoordinatorOptions(options Options) Options {
 	return options
 }
 
-func (c *Coordinator) Close() {
-	c.cancel()
+func (c *Coordinator) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		c.shutdownID = c.active
+		c.cancel()
+		c.mu.Unlock()
+
+		// Executors receive the cancelled supervisor context, but their
+		// compensating rollback uses its own bounded cleanup context. Do not let
+		// host teardown race that rollback.
+		c.workers.Wait()
+		c.mu.Lock()
+		if c.shutdownID != "" {
+			if entry := c.entries[c.shutdownID]; entry != nil &&
+				entry.result.State == StateDegraded {
+				message := "reconciliation rollback remained degraded during supervisor shutdown"
+				if entry.result.Failure != nil && entry.result.Failure.Message != "" {
+					message += ": " + entry.result.Failure.Message
+				}
+				c.closeErr = errors.New(message)
+			}
+		}
+		c.mu.Unlock()
+		close(c.closeDone)
+	})
+	<-c.closeDone
+	return c.closeErr
 }
 
 // Submit registers the transaction before executing it. Waiting is bound to
@@ -236,6 +269,10 @@ func (c *Coordinator) Submit(ctx context.Context, request Request) (Result, erro
 		}
 		c.mu.Unlock()
 		return c.waitForEntry(ctx, existing)
+	}
+	if c.closed {
+		c.mu.Unlock()
+		return Result{}, errors.New("reconciliation coordinator is closed")
 	}
 
 	entry := &requestEntry{
@@ -297,6 +334,7 @@ func (c *Coordinator) Submit(ctx context.Context, request Request) (Result, erro
 	}
 	transaction.progress = func(state State) { c.setProgress(entry, state) }
 	deadline := c.operationDeadline(now, request.Deadline)
+	c.workers.Add(1)
 	c.mu.Unlock()
 
 	go c.execute(entry, transaction, deadline)
@@ -344,6 +382,7 @@ func (c *Coordinator) Current() *Desired {
 }
 
 func (c *Coordinator) execute(entry *requestEntry, transaction Transaction, deadline time.Time) {
+	defer c.workers.Done()
 	operationCtx, cancel := context.WithDeadline(c.ctx, deadline)
 	defer cancel()
 	c.setProgress(entry, StatePreparing)

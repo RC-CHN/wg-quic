@@ -61,7 +61,7 @@ func testRuntimeManagement(t *testing.T, refresher endpointRefresher) *runtimeMa
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(coordinator.Close)
+	t.Cleanup(func() { _ = coordinator.Close() })
 	return &runtimeManagement{
 		name: "wg0", coordinator: coordinator, refresher: refresher,
 		canonicalDigest: initial.Digest(),

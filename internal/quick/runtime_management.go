@@ -2,6 +2,7 @@ package quick
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -102,7 +103,7 @@ func startRuntimeManagement(
 	}
 	server, err := management.Start(ctx, path, management.HandlerFunc(runtime.handle))
 	if err != nil {
-		coordinator.Close()
+		_ = coordinator.Close()
 		return nil, err
 	}
 	runtime.server = server
@@ -424,9 +425,9 @@ func (r *runtimeManagement) Close() error {
 	if r == nil {
 		return nil
 	}
-	r.coordinator.Close()
+	coordinatorErr := r.coordinator.Close()
 	if r.server == nil {
-		return nil
+		return coordinatorErr
 	}
-	return r.server.Close()
+	return errors.Join(coordinatorErr, r.server.Close())
 }

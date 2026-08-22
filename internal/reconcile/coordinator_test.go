@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,7 +42,7 @@ func newTestCoordinator(
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(coordinator.Close)
+	t.Cleanup(func() { _ = coordinator.Close() })
 	return coordinator
 }
 
@@ -88,6 +89,95 @@ func TestCoordinatorCommitsOnceAndReturnsCachedResultBeforeCAS(t *testing.T) {
 	status := coordinator.Status()
 	if status.Generation != 2 || status.DesiredDigest != desired.Digest() {
 		t.Fatalf("coordinator status = %#v", status)
+	}
+}
+
+func TestCoordinatorCloseWaitsForCancelledTransactionRollback(t *testing.T) {
+	initial := coordinatorDesired(t, "old.example:443", 0)
+	desired := coordinatorDesired(t, "new.example:443", 0)
+	started := make(chan struct{})
+	rollback := make(chan struct{})
+	executor := ExecuteFunc(func(ctx context.Context, _ Transaction) ApplyResult {
+		close(started)
+		<-ctx.Done()
+		<-rollback
+		return ApplyResult{
+			State: StateRolledBack,
+			Failure: &Failure{
+				Code: "operation_cancelled", Stage: StateRollingBack,
+				Message: ctx.Err().Error(),
+			},
+		}
+	})
+	coordinator, err := NewCoordinator(context.Background(), initial, executor, Options{
+		Epoch: "shutdown-epoch", FingerprintKey: []byte("99999999999999999999999999999999"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultDone := make(chan Result, 1)
+	go func() {
+		result, _ := coordinator.Submit(context.Background(), Request{
+			ExpectedEpoch: "shutdown-epoch", ExpectedGeneration: 1,
+			RequestID: "shutdown-request", Desired: desired,
+		})
+		resultDone <- result
+	}()
+	<-started
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- coordinator.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned before rollback completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(rollback)
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-resultDone; result.State != StateRolledBack || result.Generation != 1 {
+		t.Fatalf("cancelled shutdown result = %#v", result)
+	}
+	if _, err := coordinator.Submit(context.Background(), Request{
+		ExpectedEpoch: "shutdown-epoch", ExpectedGeneration: 1,
+		RequestID: "after-close", Desired: desired,
+	}); err == nil {
+		t.Fatal("closed coordinator accepted a new transaction")
+	}
+}
+
+func TestCoordinatorCloseReportsDegradedShutdownRollback(t *testing.T) {
+	initial := coordinatorDesired(t, "old.example:443", 0)
+	desired := coordinatorDesired(t, "new.example:443", 0)
+	started := make(chan struct{})
+	coordinator, err := NewCoordinator(
+		context.Background(), initial,
+		ExecuteFunc(func(ctx context.Context, _ Transaction) ApplyResult {
+			close(started)
+			<-ctx.Done()
+			return ApplyResult{
+				State: StateDegraded,
+				Failure: &Failure{
+					Code: "rollback_failed", Stage: StateRollingBack,
+					Degraded: true, Message: "owned route could not be restored",
+				},
+			}
+		}),
+		Options{Epoch: "degraded-epoch", FingerprintKey: []byte("88888888888888888888888888888888")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = coordinator.Submit(context.Background(), Request{
+			ExpectedEpoch: "degraded-epoch", ExpectedGeneration: 1,
+			RequestID: "degraded-shutdown", Desired: desired,
+		})
+	}()
+	<-started
+	if err := coordinator.Close(); err == nil ||
+		!strings.Contains(err.Error(), "owned route could not be restored") {
+		t.Fatalf("degraded Close error = %v", err)
 	}
 }
 
