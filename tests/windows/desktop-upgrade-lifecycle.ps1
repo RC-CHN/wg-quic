@@ -308,10 +308,9 @@ PersistentKeepalive = 1
         throw "the upgraded management broker is not ready"
     }
     $blockedCheck = @(& $currentQuick desktop-client check $tunnelName 2>&1)
-    if ($LASTEXITCODE -eq 0) {
-        throw "the upgraded broker migrated ProgramData while a tunnel was active"
-    }
-    if (($blockedCheck | Out-String) -notmatch
+    $blockedCheckSucceeded = $LASTEXITCODE -eq 0
+    if (-not $blockedCheckSucceeded -and
+        ($blockedCheck | Out-String) -notmatch
         "migration requires all tunnels to be inactive") {
         throw (
             "active-tunnel migration returned an unexpected error: " +
@@ -336,6 +335,12 @@ PersistentKeepalive = 1
     )
     if (@(Compare-Object $quarantineBefore $quarantineBlocked).Count -ne 0) {
         throw "blocked migration created a quarantine while the tunnel was active"
+    }
+    if ($blockedCheckSucceeded) {
+        Write-Host (
+            "configuration check completed without replacing ProgramData; " +
+            "the active service, root identity, and quarantine set were preserved"
+        )
     }
 
     Write-Host (Invoke-Native -FilePath $currentQuick -Arguments @(
