@@ -104,6 +104,13 @@ The current development tree contains all four adapters. Release notes must use
 `integration-verified` per exact OS/architecture; cross-compilation alone never
 raises that label.
 
+The data-plane child does not depend on systemd for process ownership. On
+Linux/OpenWrt and FreeBSD/OPNsense, quick gives core a private inherited
+lifetime pipe; killing quick closes the pipe, so core exits and releases the
+TUN even under OpenRC, procd, rc.d, or a direct supervisor. FreeBSD also uses a
+parent-death signal, while Windows uses a kill-on-close Job Object. Service
+manager cgroups/process groups remain defense in depth.
+
 The current development binaries have passed the OpenWrt 25.12.5
 `runtime-smoke` fixture in both `armsr/armv8` and `x86/64` QEMU guests: TUN
 creation, procd lifecycle, hook ordering, peer add/remove, generation advance,

@@ -94,6 +94,12 @@ PresharedKey 轮换和自动全隧道切换会在任何 mutation 前返回
 `build-supported`、`unit-verified`、`runtime-verified` 或
 `integration-verified`；仅交叉编译绝不能提升支持等级。
 
+数据面子进程的所有权不依赖 systemd。Linux/OpenWrt 与 FreeBSD/OPNsense 上，
+quick 会把一个私有的继承生命周期管道交给 core；即使使用 OpenRC、procd、
+rc.d 或直接 supervisor，quick 被杀后管道也会关闭，core 随即退出并释放 TUN。
+FreeBSD 另有 parent-death signal 作为双重保护，Windows 则使用
+kill-on-close Job Object。服务管理器的 cgroup/process group 仍是额外防线。
+
 当前开发二进制已经在 OpenWrt 25.12.5 的 `armsr/armv8` 与 `x86/64` QEMU
 guest 中通过 `runtime-smoke`：包括 TUN 创建、procd 生命周期、hooks 顺序、peer
 增删、generation 推进以及 supervisor epoch 保持不变。该轮验证把本地构建的

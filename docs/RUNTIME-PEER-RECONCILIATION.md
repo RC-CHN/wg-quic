@@ -5,10 +5,11 @@ reviewed 22 August 2026.
 
 ## 1. Motivation
 
-A long-running wg-quic interface may carry several independent peers. Adding,
-removing, or changing one peer currently requires replacing the process-wide
-immutable configuration snapshot and restarting the interface. A restart
-interrupts every healthy peer, even when only one peer changed.
+A long-running wg-quic interface may carry several independent peers. Before
+runtime reconciliation, adding, removing, or changing one peer required
+replacing the process-wide immutable configuration snapshot and restarting the
+interface. A restart interrupts every healthy peer, even when only one peer
+changed.
 
 This is unsuitable for controllers that maintain a small full mesh or a
 hub-and-spoke network. A topology update must not reset unrelated sessions.
@@ -30,7 +31,8 @@ other service manager. The quick supervisor exposes the same local management
 protocol wherever it runs. Service managers only start, stop, and optionally
 invoke a convenient reload command.
 
-The completed feature must cover this matrix:
+The implementation covers this platform-family matrix; the evidence level of
+each exact OS/architecture/package tuple is tracked separately below:
 
 | Platform | Privileged management transport | Service integration | Persistent source | Crash-persistent route ownership |
 | --- | --- | --- | --- | --- |
@@ -98,7 +100,7 @@ immutable or full-tunnel change.
 
 ## 3. Goals and guarantees
 
-The completed implementation must provide:
+The implementation contract provides:
 
 1. Reconciliation of a complete desired peer set without replacing the TUN or
    resetting peers absent from the diff.
@@ -211,6 +213,16 @@ The quick-to-core control channel remains separate and inaccessible to public
 controllers. This prevents a controller from bypassing DNS, host-route, or
 transport-key ownership.
 
+The core also receives a one-way process-lifetime primitive from quick. Linux,
+OpenWrt, FreeBSD, and OPNsense use an inherited non-secret pipe whose write end
+exists only in the quick supervisor; EOF cancels the core and closes its TUN.
+This works under systemd, OpenRC, procd, rc.d, or a direct supervisor and avoids
+Linux `PDEATHSIG` being tied to whichever Go runtime thread created the child.
+FreeBSD additionally uses `Pdeathsig` as defense in depth. Windows assigns the
+core to a kill-on-close Job Object owned by the per-tunnel LocalSystem
+supervisor. A service manager's process-group or cgroup cleanup is useful but
+is not the only mechanism preventing an orphaned core.
+
 Both management transports carry the same bounded, versioned protocol. One
 connection or pipe instance accepts one JSON request and returns one JSON
 response; long-running work is subsequently recoverable by request ID instead
@@ -286,11 +298,19 @@ are constant-time.
 
 Quick computes two digests:
 
-- a process-keyed HMAC over the complete canonical request, including secrets,
-  used only for request-ID collision detection; and
+- a process-keyed HMAC over the semantic mutation identity—the interface-local
+  expected epoch/generation tuple and complete canonical desired projection,
+  including secrets—used only for request-ID collision detection; and
 - a stable digest of the non-secret desired projection, exposed in status.
 
 No raw digest over a private or preshared key is exposed.
+
+Transport framing is not mutation identity. The request ID itself, protocol
+envelope, requested wait deadline, and equivalent capability assertions are
+excluded from that HMAC. The first accepted use of a request ID owns the
+clamped operation deadline. A retry may therefore use a later socket deadline
+and still join or recover exactly the same transaction; changing its CAS tuple
+or desired projection remains a collision.
 
 ## 7. Epochs, generations, requests, and idempotency
 
@@ -949,6 +969,29 @@ the ledger intact so the service manager and next startup can retry. Abrupt
 termination tests validate recovery on the next epoch; they do not pretend a
 killed process executed rollback code.
 
+Graceful and abrupt shutdown deliberately take different paths. Graceful
+shutdown first closes admission to new reconciliations, cancels the active
+operation, waits for its bounded compensating rollback, and propagates a
+`degraded` rollback as a non-zero service result before host/core teardown.
+Abrupt death cannot run those steps: the core-lifetime primitive releases the
+TUN and all process-local leases, while only durable platform journals are
+interpreted by the next epoch.
+
+The durable phase recovery rule is:
+
+| Last observable phase | State that may survive | Next-epoch action |
+| --- | --- | --- |
+| validation, prepare, or endpoint switch | no portable core/session state; a Windows route journal may be `prepared` but no new route is proven | discard process-local work, remove only previously journalled routes, retain any unproven candidate object, then apply canonical state |
+| route removal / core commit | Windows journal is `removing` or `removed`; FreeBSD outer records may be `active` | verify exact LUID/compartment or gateway/interface identity, remove proven stale ownership, retain identity mismatches |
+| route addition | Windows journal is `adding`; a live candidate route is ambiguous until the phase completion bit is durable | adopt it only when canonical state requests the exact prefix; otherwise retain and diagnose it |
+| compensating rollback | Windows journal records `rollback-additions` or `rollback-removals` plus completion bits | delete only additions proved complete, restore canonical state from a fresh core, and never infer ownership from a prefix alone |
+| commit finalization | Windows journal is `committed` or `active`; process-local stale sessions/keys/cleanup jobs disappear with core | clean the proven route projection, reapply canonical state, and publish cleanup/recovery diagnostics before the new epoch becomes mutable |
+
+Linux/OpenWrt peer routes are TUN-bound, so the table has no hidden Linux
+policy-rule phase in v1. FreeBSD/OPNsense peer routes are likewise TUN-bound;
+their durable phase machine applies to outer endpoint pins. Windows covers
+both outer endpoint pins and the separate inner peer-route journal.
+
 A binary or package upgrade that restarts quick also starts a new epoch.
 In-progress request-cache entries are not carried across that boundary. The
 controller re-reads status, observes canonical desired state and any reported
@@ -1008,6 +1051,34 @@ Platform coverage must include:
 The privileged fixture includes packet loss, delay, jitter, DNS answer changes,
 lost management responses, concurrent controllers, process termination, route
 command failure, and cleanup retry.
+
+Evidence is intentionally split by failure boundary. The shared executor and
+endpoint suites inject failures in prepare/commit/rollback/finalize operations;
+the Linux privileged fixture kills quick without killing its container/init
+process and proves that the inherited lifetime pipe removes the core and TUN;
+Windows native tests replay every durable peer-route journal phase; FreeBSD
+native tests cover pending-add, active, and pending-delete outer-route
+recovery. Exact installed-package kill/reboot runs remain claim-gate evidence
+rather than being inferred from these portable tests.
+
+The portable acceptance trace is kept close to the code rather than in an
+external checklist:
+
+| Acceptance items | Primary executable evidence |
+| --- | --- |
+| 1–3 | `tests/container/test.sh` keeps TCP/UDP active while a third peer is added, updated, and removed; it asserts unchanged supervisor/session/endpoint generations for the unrelated peer |
+| 4 | `internal/transport/fec` group-flush tests, `internal/bind` live policy replacement tests, and `internal/core` FEC transaction commit/rollback tests |
+| 5–6 | model validation plus `internal/quick/reconcile_executor_test.go` failure injection at every mutation, rollback, and finalization boundary |
+| 7–9 | coordinator CAS/disconnect/cache tests plus the privileged stale-generation, ID-collision, and changed-deadline retry path |
+| 10–14 | endpoint generation/readiness, candidate rotation, route-lease rollback, DNS reorder, NXDOMAIN, and timeout tests under `internal/endpoint` |
+| 15 | privileged MTU/loss/NAT/peer-restart tests, parent-death core/TUN teardown, route-notification tests, and platform startup recovery suites |
+| 16 | canonical diff tests prove automatic default-route transitions reject before executor preparation |
+| 17 | secure snapshot, protocol redaction, status, journal codec, and secret-like journal rejection tests |
+| 18 | graceful coordinator shutdown rollback tests, the Linux quick `SIGKILL` fixture, every Windows peer-route journal phase, and every FreeBSD outer-route ledger phase |
+
+This table identifies the portable gate only. A release support label still
+requires the exact package/service/image evidence in sections 21 and 26; a
+source-level test name cannot promote an artifact by itself.
 
 Acceptance is gated in two layers:
 

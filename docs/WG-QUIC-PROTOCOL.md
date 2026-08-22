@@ -504,10 +504,15 @@ Current accepted values are:
 controller. It does not probe or negotiate a controller with the peer. Reno
 and CUBIC are benchmark/debug alternatives.
 
-The parser accepts per-peer
-`peer.fec-latency=latency|balanced|throughput`, but the runtime does not yet
-read that value. It currently changes neither wire records nor local FEC
-behavior and MUST be described as reserved/no-op in user interfaces.
+The per-peer directive
+`peer.fec-latency=latency|balanced|throughput` selects a local encoder profile.
+`balanced` uses the interface values; `latency` caps data shards at four,
+forces interleave one, and caps the flush deadline at 1 ms; `throughput` uses
+at least interleave two and a 4 ms flush deadline. Outbound sessions inherit
+the configured endpoint's peer policy. Inbound and roamed sessions receive a
+policy only after WireGuard authenticates the peer identity. A live change
+flushes the old group before reconfiguring the encoder, so it changes no v1
+record syntax and never reinterprets an in-flight group.
 
 ## 10. Current adaptive FEC sender
 
@@ -515,10 +520,11 @@ The current automatic sender uses these defaults:
 
 | Setting | Current value |
 | --- | ---: |
-| Maximum data shards per group | 8 |
+| Default interface data-shard limit | 32 |
 | Initial target parity | 1 |
 | Partial-group flush deadline | 2 ms |
-| Controller parity range | 0 through 4 |
+| Controller parity range | 0 through 8 |
+| Controller interleave range | 1 through 4 |
 | Healthy-path protected probe | one group after 4,096 raw frames |
 | Normal decrease evidence | 32 groups |
 
@@ -527,10 +533,10 @@ For a partial group with `k` source shards, emitted parity is bounded by
 increments epoch only at the next group boundary after the target changes.
 
 The controller maintains a loss EWMA from receiver feedback. Its sample weight
-is clamped between 1/32 and 1/4. Using the default eight-source group, it
+is clamped between 1/32 and 1/4. Using the default 32-source interface profile, it
 chooses the smallest parity count whose independent-loss estimate gives a
 probability of losing more than that many shards in the resulting group of at
-most 0.5%, with a current maximum of four.
+most 0.5%, with a current maximum of eight.
 
 At RTT up to 100 ms, an estimated loss at or below 0.1% permits the parity-zero
 fast path. Above 100 ms that threshold scales by `100 ms / path RTT`, down to a
@@ -545,8 +551,8 @@ parity is zero, two or more losses at a sample rate of at least 0.5%
 immediately leave the fast path. A protected probe with even one missing
 source shard has the same effect, including when FEC repaired that shard.
 
-These thresholds, the independent-loss model, and the fixed group/flush values
-are implementation policy. They may change without a wire-version change.
+These thresholds, the independent-loss model, and the local peer profiles are
+implementation policy. They may change without a wire-version change.
 
 ## 11. Current capacity and congestion model
 
@@ -615,9 +621,10 @@ The implemented profile has the following deliberate or known limits:
   blocking.
 - There is no padding, packet-size shaping, port hopping, multipath scheduler,
   or application-layer reliable retransmission.
-- FEC adapts parity only. It does not yet adapt `k`, the 2 ms flush deadline,
-  interleaving, repair deadlines, or per-packet protection.
-- `peer.fec-latency` is not implemented beyond configuration parsing.
+- FEC adapts parity and burst interleave. Per-peer policy can change `k`,
+  interleave, and flush deadline at a group boundary, but the path controller
+  does not continuously tune `k`, flush deadline, repair deadlines, or
+  per-packet protection.
 - FEC completion and feedback use 3-second expiry, which is not derived from
   a peer latency policy.
 - Feedback and malformed-frame diagnostics are incomplete.
