@@ -2,11 +2,12 @@
 
 set -eu
 
-target=${1:?usage: guest-validate.sh 26.1|26.7}
+target=${1:?usage: guest-validate.sh 26.1|26.7 [PACKAGE]}
 case "${target}" in
     26.1|26.7) ;;
     *) echo "unsupported target: ${target}" >&2; exit 64 ;;
 esac
+provided_package=${2:-}
 
 mount_dir=/mnt/wg-quic-share
 archive="${mount_dir}/plugin-source-${target}.tar.gz"
@@ -26,33 +27,44 @@ if ! mount | grep -q "on ${mount_dir} "; then
     mount_msdosfs "${share_device}" "${mount_dir}"
 fi
 
-test -f "${archive}"
-test -f "${core_archive}"
-plugin_version=$(sed -n '1p' "${mount_dir}/VERSION")
-test -n "${plugin_version}"
-# The qcow2 disks are deliberately reusable. Remove the previous plugin
-# checkout so stale work/pkg staging files can never be mistaken for a package
-# built from the archive under test.
-rm -rf -- /usr/plugins/net/wg-quic
-tar -xzf "${archive}" -C /usr/plugins
-tar -xzf "${core_archive}" -C /usr/core
-
 echo "== platform =="
 opnsense-version
 freebsd-version
 uname -a
 
-echo "== plugin lint =="
-cd /usr/plugins/net/wg-quic
-make PLUGIN_VERSION="${plugin_version}" lint
+if [ -n "${provided_package}" ]; then
+    case "${provided_package}" in
+        */*) echo "PACKAGE must be a file name from the mounted share" >&2; exit 64 ;;
+    esac
+    package_file="${mount_dir}/${provided_package}"
+    test -f "${package_file}"
+    echo "== exact CI package =="
+    sha256 "${package_file}"
+    pkg info -F "${package_file}"
+else
+    test -f "${archive}"
+    test -f "${core_archive}"
+    plugin_version=$(sed -n '1p' "${mount_dir}/VERSION")
+    test -n "${plugin_version}"
+    # The qcow2 disks are deliberately reusable. Remove the previous plugin
+    # checkout so stale work/pkg staging files can never be mistaken for a
+    # package built from the archive under test.
+    rm -rf -- /usr/plugins/net/wg-quic
+    tar -xzf "${archive}" -C /usr/plugins
+    tar -xzf "${core_archive}" -C /usr/core
 
-echo "== package build =="
-make PLUGIN_VERSION="${plugin_version}" package
-package_file=$(find work/pkg -name 'os-wg-quic-*.pkg' -type f | head -n 1)
-test -n "${package_file}"
-pkg info -F "${package_file}"
-cp "${package_file}" \
-    "${mount_dir}/os-wg-quic-${plugin_version}-opnsense-${target}-amd64.pkg"
+    echo "== plugin lint =="
+    cd /usr/plugins/net/wg-quic
+    make PLUGIN_VERSION="${plugin_version}" lint
+
+    echo "== package build =="
+    make PLUGIN_VERSION="${plugin_version}" package
+    package_file=$(find work/pkg -name 'os-wg-quic-*.pkg' -type f | head -n 1)
+    test -n "${package_file}"
+    pkg info -F "${package_file}"
+    cp "${package_file}" \
+        "${mount_dir}/os-wg-quic-${plugin_version}-opnsense-${target}-amd64.pkg"
+fi
 
 echo "== package install =="
 pkg add -f "${package_file}"
