@@ -139,8 +139,22 @@ $compose exec -T a iptables -t nat -I POSTROUTING 1 \
 	-j SNAT --to-source 172.29.0.22
 # Netfilter chooses NAT only for the first packet in a conntrack flow. Drop the
 # established mapping so the next QUIC packet actually exercises the new path.
+# A packet sent by B's QUIC keepalive can otherwise win the race and create the
+# reverse flow first, bypassing A's POSTROUTING SNAT for the lifetime of that
+# entry. Block only B's old-path packets in raw PREROUTING until A establishes
+# the translated flow; raw runs before conntrack, while replies to the new .22
+# address remain allowed.
+$compose exec -T a iptables -t raw -I PREROUTING 1 \
+	-p udp -s 172.29.0.3 --sport 51820 -d 172.29.0.2 --dport 51820 \
+	-j DROP
 $compose exec -T a conntrack -F
 wait_ping a 10.77.0.2 "" "tunnel did not survive outer NAT address rebinding"
+$compose exec -T a iptables -t raw -D PREROUTING \
+	-p udp -s 172.29.0.3 --sport 51820 -d 172.29.0.2 --dport 51820 \
+	-j DROP
+$compose exec -T a sh -ec \
+	"iptables-save -c -t nat | grep -Eq '^\\[[1-9][0-9]*:[0-9]+\\] -A POSTROUTING .*--to-source 172\\.29\\.0\\.22$'" ||
+	fail_with_logs "outer rebinding fixture did not traverse the SNAT rule"
 attempt=0
 while :; do
 	rebound_endpoint=$($compose exec -T b wg-quic show wg0 --json |
