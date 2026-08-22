@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"unsafe"
@@ -251,10 +252,6 @@ func ensureWindowsSecureProductRoot(
 	if !errors.Is(err, errWindowsUntrustedExistingPath) {
 		return 0, nil, err
 	}
-	if err := refuseWindowsLegacyMigrationWhileTunnelActive(); err != nil {
-		return 0, nil, err
-	}
-
 	var legacyRoot windows.Handle
 	err = withWindowsFileSecurityPrivileges(func() error {
 		var openErr error
@@ -272,6 +269,10 @@ func ensureWindowsSecureProductRoot(
 		return nil
 	})
 	if err != nil {
+		return 0, nil, err
+	}
+	if err := refuseWindowsLegacyMigrationWhileTunnelActive(root); err != nil {
+		windows.CloseHandle(legacyRoot)
 		return 0, nil, err
 	}
 
@@ -350,21 +351,27 @@ func ensureWindowsSecureProductRoot(
 	return newRoot, migration, nil
 }
 
-func refuseWindowsLegacyMigrationWhileTunnelActive() error {
+func refuseWindowsLegacyMigrationWhileTunnelActive(legacyRoot string) error {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("inspect tunnel services before ProgramData migration: %w", err)
 	}
 	defer manager.Disconnect()
-	names, err := manager.ListServices()
+	listed, err := manager.ListServices()
 	if err != nil {
 		return fmt.Errorf("list tunnel services before ProgramData migration: %w", err)
 	}
+	names, err := windowsLegacyMigrationServiceNames(legacyRoot, listed)
+	if err != nil {
+		return err
+	}
 	for _, name := range names {
-		if !strings.HasPrefix(name, windowsServicePrefix) {
+		service, openErr := manager.OpenService(name)
+		if errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			// The service may have completed deletion after enumeration. A
+			// missing service cannot own a live tunnel.
 			continue
 		}
-		service, openErr := manager.OpenService(name)
 		if openErr != nil {
 			return fmt.Errorf("inspect tunnel service %s before ProgramData migration: %w", name, openErr)
 		}
@@ -382,6 +389,69 @@ func refuseWindowsLegacyMigrationWhileTunnelActive() error {
 		}
 	}
 	return nil
+}
+
+// windowsLegacyMigrationServiceNames combines the SCM enumeration with the
+// service names implied by legacy profiles. mgr.ListServices documents that
+// services for which the caller cannot query status may be silently omitted;
+// an upgrade must not turn such an omission (or a transient enumeration race)
+// into permission to replace ProgramData beneath a live legacy tunnel.
+//
+// The legacy directory is untrusted, so its entries only broaden the set of
+// fixed-format SCM names queried. They never authorize a migration or supply a
+// path to any privileged mutation.
+func windowsLegacyMigrationServiceNames(
+	legacyRoot string,
+	listed []string,
+) ([]string, error) {
+	byFoldedName := make(map[string]string)
+	add := func(name string) {
+		folded := strings.ToLower(name)
+		if _, exists := byFoldedName[folded]; !exists {
+			byFoldedName[folded] = name
+		}
+	}
+	for _, name := range listed {
+		if len(name) >= len(windowsServicePrefix) && strings.EqualFold(
+			name[:len(windowsServicePrefix)],
+			windowsServicePrefix,
+		) {
+			add(name)
+		}
+	}
+
+	interfaces := filepath.Join(legacyRoot, "interfaces")
+	entries, err := readWindowsLegacyMigrationEntries(interfaces)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) ||
+		errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		err = nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf(
+			"inspect legacy profiles before ProgramData migration: %w",
+			err,
+		)
+	}
+	for _, entry := range entries {
+		fileName := entry.Name()
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(fileName), ".conf") {
+			continue
+		}
+		name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		if platform.Current().ValidateInterfaceName(name) != nil {
+			continue
+		}
+		add(windowsServiceName(name))
+	}
+
+	names := make([]string, 0, len(byFoldedName))
+	for _, name := range byFoldedName {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	})
+	return names, nil
 }
 
 type windowsFileRenameInformation struct {

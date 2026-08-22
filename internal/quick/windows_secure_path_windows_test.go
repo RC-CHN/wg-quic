@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -460,6 +461,55 @@ func TestWindowsLegacyMigrationLimitsAreFailClosed(t *testing.T) {
 		errWindowsLegacyMigrationLimit,
 	) {
 		t.Fatalf("legacy total overflow error = %v", err)
+	}
+}
+
+func TestWindowsLegacyMigrationServiceNamesCombineSCMAndProfiles(t *testing.T) {
+	legacyRoot := t.TempDir()
+	interfaces := filepath.Join(legacyRoot, "interfaces")
+	if err := os.Mkdir(interfaces, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"stored.conf",
+		"ignored.txt",
+		"trailing..conf",
+	} {
+		if err := os.WriteFile(filepath.Join(interfaces, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(interfaces, "directory.conf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := windowsLegacyMigrationServiceNames(legacyRoot, []string{
+		"unrelated-service",
+		"Wg-Quic-Quick@listed",
+		"WG-QUIC-QUICK@stored",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Wg-Quic-Quick@listed",
+		"WG-QUIC-QUICK@stored",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy migration service names = %#v, want %#v", got, want)
+	}
+}
+
+func TestWindowsLegacyMigrationServiceNamesAllowMissingInterfaces(t *testing.T) {
+	got, err := windowsLegacyMigrationServiceNames(t.TempDir(), []string{
+		"wg-quic-quick@listed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"wg-quic-quick@listed"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy migration service names = %#v, want %#v", got, want)
 	}
 }
 

@@ -129,7 +129,11 @@ LocalSystem owner/DACL and single-link checks for privileged files. A legacy
 root that does not already have trusted provenance is atomically moved to a
 `.wg-quic-quarantine-*` directory before a clean root is created. Only valid,
 hook-free profiles are copied automatically; skipped profiles remain in the
-quarantine and must be reviewed and explicitly imported again.
+quarantine and must be reviewed and explicitly imported again. Migration pins
+and inspects the legacy root first, then refuses to rename it while any tunnel
+service is not stopped. The guard queries the union of the SCM enumeration and
+the fixed service names implied by legacy profile files, so an SCM enumeration
+omission cannot authorize migration beneath an active upgrade-era tunnel.
 
 The MSI installs the UI and helper under ACL-protected Program Files, so an
 unelevated process cannot replace the broker or helper. Configuration and
