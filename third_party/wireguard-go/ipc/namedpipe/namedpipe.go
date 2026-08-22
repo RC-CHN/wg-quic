@@ -171,6 +171,11 @@ func dialSecurityQualityOfService(impersonationLevel uint32) (uint32, error) {
 // DialConfig exposes various options for use in Dial and DialContext.
 type DialConfig struct {
 	ExpectedOwner *windows.SID // If non-nil, the pipe is verified to be owned by this SID.
+	// ExpectedOwners verifies the pipe owner against an allowlist. It is
+	// additive with ExpectedOwner. This supports services that are normally
+	// LocalSystem-owned but deliberately allow an elevated same-user debug
+	// instance without accepting a pipe owned by some other administrator.
+	ExpectedOwners []*windows.SID
 
 	// DesiredAccess is the exact access mask requested when opening the client
 	// end. Zero preserves the historical GENERIC_READ|GENERIC_WRITE behavior.
@@ -213,7 +218,7 @@ func (config *DialConfig) DialContext(ctx context.Context, path string) (net.Con
 		return nil, err
 	}
 
-	if config.ExpectedOwner != nil {
+	if config.ExpectedOwner != nil || len(config.ExpectedOwners) != 0 {
 		sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 		if err != nil {
 			windows.Close(h)
@@ -224,7 +229,14 @@ func (config *DialConfig) DialContext(ctx context.Context, path string) (net.Con
 			windows.Close(h)
 			return nil, err
 		}
-		if !realOwner.Equals(config.ExpectedOwner) {
+		ownerMatches := config.ExpectedOwner != nil && realOwner.Equals(config.ExpectedOwner)
+		for _, expected := range config.ExpectedOwners {
+			if expected != nil && realOwner.Equals(expected) {
+				ownerMatches = true
+				break
+			}
+		}
+		if !ownerMatches {
 			windows.Close(h)
 			return nil, windows.ERROR_ACCESS_DENIED
 		}

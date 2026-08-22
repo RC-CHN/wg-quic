@@ -199,6 +199,14 @@ installed Windows management service may forward an already authorized request
 to the per-tunnel supervisor, but an unprivileged WebView never receives direct
 mutation access.
 
+The pipe security descriptor pins Owner to the actual privileged creator. In
+the installed lifecycle that creator is LocalSystem. A deliberately elevated
+same-user debug/test supervisor instead owns the pipe with that administrator's
+user SID; its client accepts only LocalSystem or its own enabled-Administrator
+SID, never an arbitrary administrator or unelevated user. This avoids requiring
+`SeRestorePrivilege` merely to assign LocalSystem ownership outside the service
+lifecycle while retaining owner verification against pipe squatting.
+
 The quick-to-core control channel remains separate and inaccessible to public
 controllers. This prevents a controller from bypassing DNS, host-route, or
 transport-key ownership.
