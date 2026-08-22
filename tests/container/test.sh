@@ -148,8 +148,13 @@ while :; do
 	if [ "${rebound_endpoint}" = "172.29.0.22:51820" ]; then
 		break
 	fi
+	# QUIC can deliver the first packet from a rebinding before promoting the
+	# validated remote path reported to later datagrams. Endpoint roaming is
+	# authenticated by WireGuard traffic, so keep supplying bounded probes
+	# instead of polling status after a single possibly pre-promotion packet.
+	$compose exec -T a ping -c 1 -W 1 10.77.0.2 >/dev/null 2>&1 || true
 	attempt=$((attempt + 1))
-	if [ "${attempt}" -ge 30 ]; then
+	if [ "${attempt}" -ge 100 ]; then
 		fail_with_logs "peer status retained the pre-migration outer endpoint"
 	fi
 	sleep 0.1
@@ -171,8 +176,9 @@ while :; do
 	if [ "${restored_endpoint}" = "172.29.0.2:51820" ]; then
 		break
 	fi
+	$compose exec -T a ping -c 1 -W 1 10.77.0.2 >/dev/null 2>&1 || true
 	attempt=$((attempt + 1))
-	if [ "${attempt}" -ge 30 ]; then
+	if [ "${attempt}" -ge 100 ]; then
 		fail_with_logs "peer status did not follow the restored outer endpoint"
 	fi
 	sleep 0.1
