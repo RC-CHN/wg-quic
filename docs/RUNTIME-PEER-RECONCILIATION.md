@@ -1140,3 +1140,38 @@ an older binary that cannot understand the schema refuses mutation and leaves
 owned objects intact. Package uninstall must first stop every instance and run
 normal or explicit repair; it must not delete the state directory while live or
 ambiguous route ownership remains.
+
+## 26. Support evidence and release promotion
+
+Platform support is evidence attached to an exact artifact, not a permanent
+property inferred from a source directory or an older release. Each release
+candidate maintains one record per claim-matrix tuple containing:
+
+- source commit and version;
+- archive or package SHA-256, including the desktop installer where relevant;
+- OS image/release, architecture, kernel, and native-versus-emulated runner;
+- service adapter and fixture revision;
+- completed portable and claim gates, with durable log or artifact links; and
+- the strongest resulting label for each of the four support dimensions.
+
+A runtime or integration result is reusable only when the tested package hash
+is the released hash. Installing locally copied binaries into package paths is
+useful portable evidence but cannot promote the package dimension. Manual QEMU
+or hardware runs are acceptable when hosted CI lacks the target, but they must
+produce the same machine-readable record and retain the exact commands and
+image checksum.
+
+Evidence becomes stale when a later commit changes a component inside its
+claim boundary. Core, transport, quick transaction, route, secure-path, service
+adapter, package, or fixture changes invalidate the affected runtime or
+integration records. Documentation-only changes do not. A platform-specific
+change invalidates that platform; a portable transaction or data-plane change
+invalidates every runtime tuple. A release workflow may preserve a lower
+build/unit label while stronger evidence is rerun, but it must never carry a
+stale runtime/integration label forward silently.
+
+README and release-note tables are projections of these records. CI verifies
+that every stronger label names current evidence and that every published
+artifact tuple has at least build evidence. Missing hardware therefore appears
+as an explicit lower label and pending claim gate, rather than as either a
+false universal-support claim or an untracked exception.
