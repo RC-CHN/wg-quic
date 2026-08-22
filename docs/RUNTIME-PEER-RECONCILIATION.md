@@ -804,6 +804,8 @@ Per-peer status exposes non-secret desired and operational state:
   "public_key": "...",
   "configured_endpoint": "node-b.example.net:12580",
   "selected_endpoint": "203.0.113.10:12580",
+  "endpoint": "198.51.100.27:43192",
+  "current_endpoint": "198.51.100.27:43192",
   "dns_candidates": ["203.0.113.10", "203.0.113.11"],
   "last_resolved_at": "2026-08-21T12:00:00Z",
   "next_refresh_at": "2026-08-21T12:01:00Z",
@@ -814,6 +816,8 @@ Per-peer status exposes non-secret desired and operational state:
   "latest_handshake": 1787313600,
   "last_rx": 1787313601,
   "last_tx": 1787313601,
+  "last_activity": 1787313601,
+  "last_activity_direction": "received",
   "reconnect_attempts": 2,
   "transfer_rx": 1234,
   "transfer_tx": 5678,
@@ -821,6 +825,18 @@ Per-peer status exposes non-secret desired and operational state:
   "cleanup_pending": false
 }
 ```
+
+Endpoint status deliberately has three separate meanings. `configured_endpoint`
+is the canonical user configuration and may contain a hostname;
+`selected_endpoint` is the numeric candidate owned by `endpoint_generation`;
+`current_endpoint` is WireGuard's authenticated live path and can temporarily
+differ after QUIC roaming or an outer NAT rebinding. Candidate readiness compares
+the selected and authenticated generation/endpoint, while reconnect, rollback,
+and resource ownership use the selected endpoint. Neither operation may promote
+a transient current endpoint into desired state. The legacy core and quick CLI
+`show` field `endpoint` remains a compatibility alias of the live/current
+endpoint; the additive `selected_endpoint` field exposes the transactional
+target and `current_endpoint` gives management clients an unambiguous name.
 
 The last failed transaction summary is bounded and redacted. It contains stage,
 error code, affected public-key prefix, retryability, and whether rollback was

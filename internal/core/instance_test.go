@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/internal/wgdevice"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun/tuntest"
@@ -190,6 +192,7 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	initial := instance.status()
 	if len(initial.Peers) != 1 ||
 		initial.Peers[0].Endpoint != "192.0.2.1:443" ||
+		initial.Peers[0].SelectedEndpoint != "192.0.2.1:443" ||
 		initial.Peers[0].Generation != 1 {
 		t.Fatalf("initial peer endpoint did not use the runtime activation path: %#v", initial.Peers)
 	}
@@ -207,7 +210,8 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Peers) != 1 || status.Peers[0].Endpoint != update.Endpoint || status.Peers[0].Generation != 2 {
+	if len(status.Peers) != 1 || status.Peers[0].Endpoint != update.Endpoint ||
+		status.Peers[0].SelectedEndpoint != update.Endpoint || status.Peers[0].Generation != 2 {
 		t.Fatalf("peer status = %#v, want endpoint update %#v", status.Peers, update)
 	}
 	var authenticatedPublic device.NoisePublicKey
@@ -219,6 +223,23 @@ func TestInstanceUpdatesNumericPeerEndpointThroughControl(t *testing.T) {
 	if status.Peers[0].AuthenticatedGeneration != update.Generation ||
 		status.Peers[0].AuthenticatedEndpoint != update.Endpoint {
 		t.Fatalf("authenticated endpoint generation = %#v", status.Peers[0])
+	}
+	roamed := netip.MustParseAddrPort("[2001:db8::99]:9443")
+	if err := wgdevice.SetPeerEndpoint(instance.device, publicKey, roamed); err != nil {
+		t.Fatal(err)
+	}
+	status = instance.status()
+	if status.Peers[0].Endpoint != roamed.String() ||
+		status.Peers[0].SelectedEndpoint != update.Endpoint ||
+		status.Peers[0].Generation != update.Generation {
+		t.Fatalf("roamed peer status confused current and selected endpoints: %#v", status.Peers[0])
+	}
+	if err := wgdevice.SetPeerEndpoint(
+		instance.device,
+		publicKey,
+		netip.MustParseAddrPort(update.Endpoint),
+	); err != nil {
+		t.Fatal(err)
 	}
 	uapi, err := instance.device.IpcGet()
 	if err != nil {

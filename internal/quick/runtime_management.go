@@ -392,12 +392,16 @@ func (r *runtimeManagement) peerStatus(coreStatus *control.Status) []management.
 			continue
 		}
 		result[index].Session = peer.Session
+		result[index].Endpoint = peer.Endpoint
+		result[index].CurrentEndpoint = peer.Endpoint
 		result[index].EndpointGeneration = peer.Generation
 		result[index].AuthenticatedGeneration = peer.AuthenticatedGeneration
 		result[index].AuthenticatedEndpoint = peer.AuthenticatedEndpoint
 		result[index].LatestHandshake = peer.LatestHandshake
 		result[index].LastRx = peer.LastRx
 		result[index].LastTx = peer.LastTx
+		result[index].LastActivity = peer.LastActivity
+		result[index].LastDirection = peer.LastDirection
 		result[index].ReconnectAttempts = peer.ReconnectAttempts
 		result[index].ReconnectFailures = peer.ReconnectFailures
 		result[index].ConsecutiveReconnectFailures = peer.ConsecutiveReconnectFailures

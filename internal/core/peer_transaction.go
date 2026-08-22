@@ -267,7 +267,7 @@ func (i *Instance) applyPeerFECChanges(transaction *corePeerTransaction) error {
 			err := errors.New("peer FEC policy changed after transaction preparation")
 			return errors.Join(err, i.rollbackPeerFECChangesLocked(transaction, applied))
 		}
-		endpoint, endpointErr := peerendpoint.ParseNumeric(runtime.status.Endpoint)
+		endpoint, endpointErr := peerendpoint.ParseNumeric(runtime.status.SelectedEndpoint)
 		if endpointErr == nil {
 			if runtime.releaseFECPolicy == nil {
 				err := errors.New("active endpoint is missing its FEC policy lease")
@@ -313,7 +313,7 @@ func (i *Instance) rollbackPeerFECChangesLocked(
 			))
 			continue
 		}
-		endpoint, endpointErr := peerendpoint.ParseNumeric(runtime.status.Endpoint)
+		endpoint, endpointErr := peerendpoint.ParseNumeric(runtime.status.SelectedEndpoint)
 		if endpointErr == nil {
 			release, err := i.bind.ReplaceEndpointFECPolicy(endpoint, change.after, change.before)
 			if err != nil {
@@ -390,7 +390,7 @@ func validateCoreTransactionID(value string) error {
 }
 
 func (i *Instance) releasePeerRuntimeLocked(runtime *peerRuntime) {
-	if endpoint, err := peerendpoint.ParseNumeric(runtime.status.Endpoint); err == nil {
+	if endpoint, err := peerendpoint.ParseNumeric(runtime.status.SelectedEndpoint); err == nil {
 		i.bind.RetireEndpoint(endpoint)
 	}
 	for _, resource := range runtime.obsoleteEndpoints {

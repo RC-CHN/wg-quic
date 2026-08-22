@@ -71,9 +71,13 @@ type RecoveryStatus struct {
 }
 
 type PeerStatus struct {
-	PublicKey                    string     `json:"public_key"`
-	ConfiguredEndpoint           string     `json:"configured_endpoint,omitempty"`
-	SelectedEndpoint             string     `json:"selected_endpoint,omitempty"`
+	PublicKey          string `json:"public_key"`
+	ConfiguredEndpoint string `json:"configured_endpoint,omitempty"`
+	SelectedEndpoint   string `json:"selected_endpoint,omitempty"`
+	// Endpoint is the compatibility alias retained by wg-quic-quick show.
+	// CurrentEndpoint is the explicit management-protocol name.
+	Endpoint                     string     `json:"endpoint,omitempty"`
+	CurrentEndpoint              string     `json:"current_endpoint,omitempty"`
 	DNSCandidates                []string   `json:"dns_candidates,omitempty"`
 	LastResolvedAt               *time.Time `json:"last_resolved_at,omitempty"`
 	NextRefreshAt                *time.Time `json:"next_refresh_at,omitempty"`
@@ -85,6 +89,8 @@ type PeerStatus struct {
 	LatestHandshake              int64      `json:"latest_handshake,omitempty"`
 	LastRx                       int64      `json:"last_rx,omitempty"`
 	LastTx                       int64      `json:"last_tx,omitempty"`
+	LastActivity                 int64      `json:"last_activity,omitempty"`
+	LastDirection                string     `json:"last_activity_direction,omitempty"`
 	ReconnectAttempts            uint64     `json:"reconnect_attempts,omitempty"`
 	ReconnectFailures            uint64     `json:"reconnect_failures,omitempty"`
 	ConsecutiveReconnectFailures uint32     `json:"consecutive_reconnect_failures,omitempty"`

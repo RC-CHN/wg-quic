@@ -64,7 +64,7 @@ func (c localCoreEndpointControl) WaitPeerReady(ctx context.Context, update endp
 					)
 				}
 				if peer.Generation == update.Generation &&
-					peer.Endpoint == update.Endpoint.String() &&
+					peer.SelectedEndpoint == update.Endpoint.String() &&
 					peer.AuthenticatedGeneration == update.Generation &&
 					peer.AuthenticatedEndpoint == update.Endpoint.String() {
 					return nil

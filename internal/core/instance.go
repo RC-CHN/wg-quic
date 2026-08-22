@@ -346,6 +346,7 @@ func (i *Instance) status() control.Status {
 		peer := runtimePeer.status
 		peer.FECPolicy = runtimePeer.fecPolicy
 		if runtime, ok := runtimePeers[publicKey]; ok {
+			peer.Endpoint = runtime.Endpoint
 			peer.LatestHandshake = runtime.LatestHandshake
 			peer.LastRx = runtime.LastRx
 			peer.LastTx = runtime.LastTx
@@ -355,9 +356,13 @@ func (i *Instance) status() control.Status {
 			)
 			peer.TransferRx = runtime.TransferRx
 			peer.TransferTx = runtime.TransferTx
+		} else {
+			// IpcGet failures must not erase the last selected endpoint from
+			// status. A present peer with an empty runtime endpoint remains empty.
+			peer.Endpoint = peer.SelectedEndpoint
 		}
 		peer.Session = string(armorbind.EndpointSessionIdle)
-		if endpoint, err := peerendpoint.ParseNumeric(peer.Endpoint); err == nil {
+		if endpoint, err := peerendpoint.ParseNumeric(peer.SelectedEndpoint); err == nil {
 			peer.Session = string(i.bind.EndpointSessionState(endpoint))
 			reconnect := i.bind.EndpointReconnectStatus(endpoint)
 			peer.ReconnectAttempts = reconnect.Attempts
@@ -444,7 +449,7 @@ func (i *Instance) clearPeerEndpoint(publicKey string, generation uint64) error 
 		)
 	}
 	if generation == peer.status.Generation {
-		if peer.status.Endpoint == "" {
+		if peer.status.SelectedEndpoint == "" {
 			return nil
 		}
 		return fmt.Errorf("peer endpoint generation %d conflicts with the active endpoint", generation)
@@ -453,11 +458,11 @@ func (i *Instance) clearPeerEndpoint(publicKey string, generation uint64) error 
 		return fmt.Errorf("clear WireGuard peer endpoint: %w", err)
 	}
 	activationReceiveSequence := i.bind.ReceiveSequence()
-	oldEndpoint, oldEndpointErr := peerendpoint.ParseNumeric(peer.status.Endpoint)
+	oldEndpoint, oldEndpointErr := peerendpoint.ParseNumeric(peer.status.SelectedEndpoint)
 	i.retainPeerEndpointResourcesLocked(peer, oldEndpoint, oldEndpointErr)
 	peer.releaseAssociation = nil
 	peer.releaseFECPolicy = nil
-	peer.status.Endpoint = ""
+	peer.status.SelectedEndpoint = ""
 	peer.status.Generation = generation
 	peer.status.AuthenticatedGeneration = 0
 	peer.status.AuthenticatedEndpoint = ""
@@ -486,7 +491,7 @@ func (i *Instance) installPeerEndpoint(publicKey string, endpoint netip.AddrPort
 		)
 	}
 	if generation == peer.status.Generation {
-		if peer.status.Endpoint == endpoint.String() {
+		if peer.status.SelectedEndpoint == endpoint.String() {
 			return nil
 		}
 		return fmt.Errorf("peer endpoint generation %d conflicts with the active endpoint", generation)
@@ -517,11 +522,11 @@ func (i *Instance) installPeerEndpoint(publicKey string, endpoint netip.AddrPort
 	}
 	activationReceiveSequence := i.bind.ReceiveSequence()
 
-	oldEndpoint, oldEndpointErr := peerendpoint.ParseNumeric(peer.status.Endpoint)
+	oldEndpoint, oldEndpointErr := peerendpoint.ParseNumeric(peer.status.SelectedEndpoint)
 	i.retainPeerEndpointResourcesLocked(peer, oldEndpoint, oldEndpointErr)
 	peer.releaseAssociation = release
 	peer.releaseFECPolicy = fecRelease
-	peer.status.Endpoint = endpoint.String()
+	peer.status.SelectedEndpoint = endpoint.String()
 	peer.status.Generation = generation
 	peer.status.AuthenticatedGeneration = 0
 	peer.status.AuthenticatedEndpoint = ""
@@ -565,7 +570,7 @@ func (i *Instance) finalizePeerEndpoint(publicKey string, generation uint64) err
 			peer.status.Generation, generation,
 		)
 	}
-	active, _ := peerendpoint.ParseNumeric(peer.status.Endpoint)
+	active, _ := peerendpoint.ParseNumeric(peer.status.SelectedEndpoint)
 	for index := range peer.obsoleteEndpoints {
 		resource := &peer.obsoleteEndpoints[index]
 		if resource.endpoint.IsValid() && resource.endpoint != active {
@@ -593,7 +598,7 @@ func (i *Instance) recordAuthenticatedReceive(event device.AuthenticatedReceive)
 		policy = peer.fecPolicy
 	}
 	if event.ReceiveSequence == 0 || peer == nil || peer.status.Generation == 0 ||
-		peer.status.Endpoint != event.Endpoint ||
+		peer.status.SelectedEndpoint != event.Endpoint ||
 		event.ReceiveSequence <= peer.activationReceiveSequence {
 		i.endpointMu.Unlock()
 		if policy != "" {
@@ -623,7 +628,7 @@ func (i *Instance) redialPeer(publicKey string) error {
 		i.endpointMu.RUnlock()
 		return errors.New("peer public key is not configured")
 	}
-	endpoint, err := peerendpoint.ParseNumeric(peer.status.Endpoint)
+	endpoint, err := peerendpoint.ParseNumeric(peer.status.SelectedEndpoint)
 	i.endpointMu.RUnlock()
 	if err != nil {
 		return errors.New("peer does not have an active numeric endpoint")
@@ -637,7 +642,7 @@ func (i *Instance) restorePeersAfterTransportReconnect(endpoint netip.AddrPort) 
 	publicKeys := make([]string, 0, 1)
 	for _, publicKey := range i.peerOrder {
 		peer := i.peers[publicKey]
-		configured, err := peerendpoint.ParseNumeric(peer.status.Endpoint)
+		configured, err := peerendpoint.ParseNumeric(peer.status.SelectedEndpoint)
 		if err == nil && configured == endpoint {
 			publicKeys = append(publicKeys, publicKey)
 		}

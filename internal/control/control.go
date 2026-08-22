@@ -28,8 +28,15 @@ type Status struct {
 }
 
 type PeerStatus struct {
-	PublicKey                    string `json:"public_key"`
-	Endpoint                     string `json:"endpoint,omitempty"`
+	PublicKey string `json:"public_key"`
+	// Endpoint is WireGuard's live endpoint and preserves the pre-reconcile
+	// status contract. It may differ from SelectedEndpoint after authenticated
+	// QUIC path roaming or an outer NAT rebinding.
+	Endpoint string `json:"endpoint,omitempty"`
+	// SelectedEndpoint is the numeric endpoint owned by Generation. Core
+	// transactions, readiness, reconnect, and resource cleanup use this field;
+	// they must not mistake a transient roaming address for desired state.
+	SelectedEndpoint             string `json:"selected_endpoint,omitempty"`
 	Generation                   uint64 `json:"generation"`
 	AuthenticatedGeneration      uint64 `json:"authenticated_endpoint_generation,omitempty"`
 	AuthenticatedEndpoint        string `json:"authenticated_endpoint,omitempty"`

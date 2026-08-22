@@ -81,6 +81,9 @@ func Show(name string, jsonOutput bool) error {
 			if peer.Endpoint != "" {
 				fmt.Printf("    endpoint: %s\n", peer.Endpoint)
 			}
+			if peer.SelectedEndpoint != "" && peer.SelectedEndpoint != peer.Endpoint {
+				fmt.Printf("    selected endpoint: %s\n", peer.SelectedEndpoint)
+			}
 			fmt.Printf("    session: %s\n", peer.Session)
 			if peer.ReconnectAttempts != 0 || peer.ReconnectFailures != 0 {
 				fmt.Printf(

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/RC-CHN/wg-quic/internal/config"
+	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/internal/endpoint"
 	"github.com/RC-CHN/wg-quic/internal/management"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/internal/reconcile"
@@ -26,6 +28,10 @@ type fakeEndpointRefresher struct {
 	peerCalls []string
 	err       error
 }
+
+type endpointStatusFixture []endpoint.Status
+
+func (f endpointStatusFixture) Status() []endpoint.Status { return f }
 
 func (f *fakeEndpointRefresher) RefreshAll(context.Context) error {
 	f.allCalls++
@@ -81,6 +87,25 @@ func TestRuntimeManagementAdvertisesOnlyActiveCapabilities(t *testing.T) {
 	})
 	if response.Failure == nil || response.Failure.Code != "unsupported_capability" {
 		t.Fatalf("reconcile response = %#v", response)
+	}
+}
+
+func TestRuntimeManagementPreservesLiveEndpointAndActivityCompatibility(t *testing.T) {
+	runtime := testRuntimeManagement(t, &fakeEndpointRefresher{})
+	runtime.endpointStatus = endpointStatusFixture{{
+		PublicKey: "peer", ConfiguredEndpoint: "peer.example:443",
+		SelectedEndpoint: "192.0.2.10:443", Generation: 4,
+	}}
+	peers := runtime.peerStatus(&control.Status{Peers: []control.PeerStatus{{
+		PublicKey: "peer", Endpoint: "198.51.100.27:43192",
+		SelectedEndpoint: "192.0.2.10:443", Generation: 4,
+		LastRx: 20, LastTx: 19, LastActivity: 20, LastDirection: "received",
+	}}})
+	if len(peers) != 1 || peers[0].Endpoint != "198.51.100.27:43192" ||
+		peers[0].CurrentEndpoint != peers[0].Endpoint ||
+		peers[0].SelectedEndpoint != "192.0.2.10:443" ||
+		peers[0].LastActivity != 20 || peers[0].LastDirection != "received" {
+		t.Fatalf("management peer status = %#v", peers)
 	}
 }
 
