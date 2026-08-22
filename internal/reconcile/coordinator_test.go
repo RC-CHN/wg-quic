@@ -61,6 +61,7 @@ func TestCoordinatorCommitsOnceAndReturnsCachedResultBeforeCAS(t *testing.T) {
 	request := Request{
 		ExpectedEpoch: "test-epoch", ExpectedGeneration: 1,
 		RequestID: "request-1", Desired: desired,
+		Deadline: time.Now().Add(time.Minute),
 	}
 	first, err := coordinator.Submit(context.Background(), request)
 	if err != nil {
@@ -75,7 +76,9 @@ func TestCoordinatorCommitsOnceAndReturnsCachedResultBeforeCAS(t *testing.T) {
 
 	// This still carries generation 1. Request-ID lookup must happen before
 	// the stale-generation check and return the original result.
-	second, err := coordinator.Submit(context.Background(), request)
+	retry := request
+	retry.Deadline = time.Now().Add(2 * time.Minute)
+	second, err := coordinator.Submit(context.Background(), retry)
 	if err != nil {
 		t.Fatal(err)
 	}

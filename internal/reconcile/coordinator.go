@@ -466,16 +466,17 @@ func (c *Coordinator) requestFingerprint(request Request) ([sha256.Size]byte, er
 	payload := struct {
 		ExpectedEpoch      string         `json:"expected_epoch"`
 		ExpectedGeneration uint64         `json:"expected_generation"`
-		DeadlineMillis     int64          `json:"deadline_unix_millis"`
 		Desired            *configForHash `json:"desired"`
 	}{
 		ExpectedEpoch:      request.ExpectedEpoch,
 		ExpectedGeneration: request.ExpectedGeneration,
 		Desired:            &configForHash{Config: request.Desired.config},
 	}
-	if !request.Deadline.IsZero() {
-		payload.DeadlineMillis = request.Deadline.UnixMilli()
-	}
+	// The first accepted request owns the operation deadline. A client retry
+	// naturally carries a later transport deadline, but must still join or
+	// recover the original transaction when its CAS tuple and desired content
+	// are identical. Including Deadline here would make CLI retries with the
+	// same request ID fail as false content collisions.
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return [sha256.Size]byte{}, fmt.Errorf("encode reconciliation request fingerprint: %w", err)
