@@ -89,8 +89,14 @@ AllowedIPs = 10.66.0.1/32
 PersistentKeepalive = 1
 CONFIG;
 
-    file_put_contents('/tmp/wg-quic-peer.conf', $peerConfig . "\n");
-    chmod('/tmp/wg-quic-peer.conf', 0600);
+    $configDir = '/usr/local/etc/wg-quic';
+    if (!is_dir($configDir) && !mkdir($configDir, 0700, true)) {
+        throw new RuntimeException('Unable to create wg-quic configuration directory');
+    }
+    chmod($configDir, 0700);
+    $peerConfigPath = $configDir . '/quic1.conf';
+    file_put_contents($peerConfigPath, $peerConfig . "\n");
+    chmod($peerConfigPath, 0600);
     echo "test model configured\n";
     exit(0);
 }

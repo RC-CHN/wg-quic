@@ -74,24 +74,23 @@ pkg check -s os-wg-quic
 echo "== WebUI log routing =="
 test -f \
     /usr/local/opnsense/service/templates/OPNsense/Syslog/local/wireguardquic.conf
-logger -t wg-quic "wg-quic QEMU WebUI log routing probe"
+log_probe="wg-quic QEMU WebUI log routing probe $$"
 attempt=0
-while [ "${attempt}" -lt 30 ]; do
-    if find /var/log/wireguardquic -name '*.log' -type f -size +0c \
-        2>/dev/null | grep -q .; then
+while [ "${attempt}" -lt 60 ]; do
+    logger -t wg-quic "${log_probe}"
+    /usr/local/opnsense/scripts/syslog/queryLog.py \
+        --limit 10 \
+        --offset 0 \
+        --module core \
+        --filename wireguardquic \
+        > /tmp/wg-quic-webui-log.json 2>/dev/null || true
+    if grep -Fq "${log_probe}" /tmp/wg-quic-webui-log.json; then
         break
     fi
-    sleep 0.1
+    sleep 0.5
     attempt=$((attempt + 1))
 done
-/usr/local/opnsense/scripts/syslog/queryLog.py \
-    --limit 10 \
-    --offset 0 \
-    --module core \
-    --filename wireguardquic \
-    > /tmp/wg-quic-webui-log.json
-grep -q 'wg-quic QEMU WebUI log routing probe' \
-    /tmp/wg-quic-webui-log.json
+grep -Fq "${log_probe}" /tmp/wg-quic-webui-log.json
 
 echo "== installed PHP syntax =="
 find /usr/local/opnsense/mvc/app/controllers/OPNsense/WireguardQuic \
@@ -149,9 +148,12 @@ ifconfig quic0
 echo "== second userspace peer =="
 mkdir -p /var/run/wg-quic
 /usr/sbin/daemon -f -S -p /var/run/wg-quic/quic1.pid -T wg-quic-test \
-    /usr/local/sbin/wg-quic-quick run /tmp/wg-quic-peer.conf --name quic1
+    /usr/local/sbin/wg-quic-quick run \
+    /usr/local/etc/wg-quic/quic1.conf --name quic1
 attempt=0
-while [ ! -S /var/run/wg-quic/quic1.sock ] && [ "${attempt}" -lt 150 ]; do
+while { [ ! -S /var/run/wg-quic/quic1.sock ] ||
+    [ ! -S /var/run/wg-quic/quic1.sock.status ] ||
+    ! ifconfig quic1 >/dev/null 2>&1; } && [ "${attempt}" -lt 150 ]; do
     sleep 0.1
     attempt=$((attempt + 1))
 done
@@ -326,6 +328,11 @@ test ! -e /usr/local/opnsense/mvc/app/models/OPNsense/WireguardQuic/Menu/Menu.xm
 test ! -e /usr/local/opnsense/service/conf/actions.d/actions_wireguardquic.conf
 test ! -e /usr/local/opnsense/www/js/widgets/WireguardQuic.js
 test ! -e /usr/local/opnsense/www/js/widgets/Metadata/WireguardQuic.xml
+if grep -q 'wireguardquic' \
+    /usr/local/etc/syslog-ng.conf.d/syslog-ng-local.conf; then
+    echo "wireguardquic syslog route remained after uninstall" >&2
+    exit 1
+fi
 if ifconfig quic0 >/dev/null 2>&1; then
     echo "quic0 remained after uninstall" >&2
     exit 1
