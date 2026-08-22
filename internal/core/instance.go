@@ -362,8 +362,10 @@ func (i *Instance) status() control.Status {
 			peer.Endpoint = peer.SelectedEndpoint
 		}
 		peer.Session = string(armorbind.EndpointSessionIdle)
-		if endpoint, err := peerendpoint.ParseNumeric(peer.SelectedEndpoint); err == nil {
+		if endpoint, ok := peerSessionEndpoint(peer); ok {
 			peer.Session = string(i.bind.EndpointSessionState(endpoint))
+		}
+		if endpoint, err := peerendpoint.ParseNumeric(peer.SelectedEndpoint); err == nil {
 			reconnect := i.bind.EndpointReconnectStatus(endpoint)
 			peer.ReconnectAttempts = reconnect.Attempts
 			peer.ReconnectFailures = reconnect.Failures
@@ -391,6 +393,20 @@ func (i *Instance) status() control.Status {
 		},
 		Stats: i.Stats(),
 	}
+}
+
+// peerSessionEndpoint returns the WireGuard-authenticated live path when one
+// is known. Inbound peers have no selected dial endpoint, and outbound peers
+// may roam away from it after NAT rebinding. The selected endpoint remains the
+// owner of reconnect accounting, but it is not necessarily the active session.
+func peerSessionEndpoint(peer control.PeerStatus) (netip.AddrPort, bool) {
+	for _, value := range []string{peer.Endpoint, peer.SelectedEndpoint} {
+		endpoint, err := peerendpoint.ParseNumeric(value)
+		if err == nil {
+			return endpoint, true
+		}
+	}
+	return netip.AddrPort{}, false
 }
 
 func latestPeerActivity(lastRx, lastTx int64) (int64, string) {

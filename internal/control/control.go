@@ -34,7 +34,7 @@ type PeerStatus struct {
 	// QUIC path roaming or an outer NAT rebinding.
 	Endpoint string `json:"endpoint,omitempty"`
 	// SelectedEndpoint is the numeric endpoint owned by Generation. Core
-	// transactions, readiness, reconnect, and resource cleanup use this field;
+	// transactions, reconnect accounting, and resource cleanup use this field;
 	// they must not mistake a transient roaming address for desired state.
 	SelectedEndpoint             string `json:"selected_endpoint,omitempty"`
 	Generation                   uint64 `json:"generation"`

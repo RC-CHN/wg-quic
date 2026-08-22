@@ -120,6 +120,50 @@ func TestLatestPeerActivityPreservesDirection(t *testing.T) {
 	}
 }
 
+func TestPeerSessionEndpointUsesLiveWireGuardPath(t *testing.T) {
+	selected := "192.0.2.10:52820"
+	live := "198.51.100.20:52821"
+	for _, test := range []struct {
+		name string
+		peer control.PeerStatus
+		want string
+		ok   bool
+	}{
+		{
+			name: "inbound live endpoint without selected endpoint",
+			peer: control.PeerStatus{Endpoint: live},
+			want: live,
+			ok:   true,
+		},
+		{
+			name: "roamed live endpoint wins over selected endpoint",
+			peer: control.PeerStatus{Endpoint: live, SelectedEndpoint: selected},
+			want: live,
+			ok:   true,
+		},
+		{
+			name: "selected endpoint is the pre-handshake fallback",
+			peer: control.PeerStatus{SelectedEndpoint: selected},
+			want: selected,
+			ok:   true,
+		},
+		{
+			name: "invalid live endpoint falls back to selected endpoint",
+			peer: control.PeerStatus{Endpoint: "vpn.example.test:52820", SelectedEndpoint: selected},
+			want: selected,
+			ok:   true,
+		},
+		{name: "peer without an endpoint"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := peerSessionEndpoint(test.peer)
+			if ok != test.ok || (ok && got.String() != test.want) {
+				t.Fatalf("peerSessionEndpoint(%#v) = (%q, %t), want (%q, %t)", test.peer, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
 func TestInstancePreparedStateDefersNetworkActivation(t *testing.T) {
 	host := &testDeviceHost{
 		tunnel:      tuntest.NewChannelTUN(),
