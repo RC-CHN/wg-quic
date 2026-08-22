@@ -57,37 +57,131 @@ wg-quic-quick show wg0 --json
 sudo wg-quic-quick down wg0
 ```
 
-For a current development build, `show` first uses the quick management
-endpoint and reports desired generation/digests, persistent drift, configured
-and selected endpoints, DDNS candidates, authenticated endpoint generation,
-QUIC/WireGuard activity, per-peer FEC policy, cleanup work, and transport
-counters. It falls back to the legacy core-only view for an older instance.
+### Runtime peer and DDNS management (development tree)
 
-Runtime peer reconciliation is file-owned and capability-gated. These commands
-are present in the current development tree; their presence here is not a claim
-that the already-published v0.3.1 binaries expose `peer_reconcile_v1`:
+The current `main` tree supports live peer reconciliation and automatic DDNS.
+The already-published v0.3.1 artifacts predate this implementation and do not
+provide it; use a current development build or a later release.
+
+Start by inspecting the running supervisor. On Unix, use root for the detailed
+quick status because its management socket is mode `0600`:
 
 ```sh
-# Atomically replace /etc/wg-quic/wg0.conf first, then reconcile it.
-sudo wg-quic-quick reload wg0 --json
-
-# Apply a protected candidate without promoting the file yet.
-sudo wg-quic-quick reconcile wg0 /protected/staging/wg0.conf \
-  --expected-epoch EPOCH --expected-generation N --request-id ID --json
-
-sudo wg-quic-quick refresh-endpoints wg0 --json
-wg-quic-quick transaction-status wg0 --request-id ID --json
+sudo wg-quic-quick show wg0 --json
 ```
 
-Peer add/remove, ordinary AllowedIPs, keepalive, endpoint, DDNS selection, and
-per-peer FEC policy are live mutations when the status capability list permits
-them. Interface keys/addresses/MTU/DNS/hooks/global transport policy,
-preshared-key rotation, and automatic full-tunnel transitions return
-`restart_required` before mutation. `SaveConfig = true` remains rejected:
-runtime commit and durable file promotion are deliberately separate, and
-wg-quic never rewrites a secret-bearing profile implicitly. See
-[`docs/RUNTIME-PEER-RECONCILIATION.md`](docs/RUNTIME-PEER-RECONCILIATION.md)
-for the complete contract.
+The `capabilities` array must contain `peer_reconcile_v1` for live peer changes
+and `endpoint_refresh_v1` for administrative DDNS refresh. Status also reports
+`supervisor_epoch`, `desired_generation`, `persistent_drift`, recovery state,
+and, for every peer, the configured hostname, selected numeric endpoint, DNS
+candidates, refresh time, resolution error, endpoint generation, authenticated
+endpoint, session, and traffic counters.
+
+The CLI is the reference client for the privileged local management API:
+
+| CLI | Protocol operation | Required capability | Effect |
+| --- | --- | --- | --- |
+| `show --json` | `status` | `management_protocol_v1` | Inspect runtime, persistence, peers, DDNS, recovery, and transactions |
+| `reload` | `reload` | `peer_reconcile_v1` | Re-read the canonical full profile and reconcile it |
+| `reconcile` | `reconcile` | `peer_reconcile_v1` | Validate and apply a protected candidate using epoch/generation CAS |
+| `transaction-status` | `transaction_status` | management protocol | Recover the result of an accepted request ID |
+| `refresh-endpoints` | `refresh_endpoints` | `endpoint_refresh_v1` | Refresh all hostname peers or one public key immediately |
+
+This is not a remote HTTP API. Linux/OpenWrt use
+`/run/wg-quic/<interface>.manage.sock`, FreeBSD/OPNsense use
+`/var/run/wg-quic/<interface>.manage.sock`, and Windows uses the ACL-protected
+`\\.\pipe\wg-quic-quick-<interface>` named pipe. Each connection carries one
+bounded protocol-v1 JSON request and one response. Controllers should normally
+invoke the CLI or use the typed Go client instead of exposing these endpoints.
+
+#### Add, update, or remove peers
+
+Every input is a **complete desired profile**, not a peer patch. Add a `[Peer]`
+section to add it, edit that section to update it, or omit it to remove it.
+The normal administrator workflow is to replace the canonical file atomically
+and call `reload`. This Linux/OpenWrt example stages the file in the same
+root-owned directory so the rename is atomic:
+
+```sh
+sudo install -o root -g root -m 0600 ./wg0.next.conf \
+  /etc/wg-quic/.wg0.conf.next
+sudo mv /etc/wg-quic/.wg0.conf.next /etc/wg-quic/wg0.conf
+sudo wg-quic-quick reload wg0 --json
+```
+
+Use `/usr/local/etc/wg-quic/` on FreeBSD/OPNsense. The Windows manager performs
+the protected candidate and canonical-file operations under
+`%ProgramData%\wg-quic\interfaces`. `reload` reads status itself, supplies the
+current CAS tuple, and generates a request ID. If the file is valid but runtime
+commit fails, `show --json` reports `persistent_drift=true`; it never pretends
+that the canonical file was rolled back.
+
+An automation controller that needs runtime commit before file promotion uses
+the candidate workflow. Keep the candidate under a root-only path, retain one
+request ID across timeout retries, and promote those exact bytes only after a
+`committed` or `no_op` result:
+
+```sh
+sudo wg-quic-quick show wg0 --json
+# Copy supervisor_epoch and desired_generation from the response.
+
+sudo install -d -o root -g root -m 0700 /etc/wg-quic/.candidates
+sudo install -o root -g root -m 0600 ./wg0.next.conf \
+  /etc/wg-quic/.candidates/wg0.peer-change-01.conf
+
+sudo wg-quic-quick reconcile wg0 \
+  /etc/wg-quic/.candidates/wg0.peer-change-01.conf \
+  --expected-epoch EPOCH --expected-generation N \
+  --request-id peer-change-01 --json
+
+# Use the same ID after a lost response; do not submit changed content under it.
+sudo wg-quic-quick transaction-status wg0 \
+  --request-id peer-change-01 --json
+
+# After success, promote the exact candidate atomically on the same filesystem.
+sudo mv /etc/wg-quic/.candidates/wg0.peer-change-01.conf \
+  /etc/wg-quic/wg0.conf
+```
+
+Live mutable fields are peer add/remove, ordinary `AllowedIPs`, `Endpoint`,
+`PersistentKeepalive`, and `peer.fec-latency`. Adding a new peer may include a
+`PresharedKey`; changing one for an active peer requires restart. Interface
+keys/addresses/listen port/fwmark/MTU/DNS/table/hooks/global transport policy,
+automatic full-tunnel transitions, and active preshared-key rotation return
+`restart_required` before mutation. A durable full profile should retain all
+of its secrets even though an omitted existing preshared key can be inherited
+for the current live transaction. `SaveConfig = true` remains rejected.
+
+#### DDNS behavior and manual refresh
+
+A hostname in `Endpoint`, for example `Endpoint = edge.example.com:443`, makes
+that peer dynamic. The supervisor resolves all usable A/AAAA candidates and
+refreshes automatically. The current system resolver does not expose TTLs, so
+it uses a conservative one-minute base interval with jitter (bounded by the
+30-second/30-minute policy); route changes and repeated transport recovery
+failures can trigger an earlier refresh or candidate rotation.
+
+```sh
+# Refresh every dynamic peer now.
+sudo wg-quic-quick refresh-endpoints wg0 --json
+
+# Refresh one peer identified by its complete base64 public key.
+sudo wg-quic-quick refresh-endpoints wg0 \
+  --peer 'PEER_PUBLIC_KEY_BASE64' --json
+
+# Inspect selected_endpoint, dns_candidates, next_refresh_at, and errors.
+sudo wg-quic-quick show wg0 --json
+```
+
+DNS answer reordering does not move a healthy peer. Timeout, SERVFAIL, and
+NXDOMAIN retain the last selected endpoint and expose an error in status. A new
+address is published only after its route is prepared and WireGuard traffic
+authenticates the new endpoint generation; failure rolls the candidate and its
+route lease back. DDNS changes `endpoint_generation`, not
+`desired_generation`, and never rewrites the profile.
+
+See [`docs/RUNTIME-PEER-RECONCILIATION.md`](docs/RUNTIME-PEER-RECONCILIATION.md)
+for the complete JSON, transaction, security, rollback, and controller contract.
 
 “All-platform” here means the same protocol and transaction semantics, not an
 undifferentiated claim that every CPU has already completed native acceptance:

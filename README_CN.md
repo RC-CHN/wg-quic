@@ -53,32 +53,120 @@ wg-quic-quick show wg0 --json
 sudo wg-quic-quick down wg0
 ```
 
-当前开发版的 `show` 会优先读取 quick 管理端点，显示 desired generation/digest、
-持久配置漂移、配置域名与当前数字端点、DDNS 候选、已认证 endpoint generation、
-QUIC/WireGuard 活动、每 peer FEC 策略、待清理资源和传输计数；连接旧实例时会
-自动回退到 core-only 状态。
+### 运行时 peer 与 DDNS 管理（当前开发树）
 
-运行时 peer reconciliation 以配置文件为持久来源，并由 capability 控制。以下
-命令存在于当前开发树；这并不表示已经发布的 v0.3.1 二进制一定声明了
-`peer_reconcile_v1`：
+当前 `main` 已支持在线 peer reconciliation 和自动 DDNS。已经发布的 v0.3.1
+制品早于这套实现，并不包含这些能力；请使用当前开发版或后续版本。
+
+首先检查运行中的 supervisor。Unix 上的 quick 管理 socket 权限为 `0600`，读取
+完整状态需要 root：
 
 ```sh
-# 先原子替换 /etc/wg-quic/wg0.conf，再同步运行状态。
-sudo wg-quic-quick reload wg0 --json
-
-# 应用受保护的候选文件，成功后再由外部控制器提升为正式文件。
-sudo wg-quic-quick reconcile wg0 /protected/staging/wg0.conf \
-  --expected-epoch EPOCH --expected-generation N --request-id ID --json
-
-sudo wg-quic-quick refresh-endpoints wg0 --json
-wg-quic-quick transaction-status wg0 --request-id ID --json
+sudo wg-quic-quick show wg0 --json
 ```
 
-状态 capability 允许时，peer 增删、普通 AllowedIPs、keepalive、endpoint、DDNS
-选择和每 peer FEC 策略都可热更新。接口密钥/地址/MTU/DNS/hooks/全局传输策略、
-PresharedKey 轮换和自动全隧道切换会在任何 mutation 前返回
-`restart_required`。`SaveConfig = true` 仍明确拒绝：运行时提交与配置文件持久化
-被刻意拆开，wg-quic 不会隐式重写含密钥的配置。完整契约见
+`capabilities` 数组包含 `peer_reconcile_v1` 时才能在线修改 peer，包含
+`endpoint_refresh_v1` 时才能手动触发 DDNS 刷新。状态还会显示
+`supervisor_epoch`、`desired_generation`、`persistent_drift`、恢复状态，以及每个
+peer 的配置域名、当前数字 endpoint、DNS 候选、下次刷新时间、解析错误、
+endpoint generation、已认证 endpoint、会话和流量计数。
+
+CLI 是特权本地管理 API 的标准客户端：
+
+| CLI | 协议 operation | 所需 capability | 作用 |
+| --- | --- | --- | --- |
+| `show --json` | `status` | `management_protocol_v1` | 查看运行状态、持久化、peer、DDNS、恢复和事务 |
+| `reload` | `reload` | `peer_reconcile_v1` | 重新读取完整正式配置并同步运行状态 |
+| `reconcile` | `reconcile` | `peer_reconcile_v1` | 使用 epoch/generation CAS 校验并应用受保护候选配置 |
+| `transaction-status` | `transaction_status` | 管理协议 | 按 request ID 恢复已接受事务的结果 |
+| `refresh-endpoints` | `refresh_endpoints` | `endpoint_refresh_v1` | 立即刷新全部域名 peer 或指定公钥 |
+
+它不是远程 HTTP API。Linux/OpenWrt 使用
+`/run/wg-quic/<接口>.manage.sock`，FreeBSD/OPNsense 使用
+`/var/run/wg-quic/<接口>.manage.sock`，Windows 使用 ACL 保护的
+`\\.\pipe\wg-quic-quick-<接口>` named pipe。每个连接只承载一条有大小限制的
+protocol-v1 JSON 请求和一条响应。控制器通常应调用 CLI 或 typed Go client，不能
+把这些本地端点暴露到网络。
+
+#### 增加、修改或删除 peer
+
+每次输入都是**完整 desired 配置**，不是单个 peer patch。增加 `[Peer]` 段即添加，
+修改该段即更新，不再包含某个段即删除对应 peer。普通管理员应先原子替换正式
+配置，再执行 `reload`。以下 Linux/OpenWrt 示例把临时文件写入同一个 root-only
+目录，因此最后的 rename 是原子的：
+
+```sh
+sudo install -o root -g root -m 0600 ./wg0.next.conf \
+  /etc/wg-quic/.wg0.conf.next
+sudo mv /etc/wg-quic/.wg0.conf.next /etc/wg-quic/wg0.conf
+sudo wg-quic-quick reload wg0 --json
+```
+
+FreeBSD/OPNsense 应改用 `/usr/local/etc/wg-quic/`。Windows manager 会在
+`%ProgramData%\wg-quic\interfaces` 下完成受保护的候选文件和正式文件操作。
+`reload` 会自行读取状态、填写当前 CAS tuple 并生成 request ID。如果配置有效但
+运行时提交失败，`show --json` 会报告 `persistent_drift=true`，不会假装正式文件
+已经回滚。
+
+需要“先提交运行时、再提升正式文件”的自动化控制器应使用 candidate workflow。
+候选文件必须放在 root-only 路径；超时重试必须沿用同一个 request ID；只有结果为
+`committed` 或 `no_op` 后才能提升完全相同的字节：
+
+```sh
+sudo wg-quic-quick show wg0 --json
+# 从响应复制 supervisor_epoch 和 desired_generation。
+
+sudo install -d -o root -g root -m 0700 /etc/wg-quic/.candidates
+sudo install -o root -g root -m 0600 ./wg0.next.conf \
+  /etc/wg-quic/.candidates/wg0.peer-change-01.conf
+
+sudo wg-quic-quick reconcile wg0 \
+  /etc/wg-quic/.candidates/wg0.peer-change-01.conf \
+  --expected-epoch EPOCH --expected-generation N \
+  --request-id peer-change-01 --json
+
+# 响应丢失时沿用同一个 ID；不得用这个 ID 提交已经变化的内容。
+sudo wg-quic-quick transaction-status wg0 \
+  --request-id peer-change-01 --json
+
+# 成功后，在同一文件系统内原子提升完全相同的候选文件。
+sudo mv /etc/wg-quic/.candidates/wg0.peer-change-01.conf \
+  /etc/wg-quic/wg0.conf
+```
+
+可热更新字段包括 peer 增删、普通 `AllowedIPs`、`Endpoint`、
+`PersistentKeepalive` 和 `peer.fec-latency`。新增 peer 可以带 `PresharedKey`；修改
+运行中 peer 的 PresharedKey 需要重启。接口密钥/地址/listen port/fwmark/MTU/
+DNS/table/hooks/全局传输策略、自动全隧道切换和运行中 PresharedKey 轮换会在任何
+mutation 前返回 `restart_required`。虽然现有 peer 省略 PresharedKey 时本次运行时
+事务可以继承活动密钥，但需要持久化的完整配置仍应保留全部密钥。
+`SaveConfig = true` 继续明确拒绝。
+
+#### DDNS 行为与手动刷新
+
+只要 `Endpoint` 使用域名，例如 `Endpoint = edge.example.com:443`，该 peer 就会
+自动进入 DDNS 管理。supervisor 会解析所有可用 A/AAAA 候选并定期刷新。当前系统
+resolver 不提供 TTL，因此使用一分钟保守基础间隔并加入 jitter（策略上下限为
+30 秒和 30 分钟）；主机路由变化或连续传输恢复失败也能提前触发刷新或候选轮换。
+
+```sh
+# 立即刷新所有使用域名的 peer。
+sudo wg-quic-quick refresh-endpoints wg0 --json
+
+# 使用完整 base64 公钥刷新一个 peer。
+sudo wg-quic-quick refresh-endpoints wg0 \
+  --peer 'PEER_PUBLIC_KEY_BASE64' --json
+
+# 查看 selected_endpoint、dns_candidates、next_refresh_at 和解析错误。
+sudo wg-quic-quick show wg0 --json
+```
+
+DNS 答案仅改变顺序时不会移动健康 peer。timeout、SERVFAIL 或 NXDOMAIN 会保留上次
+可用 endpoint，并在状态中暴露错误。新地址只有在外层路由准备完成且 WireGuard
+流量认证新的 endpoint generation 后才会发布；失败会回滚候选地址和路由 lease。
+DDNS 只推进 `endpoint_generation`，不改变 `desired_generation`，也不会重写配置。
+
+完整 JSON、事务、安全、回滚和控制器契约见
 [`docs/RUNTIME-PEER-RECONCILIATION.md`](docs/RUNTIME-PEER-RECONCILIATION.md)。
 
 这里的“全平台”指同一协议和事务语义，不代表每种 CPU 都已经完成原生验收：

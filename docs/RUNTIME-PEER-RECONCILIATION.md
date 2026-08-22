@@ -331,9 +331,15 @@ A mutation request contains:
   "expected_generation": 12,
   "request_id": "controller-generated-unique-id",
   "deadline_unix_millis": 1787313700000,
-  "desired_peers": []
+  "candidate_path": "/etc/wg-quic/.candidates/wg0.request-id.conf"
 }
 ```
+
+The local management envelope never carries secret-bearing peer projections.
+For `reconcile`, `candidate_path` names a protected full profile that quick
+opens and validates through the platform secure-open path. `reload` omits
+`candidate_path` and uses the canonical profile. Unknown JSON fields,
+including an inline `desired_peers` projection, are rejected in protocol v1.
 
 Request IDs are length-bounded and scoped to one interface epoch. Processing
 order is mandatory:
