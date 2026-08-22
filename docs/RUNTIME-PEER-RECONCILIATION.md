@@ -1175,3 +1175,49 @@ that every stronger label names current evidence and that every published
 artifact tuple has at least build evidence. Missing hardware therefore appears
 as an explicit lower label and pending claim gate, rather than as either a
 false universal-support claim or an untracked exception.
+
+## 27. Admission contract for a new operating-system family
+
+The all-platform contract in this document covers the platform families in
+section 2. It does not currently include macOS, iOS/iPadOS, Android, or another
+OS merely because the portable Go packages compile there. Those systems have
+different packet-interface, privilege, background-lifecycle, routing, and
+application-signing models. Until an exact tuple passes the gates below it is
+`unsupported`, not an unlisted form of build support.
+
+A new operating-system family enters the support matrix only after it supplies
+all of these adapters without weakening the portable transaction semantics:
+
+1. A production packet interface and data-plane path. For example, a macOS
+   command-line port may use `utun`, while an App Store or mobile port normally
+   requires a Network Extension or Android `VpnService`; a test-only TUN shim
+   is insufficient.
+2. A least-privilege management boundary that authenticates the local
+   controller, bounds every request, protects candidate bytes, and preserves
+   the same epoch/generation/request-ID protocol. A sandboxed application must
+   use the OS broker or extension IPC model rather than exposing the Unix root
+   socket to its UI process.
+3. Atomic, secret-safe canonical and candidate storage. Private and preshared
+   keys remain outside browser/UI state and ordinary logs; platform keychain or
+   app-group integration must still produce one exact, auditable candidate
+   projection for reconciliation.
+4. Incremental inner- and outer-route transactions with explicit ownership,
+   prepare/commit/rollback ordering, and conservative recovery for every effect
+   that can survive the packet interface or process. Broad route deletion or
+   inference from destination prefix alone is not acceptable.
+5. A native lifecycle/package adapter for the platform's supported execution
+   model, including install, upgrade, restart, sleep/network-change handling,
+   and removal while a tunnel is active. A foreground developer binary proves
+   only the dimensions it actually exercises.
+6. Capability negotiation and all shared failure-injection tests, followed by
+   an exact-artifact claim record covering traffic continuity, authenticated
+   endpoint migration, transaction rollback, forced termination, reboot or
+   extension restart, and cleanup on a supported OS release and architecture.
+
+Platform-specific limitations are returned as structured capability or
+`restart_required` results. A new adapter may initially expose a strict subset
+of mutable fields, but it may not emulate a successful hot update by silently
+restarting the tunnel or dropping unrelated peers. Native UI work begins only
+after the privileged controller contract is usable independently; this keeps a
+future Network Extension, Android service, or other presentation layer from
+becoming a second owner of runtime state.
