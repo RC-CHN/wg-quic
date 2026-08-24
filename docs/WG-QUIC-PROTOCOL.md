@@ -610,6 +610,19 @@ Status exposes, among other local measurements:
 - congestion window, bytes in flight, bandwidth estimate, pacing rate, and
   model state.
 
+Status additionally advertises `session_telemetry_v1` and exposes the same
+measurements independently for every active QUIC session. Session observations
+include the connection role and generation, configured and current outer
+endpoint, authenticated/configured peer associations, RTT variation, cumulative
+PTO firings, and packets later classified as spurious loss. A session can be
+associated with multiple WireGuard peers; implementations and collectors must
+not duplicate its QUIC counters into a separate copy for each peer. These
+portable observations use the same schema on Unix and Windows. A
+platform-specific host or socket counter must separately report whether its
+source is supported instead of using zero to mean both "unavailable" and "no
+events". Session enumeration is bounded, prioritizes configured outbound
+connections, and reports the excluded count as `session_telemetry_omitted`.
+
 These status values and the local control socket are not wire-protocol fields.
 They can change independently of v1 interoperability.
 

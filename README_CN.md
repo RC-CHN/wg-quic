@@ -70,6 +70,17 @@ sudo wg-quic-quick show wg0 --json
 peer 的配置域名、当前数字 endpoint、DNS 候选、下次刷新时间、解析错误、
 endpoint generation、已认证 endpoint、会话和流量计数。
 
+当 `capabilities` 包含 `session_telemetry_v1` 时，顶层 `sessions` 数组会提供
+连接级 WireGuard、QUIC、FEC 和队列观测。每项包含进程内唯一 session ID、该
+endpoint 的重连 generation、入站/出站角色、配置和当前 endpoint、采样时间，
+以及零个或多个 peer 关联。关联会区分“由配置推导”和“已经通过 WireGuard 包
+认证”；一个 QUIC session 可以合法关联多个 peer。PTO、误判丢包、RTT 方差、
+cwnd、pacing 和带宽估计均按 session 独立统计。计数从连接创建开始，连接关闭后
+便离开 active set，因此采集器必须用 supervisor epoch、session ID 和 generation
+共同计算 delta。Linux/OpenWrt、FreeBSD/OPNsense 和 Windows 使用完全相同的
+schema 与字段语义。枚举有固定上限并优先保留配置的出站 session；如果还有活跃
+连接未返回，`session_telemetry_omitted` 会给出其数量。
+
 CLI 是特权本地管理 API 的标准客户端：
 
 | CLI | 协议 operation | 所需 capability | 作用 |

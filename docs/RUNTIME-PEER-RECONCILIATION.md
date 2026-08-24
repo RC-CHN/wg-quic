@@ -826,7 +826,8 @@ Interface status exposes at least:
     "management_protocol_v1",
     "peer_reconcile_v1",
     "dynamic_obfs_keys",
-    "authenticated_endpoint_generation"
+    "authenticated_endpoint_generation",
+    "session_telemetry_v1"
   ]
 }
 ```
@@ -859,6 +860,53 @@ Per-peer status exposes non-secret desired and operational state:
   "cleanup_pending": false
 }
 ```
+
+When `session_telemetry_v1` is advertised, status also exposes every active
+outer connection independently. The association list is intentionally plural:
+multiple configured WireGuard peers can share one endpoint and therefore one
+QUIC session.
+
+```json
+{
+  "telemetry_version": 1,
+  "session_id": 27,
+  "session_generation": 3,
+  "role": "outbound",
+  "state": "established",
+  "configured_endpoint": "203.0.113.10:12580",
+  "current_endpoint": "198.51.100.27:43192",
+  "established_at": "2026-08-24T10:00:00Z",
+  "sampled_at": "2026-08-24T10:00:30Z",
+  "peers": [
+    {
+      "public_key": "...",
+      "endpoint_generation": 4,
+      "configured": true,
+      "authenticated": true
+    }
+  ],
+  "stats": {
+    "wire_tx_packets": 1200,
+    "wire_rx_packets": 1188,
+    "quic_packets_lost": 12,
+    "quic_spurious_loss_packets": 2,
+    "quic_pto_count": 1,
+    "quic_smoothed_rtt_us": 74200,
+    "quic_rttvar_us": 8300,
+    "quic_congestion_window_bytes": 65536,
+    "send_queue_depth": 0,
+    "queue_drops": 0
+  }
+}
+```
+
+Session counters begin at connection creation and disappear from the active
+set when the session closes. A collector keys deltas by supervisor epoch,
+session ID, and session generation. Linux/OpenWrt, FreeBSD/OPNsense, and
+Windows use this same management schema. Platform-specific kernel counters
+must carry explicit support/source metadata; absence is never encoded as a
+zero event count. The active-session list is bounded and prioritizes configured
+outbound connections; `session_telemetry_omitted` reports the excluded count.
 
 Endpoint status deliberately has three separate meanings. `configured_endpoint`
 is the canonical user configuration and may contain a hostname;

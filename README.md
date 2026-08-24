@@ -76,6 +76,21 @@ and, for every peer, the configured hostname, selected numeric endpoint, DNS
 candidates, refresh time, resolution error, endpoint generation, authenticated
 endpoint, session, and traffic counters.
 
+When `capabilities` contains `session_telemetry_v1`, the top-level `sessions`
+array exposes connection-scoped WireGuard, QUIC, FEC, and queue observations.
+Each entry has a process-unique session ID, an endpoint-local reconnect
+generation, role, configured/current endpoint, sample time, and zero or more
+peer associations. Associations distinguish configuration-derived ownership
+from a WireGuard-authenticated path; one QUIC session may legitimately list
+multiple peers. PTO and spurious-loss counters, RTT variation, cwnd, pacing,
+and bandwidth estimates are independent per session. Session counters start at
+connection creation and leave the active set when that connection closes, so
+collectors must key deltas by supervisor epoch, session ID, and generation.
+The schema and semantics are identical on Linux/OpenWrt, FreeBSD/OPNsense, and
+Windows. Enumeration is bounded and prioritizes configured outbound sessions;
+`session_telemetry_omitted` reports any additional active sessions that were
+not included.
+
 The CLI is the reference client for the privileged local management API:
 
 | CLI | Protocol operation | Required capability | Effect |
