@@ -15,7 +15,7 @@ Salamander-style packet obfuscation.
 > and `wg-quick`-style configuration files.
 
 The current public release is
-[`v0.3.2`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.2).
+[`v0.3.3`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.3).
 
 ## Platform status
 
@@ -59,7 +59,7 @@ sudo wg-quic-quick down wg0
 
 ### Runtime peer and DDNS management
 
-Release `v0.3.2` supports live peer reconciliation and automatic DDNS across
+Release `v0.3.3` supports live peer reconciliation and automatic DDNS across
 the platform service adapters listed above.
 
 Start by inspecting the running supervisor. On Unix, use root for the detailed
@@ -288,11 +288,11 @@ Download the archive matching the host architecture from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). For example, on amd64:
 
 ```sh
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.2/wg-quic-v0.3.2-linux-amd64.tar.gz
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.2/SHA256SUMS
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.3/wg-quic-v0.3.3-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.3/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf wg-quic-v0.3.2-linux-amd64.tar.gz
-cd wg-quic-v0.3.2-linux-amd64
+tar -xzf wg-quic-v0.3.3-linux-amd64.tar.gz
+cd wg-quic-v0.3.3-linux-amd64
 
 sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 sudo install -m 0644 wg-quic@.service /etc/systemd/system/
@@ -313,7 +313,7 @@ sudo wg-quic-quick down wg0
 The amd64 desktop Deb is an alternative for Linux desktop users:
 
 ```sh
-sudo apt install ./wg-quic-desktop-v0.3.2-linux-amd64.deb
+sudo apt install ./wg-quic-desktop-v0.3.3-linux-amd64.deb
 ```
 
 The desktop imports profiles into `/etc/wg-quic/` with mode `0600` and uses
@@ -348,7 +348,7 @@ process failure—not when reload returns `restart_required`.
 ## Windows
 
 For x64 Windows, the recommended installation is
-`wg-quic-desktop-v0.3.2-windows-x64.msi` from
+`wg-quic-desktop-v0.3.3-windows-x64.msi` from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). The per-machine MSI
 asks for elevation once, installs the UI under Program Files, and registers the
 restricted `wg-quic-manager` LocalSystem service. Use **Import** in the desktop
@@ -390,8 +390,8 @@ Download the amd64 or arm64 FreeBSD archive and install its two programs and
 rc.d script:
 
 ```sh
-tar -xzf wg-quic-v0.3.2-freebsd-amd64.tar.gz
-cd wg-quic-v0.3.2-freebsd-amd64
+tar -xzf wg-quic-v0.3.3-freebsd-amd64.tar.gz
+cd wg-quic-v0.3.3-freebsd-amd64
 install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
 install -d -m 0700 /usr/local/etc/wg-quic
@@ -415,14 +415,14 @@ After the rc.d script is installed, `wg-quic-quick up wg0` and
 
 Use the package whose OPNsense version exactly matches the firewall:
 
-- `os-wg-quic-0.3.2-opnsense-26.1-amd64.pkg`
-- `os-wg-quic-0.3.2-opnsense-26.7-amd64.pkg`
+- `os-wg-quic-0.3.3-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.3.3-opnsense-26.7-amd64.pkg`
 
 Copy it to the firewall and install it from a console or SSH session. For
 OPNsense 26.7:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.3.2-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.3.3-opnsense-26.7-amd64.pkg
 ```
 
 Then open `VPN > wg-quic`:
@@ -467,7 +467,7 @@ packages such as `kmod-tun` must match the running firmware. Install the APK
 on the router:
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.3.2-r1-openwrt-25.12.5-armsr-armv8.apk
+apk add --allow-untrusted ./wg-quic-0.3.3-r1-openwrt-25.12.5-armsr-armv8.apk
 ```
 
 The package pulls in `kmod-tun` and `ip-full`, installs both executables, and
@@ -590,9 +590,9 @@ native tooling, and `npm run version:check --prefix desktop` detects drift.
 Build and validate the six portable CLI archives locally with:
 
 ```sh
-make release-artifacts VERSION=0.3.2
+make release-artifacts VERSION=0.3.3
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.3.2-linux-amd64.tar.gz linux amd64 0.3.2
+  dist/wg-quic-v0.3.3-linux-amd64.tar.gz linux amd64 0.3.3
 ```
 
 OpenWrt and OPNsense packages must additionally match their exact target

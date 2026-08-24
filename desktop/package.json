@@ -1,7 +1,7 @@
 {
   "name": "wg-quic-desktop",
   "productName": "wg-quic",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Desktop shell for wg-quic-quick",
   "private": true,
   "type": "module",

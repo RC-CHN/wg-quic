@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## v0.3.3 - 2026-08-24
+
+Portable per-session transport observability release.
+
+- Added the versioned `session_telemetry_v1` management schema with independent
+  active-session WireGuard, QUIC, FEC, and queue counters and gauges.
+- Identified sessions by process-local ID, endpoint-local reconnect generation,
+  direction, configured/current endpoint, and sample/establishment time.
+- Preserved many-to-one WireGuard peer associations on shared QUIC connections,
+  distinguishing configured ownership from authenticated packet paths.
+- Exposed cumulative QUIC PTO and spurious-loss counts plus RTT variation per
+  session while retaining documented interface aggregates for compatibility.
+- Bounded status enumeration at 256 active sessions, prioritized configured
+  outbound sessions, and reported the number omitted from each observation.
+- Forwarded the portable schema through Unix sockets and Windows named pipes and
+  added human-readable session summaries to both status CLIs.
+- Added multi-session, authenticated-association, enumeration-bound, forwarding,
+  PTO, and spurious-loss tests, including race coverage for the affected paths.
+- Recorded the first public-internet performance study and documented which
+  controller events, bounded traces, and platform socket metrics remain future
+  observability work.
+
 ## v0.3.2 - 2026-08-22
 
 Transactional runtime reconciliation and cross-platform recovery release.
