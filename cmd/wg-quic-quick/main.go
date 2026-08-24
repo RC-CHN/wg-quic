@@ -372,6 +372,25 @@ func printRuntimeStatus(status *management.Status, jsonOutput bool) error {
 			peer.FECPolicy,
 		)
 	}
+	for _, session := range status.Sessions {
+		peerKeys := make([]string, 0, len(session.Peers))
+		for _, peer := range session.Peers {
+			peerKeys = append(peerKeys, peer.PublicKey)
+		}
+		fmt.Printf(
+			"transport session %d/%d: role=%s state=%s configured=%s current=%s peers=%v cwnd=%d rtt=%dus lost=%d pto=%d queue_drops=%d\n",
+			session.SessionID, session.SessionGeneration, session.Role, session.State,
+			session.ConfiguredEndpoint, session.CurrentEndpoint, peerKeys,
+			session.Stats.QUICCongestionWindowBytes,
+			session.Stats.QUICSmoothedRTTUs,
+			session.Stats.QUICPacketsLost,
+			session.Stats.QUICPTOCount,
+			session.Stats.QueueDrops,
+		)
+	}
+	if status.SessionTelemetryOmitted != 0 {
+		fmt.Printf("transport sessions omitted: %d\n", status.SessionTelemetryOmitted)
+	}
 	return nil
 }
 

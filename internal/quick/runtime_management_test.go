@@ -13,6 +13,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/management"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/internal/reconcile"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 func testQuickKey(value byte) string {
@@ -32,6 +33,13 @@ type fakeEndpointRefresher struct {
 type endpointStatusFixture []endpoint.Status
 
 func (f endpointStatusFixture) Status() []endpoint.Status { return f }
+
+type telemetryCoreClient struct {
+	*fakePeerSetClient
+	status control.Status
+}
+
+func (c *telemetryCoreClient) Status() (control.Status, error) { return c.status, nil }
 
 func (f *fakeEndpointRefresher) RefreshAll(context.Context) error {
 	f.allCalls++
@@ -106,6 +114,30 @@ func TestRuntimeManagementPreservesLiveEndpointAndActivityCompatibility(t *testi
 		peers[0].SelectedEndpoint != "192.0.2.10:443" ||
 		peers[0].LastActivity != 20 || peers[0].LastDirection != "received" {
 		t.Fatalf("management peer status = %#v", peers)
+	}
+}
+
+func TestRuntimeManagementForwardsPortableSessionTelemetry(t *testing.T) {
+	runtime := testRuntimeManagement(t, &fakeEndpointRefresher{})
+	runtime.core = &telemetryCoreClient{
+		fakePeerSetClient: &fakePeerSetClient{},
+		status: control.Status{
+			Capabilities:            []string{"session_telemetry_v1"},
+			SessionTelemetryOmitted: 3,
+			Sessions: []telemetry.SessionObservation{{
+				TelemetryVersion: telemetry.SessionTelemetryVersion,
+				SessionID:        9, SessionGeneration: 2, Role: "outbound",
+			}},
+		},
+	}
+	status := runtime.status()
+	if !slices.Contains(status.Capabilities, "session_telemetry_v1") ||
+		len(status.Sessions) != 1 || status.Sessions[0].SessionID != 9 ||
+		status.Sessions[0].SessionGeneration != 2 || status.SessionTelemetryOmitted != 3 {
+		t.Fatalf("forwarded session telemetry = %#v", status)
+	}
+	if !slices.Contains(runtime.capabilities(), "session_telemetry_v1") {
+		t.Fatalf("request capability set = %#v", runtime.capabilities())
 	}
 }
 

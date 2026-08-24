@@ -13,6 +13,8 @@ type ConnectionStats struct {
 	PacketsReceived       atomic.Uint64
 	BytesLost             atomic.Uint64
 	PacketsLost           atomic.Uint64
+	SpuriousLossPackets   atomic.Uint64
+	PTOCount              atomic.Uint64
 	CongestionWindow      atomic.Uint64
 	BytesInFlight         atomic.Uint64
 	BandwidthEstimate     atomic.Uint64

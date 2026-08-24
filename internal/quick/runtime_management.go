@@ -252,7 +252,6 @@ func (r *runtimeManagement) status() *management.Status {
 	canonicalError := r.canonicalError
 	reconcileActive := r.reconcileActive
 	r.mu.RUnlock()
-	capabilities := r.capabilitiesForState(reconcileActive)
 	cleanupPending := 0
 	if r.cleanup != nil {
 		cleanupPending = r.cleanup.CleanupPending()
@@ -263,6 +262,10 @@ func (r *runtimeManagement) status() *management.Status {
 			coreStatus = &status
 		}
 	}
+	capabilities := withCoreCapabilities(
+		r.capabilitiesForState(reconcileActive),
+		coreStatus,
+	)
 	peers := r.peerStatus(coreStatus)
 	state, carrier, fecMode, obfsMode := "", "", "", ""
 	var listenPort uint16
@@ -274,28 +277,44 @@ func (r *runtimeManagement) status() *management.Status {
 		addresses, stats = coreStatus.Addresses, coreStatus.Stats
 	}
 	return &management.Status{
-		ProtocolVersion:   management.ProtocolVersion,
-		Interface:         r.name,
-		State:             state,
-		ListenPort:        listenPort,
-		Carrier:           carrier,
-		FECMode:           fecMode,
-		ObfsMode:          obfsMode,
-		Addresses:         addresses,
-		Stats:             stats,
-		SupervisorEpoch:   coordinator.Epoch,
-		DesiredGeneration: coordinator.Generation,
-		DesiredDigest:     coordinator.DesiredDigest,
-		CanonicalDigest:   canonicalDigest,
-		CanonicalError:    canonicalError,
-		PersistentDrift:   canonicalError != "" || coordinator.DesiredDigest != canonicalDigest,
-		CleanupPending:    cleanupPending,
-		Recovery:          r.recovery,
-		Capabilities:      capabilities,
-		Transaction:       coordinator.Transaction,
-		LastTransaction:   coordinator.LastTransaction,
-		Peers:             peers,
+		ProtocolVersion:         management.ProtocolVersion,
+		Interface:               r.name,
+		State:                   state,
+		ListenPort:              listenPort,
+		Carrier:                 carrier,
+		FECMode:                 fecMode,
+		ObfsMode:                obfsMode,
+		Addresses:               addresses,
+		Stats:                   stats,
+		SupervisorEpoch:         coordinator.Epoch,
+		DesiredGeneration:       coordinator.Generation,
+		DesiredDigest:           coordinator.DesiredDigest,
+		CanonicalDigest:         canonicalDigest,
+		CanonicalError:          canonicalError,
+		PersistentDrift:         canonicalError != "" || coordinator.DesiredDigest != canonicalDigest,
+		CleanupPending:          cleanupPending,
+		Recovery:                r.recovery,
+		Capabilities:            capabilities,
+		Transaction:             coordinator.Transaction,
+		LastTransaction:         coordinator.LastTransaction,
+		Peers:                   peers,
+		Sessions:                sessionsFromCoreStatus(coreStatus),
+		SessionTelemetryOmitted: sessionTelemetryOmittedFromCoreStatus(coreStatus),
 	}
+}
+
+func sessionsFromCoreStatus(status *control.Status) []telemetry.SessionObservation {
+	if status == nil {
+		return nil
+	}
+	return status.Sessions
+}
+
+func sessionTelemetryOmittedFromCoreStatus(status *control.Status) uint64 {
+	if status == nil {
+		return 0
+	}
+	return status.SessionTelemetryOmitted
 }
 
 func (r *runtimeManagement) refreshCanonicalProjection() {
@@ -333,7 +352,33 @@ func (r *runtimeManagement) capabilities() []string {
 	r.mu.RLock()
 	reconcileActive := r.reconcileActive
 	r.mu.RUnlock()
-	return r.capabilitiesForState(reconcileActive)
+	capabilities := r.capabilitiesForState(reconcileActive)
+	if r.core == nil {
+		return capabilities
+	}
+	status, err := r.core.Status()
+	if err != nil {
+		return capabilities
+	}
+	return withCoreCapabilities(capabilities, &status)
+}
+
+func withCoreCapabilities(capabilities []string, status *control.Status) []string {
+	if status == nil {
+		return capabilities
+	}
+	for _, capability := range status.Capabilities {
+		if capability != "session_telemetry_v1" {
+			continue
+		}
+		for _, existing := range capabilities {
+			if existing == capability {
+				return capabilities
+			}
+		}
+		return append(capabilities, capability)
+	}
+	return capabilities
 }
 
 func (r *runtimeManagement) capabilitiesForState(reconcileActive bool) []string {

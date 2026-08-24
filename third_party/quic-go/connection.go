@@ -838,6 +838,12 @@ type ConnectionStats struct {
 	// PacketsLost is the cumulative number of congestion-controlled packets
 	// declared lost on the underlying connection.
 	PacketsLost uint64
+	// SpuriousLossPackets is the cumulative number of packets that were declared
+	// lost and later acknowledged.
+	SpuriousLossPackets uint64
+	// PTOCount is the cumulative number of probe timeouts that fired. Unlike the
+	// recovery backoff counter, this value never resets during a connection.
+	PTOCount uint64
 	// CongestionWindow is the sender's current congestion window in bytes.
 	CongestionWindow uint64
 	// BytesInFlight is the sender's current congestion-controlled flight size.
@@ -883,6 +889,8 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		PacketsReceived:       c.connStats.PacketsReceived.Load(),
 		BytesLost:             c.connStats.BytesLost.Load(),
 		PacketsLost:           c.connStats.PacketsLost.Load(),
+		SpuriousLossPackets:   c.connStats.SpuriousLossPackets.Load(),
+		PTOCount:              c.connStats.PTOCount.Load(),
 		CongestionWindow:      c.connStats.CongestionWindow.Load(),
 		BytesInFlight:         c.connStats.BytesInFlight.Load(),
 		BandwidthEstimate:     c.connStats.BandwidthEstimate.Load(),

@@ -76,6 +76,48 @@ func Show(name string, jsonOutput bool) error {
 			status.Stats.WGTxPackets, status.Stats.WGTxBytes, status.Stats.WGRxPackets, status.Stats.WGRxBytes)
 		fmt.Printf("  FEC: parity %d, raw lost %d, recovered %d, unrecovered %d\n",
 			status.Stats.FECParityTx, status.Stats.FECRawLost, status.Stats.FECRecovered, status.Stats.FECUnrecovered)
+		for _, session := range status.Sessions {
+			fmt.Printf(
+				"  transport session: %d/%d (%s, %s)\n",
+				session.SessionID,
+				session.SessionGeneration,
+				session.Role,
+				session.State,
+			)
+			if session.ConfiguredEndpoint != "" {
+				fmt.Printf("    configured endpoint: %s\n", session.ConfiguredEndpoint)
+			}
+			if session.CurrentEndpoint != "" {
+				fmt.Printf("    current endpoint: %s\n", session.CurrentEndpoint)
+			}
+			for _, peer := range session.Peers {
+				fmt.Printf(
+					"    peer association: %s (generation %d, configured=%t, authenticated=%t)\n",
+					peer.PublicKey,
+					peer.EndpointGeneration,
+					peer.Configured,
+					peer.Authenticated,
+				)
+			}
+			fmt.Printf(
+				"    QUIC: cwnd %d bytes, RTT %d us, lost %d, spurious %d, PTO %d\n",
+				session.Stats.QUICCongestionWindowBytes,
+				session.Stats.QUICSmoothedRTTUs,
+				session.Stats.QUICPacketsLost,
+				session.Stats.QUICSpuriousLossPackets,
+				session.Stats.QUICPTOCount,
+			)
+			fmt.Printf(
+				"    queues: send %d, priority %d, control %d, drops %d\n",
+				session.Stats.SendQueueDepth,
+				session.Stats.PriorityQueueDepth,
+				session.Stats.ControlQueueDepth,
+				session.Stats.QueueDrops,
+			)
+		}
+		if status.SessionTelemetryOmitted != 0 {
+			fmt.Printf("  transport sessions omitted: %d\n", status.SessionTelemetryOmitted)
+		}
 		for _, peer := range status.Peers {
 			fmt.Printf("  peer: %s\n", peer.PublicKey)
 			if peer.Endpoint != "" {

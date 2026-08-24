@@ -32,9 +32,12 @@ type Stats struct {
 	QUICPacketsAcked          uint64 `json:"quic_packets_acked"`
 	QUICBytesLost             uint64 `json:"quic_bytes_lost"`
 	QUICPacketsLost           uint64 `json:"quic_packets_lost"`
+	QUICSpuriousLossPackets   uint64 `json:"quic_spurious_loss_packets"`
+	QUICPTOCount              uint64 `json:"quic_pto_count"`
 	QUICMinRTTUs              uint64 `json:"quic_min_rtt_us"`
 	QUICSmoothedRTTUs         uint64 `json:"quic_smoothed_rtt_us"`
 	QUICLatestRTTUs           uint64 `json:"quic_latest_rtt_us"`
+	QUICRTTVarUs              uint64 `json:"quic_rttvar_us"`
 	QUICCongestionWindowBytes uint64 `json:"quic_congestion_window_bytes"`
 	QUICBytesInFlight         uint64 `json:"quic_bytes_in_flight"`
 	QUICBandwidthEstimateBps  uint64 `json:"quic_bandwidth_estimate_bps"`

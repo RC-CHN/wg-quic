@@ -695,11 +695,12 @@ func testSentPacketHandlerPTO(t *testing.T, encLevel protocol.EncryptionLevel, p
 	rttStats.UpdateRTT(500*time.Millisecond, 0)
 	rttStats.UpdateRTT(1000*time.Millisecond, 0)
 	rttStats.UpdateRTT(1500*time.Millisecond, 0)
+	stats := &utils.ConnectionStats{}
 	sph := NewSentPacketHandler(
 		0,
 		1200,
 		rttStats,
-		&utils.ConnectionStats{},
+		stats,
 		true,
 		false,
 		nil,
@@ -763,6 +764,7 @@ func testSentPacketHandlerPTO(t *testing.T, encLevel protocol.EncryptionLevel, p
 
 	eventRecorder.Clear()
 	sph.OnLossDetectionTimeout(timeout)
+	require.Equal(t, uint64(1), stats.PTOCount.Load())
 	require.Equal(t,
 		[]qlogwriter.Event{
 			qlog.LossTimerUpdated{
@@ -817,6 +819,7 @@ func testSentPacketHandlerPTO(t *testing.T, encLevel protocol.EncryptionLevel, p
 	now = timeout
 
 	sph.OnLossDetectionTimeout(timeout)
+	require.Equal(t, uint64(2), stats.PTOCount.Load())
 	require.Equal(t,
 		[]qlogwriter.Event{
 			qlog.LossTimerUpdated{
@@ -883,6 +886,7 @@ func testSentPacketHandlerPTO(t *testing.T, encLevel protocol.EncryptionLevel, p
 		eventRecorder.Events(qlog.LossTimerUpdated{}),
 	)
 	require.Contains(t, packets.Acked, pns[7])
+	require.Equal(t, uint64(2), stats.PTOCount.Load(), "cumulative PTO count reset after ACK")
 
 	// The PTO timer is now set for the last remaining packet (8),
 	// with no exponential backoff.
@@ -1589,11 +1593,12 @@ func TestSentPacketHandlerSpuriousLoss(t *testing.T) {
 
 	var eventRecorder events.Recorder
 
+	stats := &utils.ConnectionStats{}
 	sph := NewSentPacketHandler(
 		0,
 		1200,
 		utils.NewRTTStats(),
-		&utils.ConnectionStats{},
+		stats,
 		true,
 		false,
 		nil,
@@ -1666,6 +1671,7 @@ func TestSentPacketHandlerSpuriousLoss(t *testing.T) {
 		},
 		eventRecorder.Events(qlog.SpuriousLoss{}),
 	)
+	require.Equal(t, uint64(3), stats.SpuriousLossPackets.Load())
 	eventRecorder.Clear()
 
 	now = now.Add(secondAckDelay)
@@ -1707,6 +1713,7 @@ func TestSentPacketHandlerSpuriousLoss(t *testing.T) {
 		},
 		eventRecorder.Events(qlog.SpuriousLoss{}),
 	)
+	require.Equal(t, uint64(7), stats.SpuriousLossPackets.Load())
 }
 
 func BenchmarkSendAndAcknowledge(b *testing.B) {

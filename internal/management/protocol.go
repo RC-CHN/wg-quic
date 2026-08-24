@@ -41,27 +41,29 @@ func (r Request) Deadline() time.Time {
 }
 
 type Status struct {
-	ProtocolVersion   int               `json:"protocol_version"`
-	Interface         string            `json:"interface"`
-	State             string            `json:"state,omitempty"`
-	ListenPort        uint16            `json:"listen_port,omitempty"`
-	Carrier           string            `json:"carrier,omitempty"`
-	FECMode           string            `json:"fec_mode,omitempty"`
-	ObfsMode          string            `json:"obfs_mode,omitempty"`
-	Addresses         []string          `json:"addresses,omitempty"`
-	Stats             telemetry.Stats   `json:"stats"`
-	SupervisorEpoch   string            `json:"supervisor_epoch"`
-	DesiredGeneration uint64            `json:"desired_generation"`
-	DesiredDigest     string            `json:"desired_digest"`
-	CanonicalDigest   string            `json:"canonical_digest,omitempty"`
-	CanonicalError    string            `json:"canonical_error,omitempty"`
-	PersistentDrift   bool              `json:"persistent_drift"`
-	CleanupPending    int               `json:"cleanup_pending_count"`
-	Recovery          RecoveryStatus    `json:"recovery"`
-	Capabilities      []string          `json:"capabilities"`
-	Transaction       *reconcile.Result `json:"transaction,omitempty"`
-	LastTransaction   *reconcile.Result `json:"last_transaction,omitempty"`
-	Peers             []PeerStatus      `json:"peers,omitempty"`
+	ProtocolVersion         int                            `json:"protocol_version"`
+	Interface               string                         `json:"interface"`
+	State                   string                         `json:"state,omitempty"`
+	ListenPort              uint16                         `json:"listen_port,omitempty"`
+	Carrier                 string                         `json:"carrier,omitempty"`
+	FECMode                 string                         `json:"fec_mode,omitempty"`
+	ObfsMode                string                         `json:"obfs_mode,omitempty"`
+	Addresses               []string                       `json:"addresses,omitempty"`
+	Stats                   telemetry.Stats                `json:"stats"`
+	SupervisorEpoch         string                         `json:"supervisor_epoch"`
+	DesiredGeneration       uint64                         `json:"desired_generation"`
+	DesiredDigest           string                         `json:"desired_digest"`
+	CanonicalDigest         string                         `json:"canonical_digest,omitempty"`
+	CanonicalError          string                         `json:"canonical_error,omitempty"`
+	PersistentDrift         bool                           `json:"persistent_drift"`
+	CleanupPending          int                            `json:"cleanup_pending_count"`
+	Recovery                RecoveryStatus                 `json:"recovery"`
+	Capabilities            []string                       `json:"capabilities"`
+	Transaction             *reconcile.Result              `json:"transaction,omitempty"`
+	LastTransaction         *reconcile.Result              `json:"last_transaction,omitempty"`
+	Peers                   []PeerStatus                   `json:"peers,omitempty"`
+	Sessions                []telemetry.SessionObservation `json:"sessions,omitempty"`
+	SessionTelemetryOmitted uint64                         `json:"session_telemetry_omitted,omitempty"`
 }
 
 type RecoveryStatus struct {

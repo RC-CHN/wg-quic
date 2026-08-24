@@ -12,6 +12,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/wgdevice"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/device"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/tun"
@@ -117,6 +118,33 @@ func TestLatestPeerActivityPreservesDirection(t *testing.T) {
 				test.wantDirection,
 			)
 		}
+	}
+}
+
+func TestAssociateConfiguredSessionPeersPreservesManyToOneAuthentication(t *testing.T) {
+	sessions := []telemetry.SessionObservation{{
+		ConfiguredEndpoint: "192.0.2.10:443",
+		Peers: []telemetry.SessionPeerObservation{{
+			PublicKey: "peer-b", EndpointGeneration: 2, Authenticated: true,
+		}},
+	}}
+	peers := []control.PeerStatus{
+		{PublicKey: "peer-b", SelectedEndpoint: "192.0.2.10:443", Generation: 4},
+		{PublicKey: "peer-a", SelectedEndpoint: "192.0.2.10:443", Generation: 5},
+		{PublicKey: "peer-c", SelectedEndpoint: "198.51.100.20:443", Generation: 6},
+	}
+	associateConfiguredSessionPeers(sessions, peers)
+	if len(sessions[0].Peers) != 2 {
+		t.Fatalf("session peer associations = %#v", sessions[0].Peers)
+	}
+	first, second := sessions[0].Peers[0], sessions[0].Peers[1]
+	if first.PublicKey != "peer-a" || !first.Configured || first.Authenticated ||
+		first.EndpointGeneration != 5 {
+		t.Fatalf("first session peer = %#v", first)
+	}
+	if second.PublicKey != "peer-b" || !second.Configured || !second.Authenticated ||
+		second.EndpointGeneration != 4 {
+		t.Fatalf("second session peer = %#v", second)
 	}
 }
 

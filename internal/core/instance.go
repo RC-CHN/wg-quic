@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/netip"
 	runtimemetrics "runtime/metrics"
+	"sort"
 	"sync"
 
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
@@ -375,6 +376,8 @@ func (i *Instance) status() control.Status {
 		peers = append(peers, peer)
 	}
 	i.endpointMu.RUnlock()
+	sessions, sessionTelemetryOmitted := i.bind.SessionTelemetry()
+	associateConfiguredSessionPeers(sessions, peers)
 	addresses := make([]string, 0, len(cfg.Interface.Addresses))
 	for _, addr := range cfg.Interface.Addresses {
 		addresses = append(addresses, addr.String())
@@ -383,15 +386,52 @@ func (i *Instance) status() control.Status {
 		Interface: i.name, State: state, ListenPort: i.bind.Port(),
 		Carrier: cfg.Transport.Carrier, FECMode: cfg.Transport.FEC,
 		ObfsMode: cfg.Transport.Obfs, Addresses: addresses,
-		Peers: peers,
+		Peers: peers, Sessions: sessions,
+		SessionTelemetryOmitted: sessionTelemetryOmitted,
 		Capabilities: []string{
 			"core_control_v1",
 			"typed_peer_transactions_v1",
 			"dynamic_obfs_keys",
 			"dynamic_peer_fec_policy",
 			"authenticated_endpoint_generation",
+			"session_telemetry_v1",
 		},
 		Stats: i.Stats(),
+	}
+}
+
+func associateConfiguredSessionPeers(
+	sessions []telemetry.SessionObservation,
+	peers []control.PeerStatus,
+) {
+	for sessionIndex := range sessions {
+		session := &sessions[sessionIndex]
+		if session.ConfiguredEndpoint == "" {
+			continue
+		}
+		byKey := make(map[string]int, len(session.Peers))
+		for index := range session.Peers {
+			byKey[session.Peers[index].PublicKey] = index
+		}
+		for _, peer := range peers {
+			if peer.SelectedEndpoint != session.ConfiguredEndpoint {
+				continue
+			}
+			if index, exists := byKey[peer.PublicKey]; exists {
+				item := &session.Peers[index]
+				item.Configured = true
+				item.EndpointGeneration = max(item.EndpointGeneration, peer.Generation)
+				continue
+			}
+			byKey[peer.PublicKey] = len(session.Peers)
+			session.Peers = append(session.Peers, telemetry.SessionPeerObservation{
+				PublicKey: peer.PublicKey, EndpointGeneration: peer.Generation,
+				Configured: true,
+			})
+		}
+		sort.Slice(session.Peers, func(i, j int) bool {
+			return session.Peers[i].PublicKey < session.Peers[j].PublicKey
+		})
 	}
 }
 
@@ -610,22 +650,25 @@ func (i *Instance) recordAuthenticatedReceive(event device.AuthenticatedReceive)
 	i.endpointMu.Lock()
 	peer := i.peers[publicKey]
 	policy := ""
+	associationGeneration := uint64(0)
 	if peer != nil {
 		policy = peer.fecPolicy
+		associationGeneration = peer.status.AuthenticatedGeneration
 	}
-	if event.ReceiveSequence == 0 || peer == nil || peer.status.Generation == 0 ||
-		peer.status.SelectedEndpoint != event.Endpoint ||
-		event.ReceiveSequence <= peer.activationReceiveSequence {
-		i.endpointMu.Unlock()
-		if policy != "" {
-			_ = i.bind.SetAuthenticatedSessionFECPolicy(event.SessionID, policy)
-		}
-		return
+	if event.ReceiveSequence != 0 && peer != nil && peer.status.Generation != 0 &&
+		peer.status.SelectedEndpoint == event.Endpoint &&
+		event.ReceiveSequence > peer.activationReceiveSequence {
+		peer.status.AuthenticatedGeneration = peer.status.Generation
+		peer.status.AuthenticatedEndpoint = event.Endpoint
+		associationGeneration = peer.status.Generation
 	}
-	peer.status.AuthenticatedGeneration = peer.status.Generation
-	peer.status.AuthenticatedEndpoint = event.Endpoint
 	i.endpointMu.Unlock()
-	_ = i.bind.SetAuthenticatedSessionFECPolicy(event.SessionID, policy)
+	if peer != nil {
+		i.bind.AssociateSessionPeer(event.SessionID, publicKey, associationGeneration)
+	}
+	if policy != "" {
+		_ = i.bind.SetAuthenticatedSessionFECPolicy(event.SessionID, policy)
+	}
 }
 
 func canonicalPeerFECPolicy(policy string) string {

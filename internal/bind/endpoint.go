@@ -22,6 +22,7 @@ type Endpoint struct {
 	reconnectScheduled  bool
 	reconnectCancel     context.CancelFunc
 	reconnectGeneration uint64
+	sessionGeneration   uint64
 	consecutiveFailures uint32
 	reconnectAttempts   uint64
 	reconnectFailures   uint64

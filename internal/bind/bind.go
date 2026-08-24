@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,7 +20,10 @@ import (
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
 )
 
-const fecExpiryPoll = 500 * time.Millisecond
+const (
+	fecExpiryPoll       = 500 * time.Millisecond
+	maxSessionTelemetry = 256
+)
 
 type Config struct {
 	QueueSize        int
@@ -161,6 +165,23 @@ type bindStats struct {
 	fecRecovered   atomic.Uint64
 	fecUnrecovered atomic.Uint64
 	activeSessions atomic.Uint64
+}
+
+type sessionCounters struct {
+	wgTxPackets    atomic.Uint64
+	wgTxBytes      atomic.Uint64
+	wgRxPackets    atomic.Uint64
+	wgRxBytes      atomic.Uint64
+	wireTxPackets  atomic.Uint64
+	wireTxBytes    atomic.Uint64
+	wireRxPackets  atomic.Uint64
+	wireRxBytes    atomic.Uint64
+	queueDrops     atomic.Uint64
+	fecDataTx      atomic.Uint64
+	fecParityTx    atomic.Uint64
+	fecRawLost     atomic.Uint64
+	fecRecovered   atomic.Uint64
+	fecUnrecovered atomic.Uint64
 }
 
 type EndpointSessionState string
@@ -388,6 +409,73 @@ func (b *Bind) Stats() telemetry.Stats {
 	return stats
 }
 
+// SessionTelemetry returns independent observations for the currently active
+// QUIC sessions. Counters are scoped to a session and therefore reset when a
+// configured endpoint reconnects with a new session generation.
+func (b *Bind) SessionTelemetry() ([]telemetry.SessionObservation, uint64) {
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return nil, 0
+	}
+	state.mu.Lock()
+	sessions := make([]*session, 0, len(state.sessions))
+	for _, sess := range state.sessions {
+		sessions = append(sessions, sess)
+	}
+	state.mu.Unlock()
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].role != sessions[j].role {
+			return sessions[i].role == "outbound"
+		}
+		return sessions[i].id < sessions[j].id
+	})
+	omitted := uint64(0)
+	if len(sessions) > maxSessionTelemetry {
+		omitted = uint64(len(sessions) - maxSessionTelemetry)
+		sessions = sessions[:maxSessionTelemetry]
+	}
+	sampledAt := time.Now()
+	result := make([]telemetry.SessionObservation, 0, len(sessions))
+	for _, sess := range sessions {
+		result = append(result, sess.telemetry(sampledAt))
+	}
+	return result, omitted
+}
+
+// AssociateSessionPeer records that WireGuard authenticated a packet from a
+// peer on the named QUIC session. A session can carry more than one peer, so
+// associations are accumulated rather than replaced.
+func (b *Bind) AssociateSessionPeer(
+	sessionID uint64,
+	publicKey string,
+	endpointGeneration uint64,
+) bool {
+	if sessionID == 0 || publicKey == "" {
+		return false
+	}
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state == nil {
+		return false
+	}
+	state.mu.Lock()
+	sess := state.sessions[sessionID]
+	state.mu.Unlock()
+	if sess == nil || sess.closed.Load() {
+		return false
+	}
+	sess.mu.Lock()
+	if previous := sess.authenticatedPeers[publicKey]; endpointGeneration < previous {
+		endpointGeneration = previous
+	}
+	sess.authenticatedPeers[publicKey] = endpointGeneration
+	sess.mu.Unlock()
+	return true
+}
+
 func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 	b.mu.Lock()
 	state := b.state
@@ -421,6 +509,8 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 		stats.QUICPacketsAcked += current.PacketsAcked
 		stats.QUICBytesLost += current.BytesLost
 		stats.QUICPacketsLost += current.PacketsLost
+		stats.QUICSpuriousLossPackets += current.SpuriousLossPackets
+		stats.QUICPTOCount += current.PTOCount
 		stats.QUICCongestionWindowBytes += current.CongestionWindow
 		stats.QUICBytesInFlight += current.BytesInFlight
 		stats.QUICBandwidthEstimateBps += current.BandwidthEstimate
@@ -457,6 +547,10 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 		stats.QUICLatestRTTUs = max(
 			stats.QUICLatestRTTUs,
 			uint64(current.LatestRTT/time.Microsecond),
+		)
+		stats.QUICRTTVarUs = max(
+			stats.QUICRTTVarUs,
+			uint64(current.MeanDeviation/time.Microsecond),
 		)
 	}
 }
@@ -986,6 +1080,8 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		}
 		b.stats.wgTxPackets.Add(1)
 		b.stats.wgTxBytes.Add(uint64(len(buf)))
+		sess.stats.wgTxPackets.Add(1)
+		sess.stats.wgTxBytes.Add(uint64(len(buf)))
 		queue := sess.send
 		copies := 1
 		if priorityWireGuardDatagram(buf) {
@@ -1010,6 +1106,7 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 			default:
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 				b.stats.queueDrops.Add(1)
+				sess.stats.queueDrops.Add(1)
 				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
 				return errors.New("wg-quic send queue is full")
 			}
@@ -1152,13 +1249,23 @@ func (b *Bind) newSessionLocked(
 	reconnectAttempt bool,
 ) *session {
 	ctx, cancel := context.WithCancel(state.ctx)
+	ep.sessionGeneration++
+	role := "inbound"
+	configuredEndpoint := ""
+	if ep.configured {
+		role = "outbound"
+		configuredEndpoint = ep.addr.String()
+	}
 	sess := &session{
-		id: b.nextSession.Add(1), state: state, endpoint: ep, ctx: ctx, cancel: cancel,
+		id: b.nextSession.Add(1), generation: ep.sessionGeneration,
+		role: role, configuredEndpoint: configuredEndpoint,
+		state: state, endpoint: ep, ctx: ctx, cancel: cancel,
 		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
 		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
 		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
-		fecPolicyUpdates: make(chan string, 1),
-		remoteAddr:       ep.addr,
+		fecPolicyUpdates:   make(chan string, 1),
+		remoteAddr:         ep.addr,
+		authenticatedPeers: make(map[string]uint64),
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
@@ -1237,6 +1344,9 @@ func (b *Bind) runSession(sess *session) {
 
 type session struct {
 	id                  uint64
+	generation          uint64
+	role                string
+	configuredEndpoint  string
 	state               *runState
 	endpoint            *Endpoint
 	ctx                 context.Context
@@ -1249,6 +1359,7 @@ type session struct {
 	conn                *quiccarrier.Connection
 	remoteAddr          netip.AddrPort
 	establishedAt       time.Time
+	authenticatedPeers  map[string]uint64
 	readyOnce           sync.Once
 	closeOnce           sync.Once
 	closed              atomic.Bool
@@ -1259,6 +1370,84 @@ type session struct {
 	fecPolicy           string
 	fecPolicyUpdates    chan string
 	fecFlushDeadline    time.Duration
+	stats               sessionCounters
+}
+
+func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
+	s.mu.Lock()
+	conn := s.conn
+	remoteAddr := s.remoteAddr
+	establishedAt := s.establishedAt
+	peers := make([]telemetry.SessionPeerObservation, 0, len(s.authenticatedPeers))
+	for publicKey, generation := range s.authenticatedPeers {
+		peers = append(peers, telemetry.SessionPeerObservation{
+			PublicKey: publicKey, EndpointGeneration: generation, Authenticated: true,
+		})
+	}
+	s.mu.Unlock()
+	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
+
+	state := "connecting"
+	var establishedAtValue *time.Time
+	if conn != nil {
+		state = "established"
+		copy := establishedAt
+		establishedAtValue = &copy
+	}
+	currentEndpoint := ""
+	if remoteAddr.IsValid() {
+		currentEndpoint = remoteAddr.String()
+	}
+	stats := telemetry.SessionStats{
+		WGTxPackets: s.stats.wgTxPackets.Load(), WGTxBytes: s.stats.wgTxBytes.Load(),
+		WGRxPackets: s.stats.wgRxPackets.Load(), WGRxBytes: s.stats.wgRxBytes.Load(),
+		WireTxPackets: s.stats.wireTxPackets.Load(), WireTxBytes: s.stats.wireTxBytes.Load(),
+		WireRxPackets: s.stats.wireRxPackets.Load(), WireRxBytes: s.stats.wireRxBytes.Load(),
+		QueueDrops: s.stats.queueDrops.Load(), FECDataTx: s.stats.fecDataTx.Load(),
+		FECParityTx: s.stats.fecParityTx.Load(), FECRawLost: s.stats.fecRawLost.Load(),
+		FECRecovered: s.stats.fecRecovered.Load(), FECUnrecovered: s.stats.fecUnrecovered.Load(),
+		SendQueueDepth: uint64(len(s.send)), PriorityQueueDepth: uint64(len(s.priority)),
+		ControlQueueDepth: uint64(len(s.control)),
+	}
+	if s.fecEncoder != nil {
+		parity, lossEstimatePPM := s.fecEncoder.Stats()
+		stats.FECCurrentParityShards = uint64(parity)
+		stats.FECLossEstimatePPM = lossEstimatePPM
+	}
+	if conn != nil {
+		current := conn.Stats()
+		stats.QUICBytesSent = current.BytesSent
+		stats.QUICPacketsSent = current.PacketsSent
+		stats.QUICBytesReceived = current.BytesReceived
+		stats.QUICPacketsReceived = current.PacketsReceived
+		stats.QUICBytesAcked = current.BytesAcked
+		stats.QUICPacketsAcked = current.PacketsAcked
+		stats.QUICBytesLost = current.BytesLost
+		stats.QUICPacketsLost = current.PacketsLost
+		stats.QUICSpuriousLossPackets = current.SpuriousLossPackets
+		stats.QUICPTOCount = current.PTOCount
+		stats.QUICMinRTTUs = uint64(current.MinRTT / time.Microsecond)
+		stats.QUICLatestRTTUs = uint64(current.LatestRTT / time.Microsecond)
+		stats.QUICSmoothedRTTUs = uint64(current.SmoothedRTT / time.Microsecond)
+		stats.QUICRTTVarUs = uint64(current.MeanDeviation / time.Microsecond)
+		stats.QUICCongestionWindowBytes = current.CongestionWindow
+		stats.QUICBytesInFlight = current.BytesInFlight
+		stats.QUICBandwidthEstimateBps = current.BandwidthEstimate
+		stats.QUICPacingRateBps = current.PacingRate
+		stats.QUICPathRTTUs = uint64(current.PropagationRTT / time.Microsecond)
+		stats.QUICQueueDelayUs = uint64(current.QueueDelay / time.Microsecond)
+		stats.QUICFECRecoverableLossPPM = current.FECRecoverableLossPPM
+		stats.QUICFECResidualLossPPM = current.FECResidualLossPPM
+		stats.QUICCongestionModelState = current.CongestionModelState
+		stats.QUICDatagramSendQueueLen = current.DatagramSendQueueLen
+	}
+	return telemetry.SessionObservation{
+		TelemetryVersion: telemetry.SessionTelemetryVersion,
+		SessionID:        s.id, SessionGeneration: s.generation,
+		Role: s.role, State: state, ConfiguredEndpoint: s.configuredEndpoint,
+		CurrentEndpoint: currentEndpoint, EstablishedAt: establishedAtValue,
+		SampledAt: sampledAt, Peers: peers, Stats: stats,
+	}
 }
 
 type fecPolicyProfile struct {
@@ -1394,12 +1583,16 @@ func (s *session) sendLoop() {
 		}
 		s.endpoint.owner.stats.wireTxPackets.Add(1)
 		s.endpoint.owner.stats.wireTxBytes.Add(uint64(packetBytes))
+		s.stats.wireTxPackets.Add(1)
+		s.stats.wireTxBytes.Add(uint64(packetBytes))
 		if fecPacket {
 			switch kind {
 			case fec.KindData:
 				s.endpoint.owner.stats.fecDataTx.Add(1)
+				s.stats.fecDataTx.Add(1)
 			case fec.KindParity:
 				s.endpoint.owner.stats.fecParityTx.Add(1)
+				s.stats.fecParityTx.Add(1)
 			}
 		}
 		return true
@@ -1600,6 +1793,8 @@ func (s *session) receiveLoop() {
 		receiveEndpoint := s.endpointForAddrPort(datagram.RemoteAddr)
 		s.endpoint.owner.stats.wireRxPackets.Add(1)
 		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
+		s.stats.wireRxPackets.Add(1)
+		s.stats.wireRxBytes.Add(uint64(len(wirePacket)))
 		result, err := s.fecDecoder.Handle(time.Now(), wirePacket)
 		if err != nil {
 			return
@@ -1671,8 +1866,11 @@ func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 	for _, feedback := range feedbacks {
 		s.endpoint.owner.stats.fecRawLost.Add(uint64(feedback.Missing))
 		s.endpoint.owner.stats.fecRecovered.Add(uint64(feedback.Recovered))
+		s.stats.fecRawLost.Add(uint64(feedback.Missing))
+		s.stats.fecRecovered.Add(uint64(feedback.Recovered))
 		if feedback.Missing > feedback.Recovered {
 			s.endpoint.owner.stats.fecUnrecovered.Add(uint64(feedback.Missing - feedback.Recovered))
+			s.stats.fecUnrecovered.Add(uint64(feedback.Missing - feedback.Recovered))
 		}
 		select {
 		case s.control <- fec.MarshalFeedback(feedback):
@@ -1697,6 +1895,8 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 	}
 	s.endpoint.owner.stats.wgRxPackets.Add(1)
 	s.endpoint.owner.stats.wgRxBytes.Add(uint64(len(packet)))
+	s.stats.wgRxPackets.Add(1)
+	s.stats.wgRxBytes.Add(uint64(len(packet)))
 	rp := receivedPacket{data: packet, ep: endpoint}
 	if !(owned && frag.count == 1) {
 		// Everything except an owned single-fragment passthrough is a buffer
@@ -1712,6 +1912,7 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 		}
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
+		s.stats.queueDrops.Add(1)
 		if rp.release != nil {
 			rp.release(rp.data)
 		}

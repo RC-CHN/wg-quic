@@ -191,6 +191,105 @@ func TestBindRoundTripAndClose(t *testing.T) {
 	}
 }
 
+func TestSessionTelemetrySeparatesConnectionsAndAuthenticatedPeers(t *testing.T) {
+	config := DefaultConfig()
+	config.FECMode = "off"
+	a, b := New(config), New(config)
+	_, _, err := a.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	bReceive, bPort, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	remote := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bPort)))
+	aToB, err := a.ParseEndpoint(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("session-scoped telemetry")
+	if err := a.Send([][]byte{payload}, aToB); err != nil {
+		t.Fatal(err)
+	}
+	got, source := receiveOne(t, bReceive[0])
+	if !bytes.Equal(got, payload) {
+		t.Fatal("telemetry fixture payload changed in transit")
+	}
+
+	aSessions, omitted := a.SessionTelemetry()
+	if omitted != 0 {
+		t.Fatalf("outbound session telemetry omitted %d entries", omitted)
+	}
+	if len(aSessions) != 1 {
+		t.Fatalf("outbound session telemetry = %#v", aSessions)
+	}
+	outbound := aSessions[0]
+	if outbound.TelemetryVersion != 1 || outbound.Role != "outbound" ||
+		outbound.State != "established" || outbound.SessionGeneration != 1 ||
+		outbound.ConfiguredEndpoint != remote || outbound.CurrentEndpoint != remote ||
+		outbound.EstablishedAt == nil || outbound.SampledAt.IsZero() {
+		t.Fatalf("outbound session identity = %#v", outbound)
+	}
+	if outbound.Stats.WGTxPackets != 1 || outbound.Stats.WGTxBytes != uint64(len(payload)) ||
+		outbound.Stats.WireTxPackets == 0 || outbound.Stats.QUICPacketsSent == 0 {
+		t.Fatalf("outbound session counters = %#v", outbound.Stats)
+	}
+	if !a.AssociateSessionPeer(outbound.SessionID, "peer-z", 7) ||
+		!a.AssociateSessionPeer(outbound.SessionID, "peer-a", 3) ||
+		!a.AssociateSessionPeer(outbound.SessionID, "peer-z", 2) {
+		t.Fatal("active session rejected authenticated peer association")
+	}
+	aSessions, _ = a.SessionTelemetry()
+	outbound = aSessions[0]
+	if len(outbound.Peers) != 2 || outbound.Peers[0].PublicKey != "peer-a" ||
+		!outbound.Peers[0].Authenticated || outbound.Peers[0].EndpointGeneration != 3 ||
+		outbound.Peers[1].PublicKey != "peer-z" ||
+		outbound.Peers[1].EndpointGeneration != 7 {
+		t.Fatalf("authenticated session peers = %#v", outbound.Peers)
+	}
+
+	bSessions, omitted := b.SessionTelemetry()
+	if omitted != 0 {
+		t.Fatalf("inbound session telemetry omitted %d entries", omitted)
+	}
+	if len(bSessions) != 1 {
+		t.Fatalf("inbound session telemetry = %#v", bSessions)
+	}
+	inbound := bSessions[0]
+	if inbound.SessionID != source.(*Endpoint).SessionID() || inbound.Role != "inbound" ||
+		inbound.ConfiguredEndpoint != "" || inbound.CurrentEndpoint == "" ||
+		inbound.Stats.WGRxPackets != 1 || inbound.Stats.WGRxBytes != uint64(len(payload)) ||
+		inbound.Stats.WireRxPackets == 0 || inbound.Stats.QUICPacketsReceived == 0 {
+		t.Fatalf("inbound session telemetry = %#v", inbound)
+	}
+}
+
+func TestSessionTelemetryIsBoundedAndPrioritizesConfiguredSessions(t *testing.T) {
+	bind := New(DefaultConfig())
+	state := &runState{sessions: make(map[uint64]*session)}
+	bind.state = state
+	for id := uint64(1); id <= maxSessionTelemetry+2; id++ {
+		role := "inbound"
+		if id == maxSessionTelemetry+2 {
+			role = "outbound"
+		}
+		state.sessions[id] = &session{
+			id: id, generation: 1, role: role,
+			authenticatedPeers: make(map[string]uint64),
+		}
+	}
+	sessions, omitted := bind.SessionTelemetry()
+	if len(sessions) != maxSessionTelemetry || omitted != 2 {
+		t.Fatalf("bounded telemetry returned %d sessions and omitted %d", len(sessions), omitted)
+	}
+	if sessions[0].Role != "outbound" || sessions[0].SessionID != maxSessionTelemetry+2 {
+		t.Fatalf("configured session was not prioritized: first = %#v", sessions[0])
+	}
+}
+
 func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	config := DefaultConfig()
 	config.ObfsMode = "salamander"
