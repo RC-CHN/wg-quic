@@ -1306,7 +1306,7 @@ During staged development, `show --json` advertises exact capabilities. A
 controller may use supported mutable fields while an unsupported field receives
 `unsupported_capability` or `restart_required` before mutation. No release may
 describe a tuple as runtime- or integration-verified until its claim gate
-passes. A running development build advertises `peer_reconcile_v1` only after
+passes. A running binary advertises `peer_reconcile_v1` only after
 its local security, core, endpoint, and route primitives initialize
 successfully; this live capability is not a substitute for the release support
 label.

@@ -10,14 +10,15 @@
   distinguish path faults from implementation limits, and define the telemetry
   required for reproducible controller research
 - Follow-up release reviewed: `wg-quic v0.3.3`
-- Follow-up implementation status: the development tree after `v0.3.3` now
-  supplies active and retained final session telemetry, bounded sequenced
-  controller/session events, a peer-selecting generation-aware collector, and
+- Instrumentation release: `wg-quic v0.3.4`
+- Follow-up implementation status: `v0.3.4` supplies active and retained final
+  session telemetry, bounded sequenced controller/session events, a
+  peer-selecting generation-aware collector, and
   explicit cross-platform receive-overflow availability. This satisfies the
   minimum instrumentation gate for a controlled controller-recovery rerun.
-  Bounded qlog/CPU trace capture, sequence-level field evidence, privileged
-  release validation, and a new public trial are still outstanding; the data
-  still cannot justify changing the production congestion-controller default.
+  Bounded qlog/CPU trace capture, sequence-level field evidence, and a new
+  public trial are still outstanding; the data still cannot justify changing
+  the production congestion-controller default.
 - Data sensitivity: node labels are region aliases. Public addresses,
   credentials, WireGuard keys, and application payloads are intentionally not
   recorded here.
@@ -339,7 +340,7 @@ cwnd, and BWE must document whether the result is a sum, maximum, minimum, or
 weighted value.
 
 Kernel receive overflow belongs to the interface/shared UDP socket rather than
-one session. The development tree exposes a structured
+one session. `v0.3.4` exposes a structured
 `stats.receive_queue_overflow` object with `supported`, `source`, `platform`,
 and cumulative `packets`. Linux uses `SO_RXQ_OVFL`; FreeBSD/OPNsense, Windows,
 and unavailable receive paths explicitly report `supported=false` instead of
@@ -347,10 +348,10 @@ encoding absence as a zero-loss observation. Without an authoritative
 supported counter, network loss and kernel receive queue overflow still cannot
 be separated reliably.
 
-### 7.3 Closed-session final snapshots implemented after v0.3.3
+### 7.3 Closed-session final snapshots delivered in v0.3.4
 
-`v0.3.3` enumerates only active sessions. The current development tree closes
-that polling gap with `recent_session_telemetry_v1`.
+`v0.3.3` enumerates only active sessions. `v0.3.4` closes that polling gap with
+`recent_session_telemetry_v1`.
 
 The management schema exposes retained records separately as
 `recent_sessions`, so an old connection is never mistaken for a usable path.
@@ -397,10 +398,10 @@ The implementation:
 - loses process-local history on a core restart rather than pretending it is
   durable; the supervisor epoch already marks that boundary.
 
-## 8. Bounded Controller Events Implemented After v0.3.3
+## 8. Bounded Controller Events Delivered in v0.3.4
 
 Point-in-time gauges are insufficient to diagnose a collapse that recovers
-before the next sample. The development tree now records:
+before the next sample. `v0.3.4` records:
 
 - controller state transition and reason;
 - slow-start/startup exit and re-entry;
@@ -570,7 +571,7 @@ not by array position or the interface aggregate. It must:
 - report a missing or omitted target session as a failed sample, never as zero
   loss or zero traffic.
 
-The development tree implements that contract as a bounded portable command:
+`v0.3.4` implements that contract as a bounded portable command:
 
 ```bash
 wg-quic-quick collect mzwq0 \
@@ -684,15 +685,15 @@ No one hypothesis should be accepted from one short field sample.
 
 1. **Delivered in v0.3.3:** add active per-peer/session telemetry, cumulative
    PTO/spurious-loss counters, schema versioning, and bounded enumeration.
-2. **Implemented after v0.3.3:** retain bounded closed-session final snapshots
+2. **Delivered in v0.3.4:** retain bounded closed-session final snapshots
    and close reasons.
-3. **Implemented after v0.3.3:** add PTO, cwnd-transition, controller-state,
+3. **Delivered in v0.3.4:** add PTO, cwnd-transition, controller-state,
    FEC-transition, and session lifecycle events with a bounded sequence-aware
    ring.
-4. **Implemented after v0.3.3:** add a field collector that selects a
+4. **Delivered in v0.3.4:** add a field collector that selects a
    peer/session and follows generation changes without using interface
    aggregates.
-5. **Implemented after v0.3.3:** add Linux `SO_RXQ_OVFL` attribution and report
+5. **Delivered in v0.3.4:** add Linux `SO_RXQ_OVFL` attribution and report
    support/source explicitly on every platform.
 6. Add the bounded local trace operation, redacted artifact manifest, qlog
    subset, and on-demand CPU profile.
@@ -731,9 +732,9 @@ No one hypothesis should be accepted from one short field sample.
   without exposing secrets.
 - The same analysis script can compare clean, lossy, and asymmetric trials.
 
-## 16. Post-v0.3.3 Development Readiness Gate
+## 16. v0.3.4 Field-Run Readiness Gate
 
-| Activity | Current development readiness | Reason |
+| Activity | v0.3.4 readiness | Reason |
 | --- | --- | --- |
 | Inspect one active peer independently | Ready | Active per-session counters and gauges are attributable |
 | Controlled controller-recovery rerun | Ready for execution, not yet field-validated | The bounded collector follows one peer/session, consumes final snapshots, and retains controller events |
@@ -743,8 +744,8 @@ No one hypothesis should be accepted from one short field sample.
 | Diagnose clean-path CPU/data-path ceiling | Not ready | Bounded pprof/qlog trace is absent |
 | Change the production default controller | Not ready | Root-cause and repeated field evidence are incomplete |
 
-The minimum gate before the next evidence-bearing public research run is now
-implemented in the development tree:
+The minimum gate before the next evidence-bearing public research run is
+implemented in `v0.3.4`:
 
 1. closed-session final snapshot retention;
 2. PTO/cwnd/controller transition events; and
@@ -764,9 +765,9 @@ local wg-quic send queue overflow. It also found genuine public-path loss and
 directional impairment, plus a separate short-transfer penalty on the clean
 Tokyo control path.
 
-The correct next step is not a global production controller change. The
-development tree now retains attributable active/final telemetry and
-controller transitions, while the bounded collector follows peer generation
-explicitly. The next action is to run the small controlled public matrix and
-use those artifacts to drive controller, FEC, batching, and routing changes
-without confusing path faults with software faults.
+The correct next step is not a global production controller change. `v0.3.4`
+retains attributable active/final telemetry and controller transitions, while
+the bounded collector follows peer generation explicitly. The next action is
+to run the small controlled public matrix and use those artifacts to drive
+controller, FEC, batching, and routing changes without confusing path faults
+with software faults.

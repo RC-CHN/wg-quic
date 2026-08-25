@@ -51,10 +51,10 @@ Build the package with the matching official SDK as described in
 `packaging/openwrt/README.md`, then copy the package and guest test driver:
 
 ```sh
-scp -O -P 2222 dist/openwrt/wg-quic-0.3.3-r1.apk \
+scp -O -P 2222 dist/openwrt/wg-quic-0.3.4-r1.apk \
   tests/openwrt/guest-validate.sh root@127.0.0.1:/tmp/
 ssh -p 2222 root@127.0.0.1 \
-  'chmod 0755 /tmp/guest-validate.sh; /tmp/guest-validate.sh install-smoke /tmp/wg-quic-0.3.3-r1.apk'
+  'chmod 0755 /tmp/guest-validate.sh; /tmp/guest-validate.sh install-smoke /tmp/wg-quic-0.3.4-r1.apk'
 ```
 
 Use the `armsr-armv8` package in the ARM64 guest and the `x86-64` package in

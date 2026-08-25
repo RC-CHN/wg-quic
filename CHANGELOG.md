@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## v0.3.4 - 2026-08-25
+
+Cross-platform field observability release.
+
+- Retained up to 64 immutable closed-session final snapshots for five minutes,
+  with stable close reasons, redacted errors, replacement links, final sequence
+  numbers, and cumulative capacity/TTL eviction reporting.
+- Added a bounded 4,096-record, sequence-aware controller/session event stream
+  with cursor-gap detection, lifecycle and migration events, PTO/loss/spurious
+  loss, cwnd and RTT transitions, FEC changes, and queue-drop attribution.
+- Mapped status samples and events onto wall and process-monotonic clocks so
+  field artifacts preserve ordering across fast transitions.
+- Reported Linux UDP receive queue overflow from `SO_RXQ_OVFL`, including the
+  Salamander batch receive path and counter wrap, while FreeBSD/OPNsense,
+  Windows, and unavailable paths explicitly report unsupported semantics.
+- Added `wg-quic-quick collect`, a bounded peer-selecting field collector that
+  keys deltas by supervisor epoch, session ID, and generation, consumes retained
+  final snapshots before replacements, and emits raw NDJSON, derived CSV,
+  events, manifest, summary, and atomic completion state.
+- Protected collector output with Unix `0700`/`0600` modes and a protected
+  Administrators/LocalSystem Windows DACL inherited by its artifacts, without
+  capturing profiles, secrets, or application payloads.
+- Documented the new management APIs and collector workflow in English and
+  Simplified Chinese, including platform support and attribution limits.
+- Added race, cross-build, management, collector, receive-overflow, and live
+  privileged TUN coverage, including artifact parsing and permission checks.
+
 ## v0.3.3 - 2026-08-24
 
 Portable per-session transport observability release.
