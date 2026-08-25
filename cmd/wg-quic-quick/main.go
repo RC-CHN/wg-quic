@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/app"
 	"github.com/RC-CHN/wg-quic/internal/management"
+	"github.com/RC-CHN/wg-quic/internal/observe"
 	"github.com/RC-CHN/wg-quic/internal/quick"
 	"github.com/RC-CHN/wg-quic/internal/reconcile"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 var version = "0.1.0-dev"
@@ -135,6 +138,27 @@ func run(args []string) error {
 		ctx, stop := commandContext()
 		defer stop()
 		return runRuntimeCommand(ctx, args[0], parsed)
+	case "collect":
+		parsed, err := parseCollectArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		summary, err := observe.Run(ctx, runtimeObservationClient{}, observe.Options{
+			Interface: parsed.name, PeerPublicKey: parsed.peer,
+			SessionID: parsed.sessionID, Duration: parsed.duration,
+			Interval: parsed.interval, MaxBytes: parsed.maxBytes,
+			Output: parsed.output, Version: version,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"collection complete: samples=%d events=%d bytes=%d output=%s\n",
+			summary.Samples, summary.Events, summary.BytesWritten, parsed.output,
+		)
+		return nil
 	case "show":
 		name, jsonOutput, err := app.ParseShowArgs(args[1:])
 		if err != nil {
@@ -196,6 +220,115 @@ type runtimeCommandArgs struct {
 	eventStreamID      string
 	afterSequence      uint64
 	eventLimit         int
+}
+
+type collectCommandArgs struct {
+	name      string
+	peer      string
+	sessionID uint64
+	duration  time.Duration
+	interval  time.Duration
+	maxBytes  int64
+	output    string
+}
+
+func parseCollectArgs(args []string) (collectCommandArgs, error) {
+	result := collectCommandArgs{
+		duration: observe.DefaultDuration,
+		interval: observe.DefaultInterval,
+		maxBytes: observe.DefaultMaxBytes,
+	}
+	if len(args) == 0 || args[0] == "" {
+		return result, errors.New("collect requires an interface")
+	}
+	result.name = args[0]
+	remaining := args[1:]
+	for len(remaining) != 0 {
+		if len(remaining) < 2 || remaining[1] == "" {
+			return result, fmt.Errorf("%s requires a value", remaining[0])
+		}
+		option, value := remaining[0], remaining[1]
+		remaining = remaining[2:]
+		var err error
+		switch option {
+		case "--peer":
+			result.peer = value
+		case "--session-id":
+			result.sessionID, err = strconv.ParseUint(value, 10, 64)
+			if err != nil || result.sessionID == 0 {
+				return result, errors.New("session ID must be a positive integer")
+			}
+		case "--duration":
+			result.duration, err = time.ParseDuration(value)
+			if err != nil {
+				return result, fmt.Errorf("parse duration: %w", err)
+			}
+		case "--interval":
+			result.interval, err = time.ParseDuration(value)
+			if err != nil {
+				return result, fmt.Errorf("parse interval: %w", err)
+			}
+		case "--max-bytes":
+			result.maxBytes, err = parseByteSize(value)
+			if err != nil {
+				return result, err
+			}
+		case "--output":
+			result.output = value
+		default:
+			return result, fmt.Errorf("unsupported collect option %q", option)
+		}
+	}
+	if result.peer == "" {
+		return result, errors.New("collect requires --peer")
+	}
+	if result.output == "" {
+		return result, errors.New("collect requires --output")
+	}
+	return result, nil
+}
+
+func parseByteSize(value string) (int64, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		text       string
+		multiplier int64
+	}{
+		{"GIB", 1 << 30}, {"GB", 1 << 30}, {"G", 1 << 30},
+		{"MIB", 1 << 20}, {"MB", 1 << 20}, {"M", 1 << 20},
+		{"KIB", 1 << 10}, {"KB", 1 << 10}, {"K", 1 << 10},
+		{"B", 1},
+	} {
+		if strings.HasSuffix(normalized, suffix.text) {
+			multiplier = suffix.multiplier
+			normalized = strings.TrimSuffix(normalized, suffix.text)
+			break
+		}
+	}
+	quantity, err := strconv.ParseInt(normalized, 10, 64)
+	if err != nil || quantity <= 0 || quantity > (1<<63-1)/multiplier {
+		return 0, fmt.Errorf("invalid byte size %q", value)
+	}
+	return quantity * multiplier, nil
+}
+
+type runtimeObservationClient struct{}
+
+func (runtimeObservationClient) Status(
+	ctx context.Context,
+	name string,
+) (management.Status, error) {
+	return quick.RuntimeStatus(ctx, name)
+}
+
+func (runtimeObservationClient) Events(
+	ctx context.Context,
+	name, eventStreamID string,
+	afterSequence uint64,
+	limit int,
+) (telemetry.SessionEventBatch, error) {
+	return quick.RuntimeEvents(ctx, name, eventStreamID, afterSequence, limit)
 }
 
 func parseRuntimeCommand(operation string, args []string) (runtimeCommandArgs, error) {
@@ -558,7 +691,8 @@ func usage() error {
   wg-quic-quick reload INTERFACE [--expected-epoch EPOCH --expected-generation N] [--request-id ID] [--json]
   wg-quic-quick transaction-status INTERFACE --request-id ID [--json]
   wg-quic-quick refresh-endpoints INTERFACE [--peer PUBLIC_KEY] [--json]
-	  wg-quic-quick events INTERFACE [--event-stream-id ID --after-sequence N] [--limit N] [--json]
+  wg-quic-quick events INTERFACE [--event-stream-id ID --after-sequence N] [--limit N] [--json]
+  wg-quic-quick collect INTERFACE --peer PUBLIC_KEY [--session-id N] [--duration 30s] [--interval 100ms] [--max-bytes 16M] --output DIRECTORY
   wg-quic-quick up INTERFACE
   wg-quic-quick down INTERFACE [--repair]
   wg-quic-quick version`)

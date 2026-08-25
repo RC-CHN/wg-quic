@@ -3,6 +3,7 @@ package main
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestParseQuickRunArgs(t *testing.T) {
@@ -234,6 +235,37 @@ func TestParseRuntimeCommandRejectsMissingCASAndRequestID(t *testing.T) {
 	for _, test := range tests {
 		if _, err := parseRuntimeCommand(test[0], test[1:]); err == nil {
 			t.Fatalf("accepted invalid runtime command %q", slices.Clone(test))
+		}
+	}
+}
+
+func TestParseCollectArgs(t *testing.T) {
+	args, err := parseCollectArgs([]string{
+		"wg0", "--peer", "public-key", "--session-id", "7",
+		"--duration", "45s", "--interval", "250ms",
+		"--max-bytes", "32MiB", "--output", "/var/lib/wg-quic/traces/trial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args.name != "wg0" || args.peer != "public-key" || args.sessionID != 7 ||
+		args.duration != 45*time.Second || args.interval != 250*time.Millisecond ||
+		args.maxBytes != 32<<20 || args.output != "/var/lib/wg-quic/traces/trial" {
+		t.Fatalf("collect args = %#v", args)
+	}
+}
+
+func TestParseCollectArgsRejectsInvalidInput(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"wg0", "--output", "trial"},
+		{"wg0", "--peer", "key"},
+		{"wg0", "--peer", "key", "--session-id", "0", "--output", "trial"},
+		{"wg0", "--peer", "key", "--max-bytes", "lots", "--output", "trial"},
+		{"wg0", "--peer", "key", "--unknown", "value", "--output", "trial"},
+	} {
+		if _, err := parseCollectArgs(args); err == nil {
+			t.Fatalf("parseCollectArgs(%q) accepted invalid input", args)
 		}
 	}
 }

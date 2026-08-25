@@ -609,6 +609,11 @@ func (b *Bind) SessionEvents(
 		EventStreamID:    b.eventStreamID, EventsDroppedTotal: b.eventsDropped,
 		LastSequence: min(afterSequence, b.eventSequence),
 	}
+	batch.SampledAt = time.Now()
+	batch.MonotonicElapsedNS = batch.SampledAt.Sub(b.eventOrigin).Nanoseconds()
+	if batch.MonotonicElapsedNS < 0 {
+		batch.MonotonicElapsedNS = 0
+	}
 	if len(b.events) == 0 {
 		return batch, nil
 	}

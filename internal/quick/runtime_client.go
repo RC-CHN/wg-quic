@@ -8,6 +8,7 @@ import (
 
 	"github.com/RC-CHN/wg-quic/internal/management"
 	"github.com/RC-CHN/wg-quic/internal/platform"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 func RuntimeStatus(ctx context.Context, name string) (management.Status, error) {
@@ -32,6 +33,29 @@ func RuntimeCall(
 	}
 	request.Interface = name
 	return management.NewClient(host.ManagementPath(name)).Call(ctx, request)
+}
+
+func RuntimeEvents(
+	ctx context.Context,
+	name, eventStreamID string,
+	afterSequence uint64,
+	limit int,
+) (telemetry.SessionEventBatch, error) {
+	response, err := RuntimeCall(ctx, name, management.Request{
+		Operation:            management.OperationEvents,
+		RequiredCapabilities: []string{"session_events_v1"},
+		EventStreamID:        eventStreamID, AfterSequence: afterSequence, EventLimit: limit,
+	})
+	if err != nil {
+		return telemetry.SessionEventBatch{}, err
+	}
+	if response.Failure != nil {
+		return telemetry.SessionEventBatch{}, errors.New(response.Failure.Message)
+	}
+	if response.Events == nil {
+		return telemetry.SessionEventBatch{}, errors.New("management response did not include events")
+	}
+	return *response.Events, nil
 }
 
 func NewRuntimeRequestID() (string, error) {

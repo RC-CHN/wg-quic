@@ -63,6 +63,8 @@ type SessionEventBatch struct {
 	TelemetryVersion       int            `json:"telemetry_version"`
 	SupervisorEpoch        string         `json:"supervisor_epoch,omitempty"`
 	EventStreamID          string         `json:"event_stream_id"`
+	SampledAt              time.Time      `json:"sampled_at"`
+	MonotonicElapsedNS     int64          `json:"monotonic_elapsed_ns"`
 	FirstAvailableSequence uint64         `json:"first_available_sequence,omitempty"`
 	LastSequence           uint64         `json:"last_sequence,omitempty"`
 	EventsDroppedTotal     uint64         `json:"events_dropped_total,omitempty"`
