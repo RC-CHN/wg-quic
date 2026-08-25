@@ -827,7 +827,10 @@ Interface status exposes at least:
     "peer_reconcile_v1",
     "dynamic_obfs_keys",
     "authenticated_endpoint_generation",
-    "session_telemetry_v1"
+    "session_telemetry_v1",
+    "recent_session_telemetry_v1",
+    "session_events_v1",
+    "receive_queue_overflow_v1"
   ]
 }
 ```
@@ -907,6 +910,121 @@ Windows use this same management schema. Platform-specific kernel counters
 must carry explicit support/source metadata; absence is never encoded as a
 zero event count. The active-session list is bounded and prioritizes configured
 outbound connections; `session_telemetry_omitted` reports the excluded count.
+
+When `recent_session_telemetry_v1` is advertised, status also carries a
+separate immutable `recent_sessions` list. It never represents usable active
+state. The core retains at most 64 records and expires each after five minutes;
+`recent_sessions_evicted_total` is cumulative for both capacity and TTL
+eviction. History is process-local and disappears at a core/event-stream
+boundary.
+
+```json
+{
+  "telemetry_version": 1,
+  "final_sequence": 8,
+  "session_id": 27,
+  "session_generation": 3,
+  "role": "outbound",
+  "state": "closed",
+  "configured_endpoint": "203.0.113.10:12580",
+  "current_endpoint": "198.51.100.27:43192",
+  "closed_at": "2026-08-25T02:00:00Z",
+  "sampled_at": "2026-08-25T02:00:00Z",
+  "peers": [{
+    "public_key": "...",
+    "endpoint_generation": 4,
+    "configured": true,
+    "authenticated": true
+  }],
+  "close_reason": "endpoint_replaced",
+  "error_class": "",
+  "replaced_by_session_id": 31,
+  "final": true,
+  "final_stats": {
+    "quic_packets_lost": 12,
+    "quic_pto_count": 1,
+    "quic_congestion_window_bytes": 65536
+  }
+}
+```
+
+Stable close reasons are `local_shutdown`, `remote_close`, `idle_timeout`,
+`handshake_timeout`, `transport_error`, `endpoint_replaced`,
+`configuration_removed`, and `unknown`. `last_error` is single-line, redacted,
+and bounded; automation should branch on `close_reason`/`error_class`, not
+parse that message. `replaces_session_id` and `replaced_by_session_id` join
+reconnect generations when known.
+
+`stats.receive_queue_overflow` is interface-scoped because every QUIC session
+shares the UDP socket:
+
+```json
+{
+  "supported": true,
+  "source": "linux_so_rxq_ovfl",
+  "platform": "linux",
+  "packets": 3
+}
+```
+
+Linux extends the kernel's 32-bit `SO_RXQ_OVFL` value into a process-lifetime
+monotonic counter and preserves monotonicity across carrier socket recreation.
+FreeBSD/OPNsense, Windows, and other unsupported receive paths return
+`supported=false`, `source="unavailable"`, their `platform`, and a zero value;
+that is an availability statement, not evidence of zero kernel drops.
+
+The read-only `events` operation pages the bounded event stream without
+restarting a peer or interface:
+
+```json
+{
+  "protocol_version": 1,
+  "operation": "events",
+  "interface": "wg0",
+  "required_capabilities": ["session_events_v1"],
+  "event_stream_id": "f44c...",
+  "after_sequence": 72,
+  "event_limit": 1024
+}
+```
+
+The first request may omit `event_stream_id` and use sequence zero. Subsequent
+requests must send the returned stream ID with the last consumed sequence.
+The response contains `first_available_sequence`, `last_sequence`,
+`events_dropped_total`, the core `sampled_at`/`monotonic_elapsed_ns` clock
+sample, and up to 1,024 events. The core ring retains at most 4,096 records. A
+changed supervisor epoch or event stream is an explicit series boundary; if
+`first_available_sequence` skips the caller cursor, the caller has an event
+gap and must not present the timeline as complete.
+
+Every event contains telemetry version, stream ID, global sequence, session ID
+and generation, type/reason, wall time, monotonic elapsed nanoseconds, and
+typed optional `before`/`after` metric snapshots. The supervisor attaches its
+epoch to the response batch. Current low-volume event types cover session
+lifecycle, controller state, cwnd reduction, PTO, loss/spurious loss, path RTT,
+FEC policy, endpoint migration, local queue drop, and interface receive
+overflow. There is no per-ACK production event stream and no application
+payload in status or events.
+
+The portable reference collector consumes these two read-only operations:
+
+```sh
+wg-quic-quick collect wg0 \
+  --peer 'FULL_BASE64_PUBLIC_KEY' \
+  --duration 30s --interval 100ms --max-bytes 16M \
+  --output /var/lib/wg-quic/traces/TRIAL_ID
+```
+
+It selects the sole authenticated session first, falls back to a sole
+configured association, and rejects ambiguity unless `--session-id` pins one
+exact active session. Raw status is retained next to derived CSV rows. Counter
+deltas are keyed by `(supervisor_epoch, session_id, session_generation)`; on a
+replacement, the old final snapshot is emitted before the new series starts.
+A missing/omitted target, counter regression, cursor gap, epoch/stream change,
+or output bound violation makes the bundle incomplete instead of fabricating
+zero observations. Linux/OpenWrt, FreeBSD/OPNsense, and Windows share this
+collector contract and use platform-appropriate root/Administrator-only
+output protection.
 
 Endpoint status deliberately has three separate meanings. `configured_endpoint`
 is the canonical user configuration and may contain a hostname;

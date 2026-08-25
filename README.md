@@ -91,6 +91,48 @@ Windows. Enumeration is bounded and prioritizes configured outbound sessions;
 `session_telemetry_omitted` reports any additional active sessions that were
 not included.
 
+The current development tree also advertises `recent_session_telemetry_v1`,
+`session_events_v1`, and `receive_queue_overflow_v1`. `recent_sessions` retains
+up to 64 immutable final session snapshots for up to five minutes, including a
+stable close reason, replacement links, redacted error class/message, and
+`final_stats`. The process-local `event_stream_id` and globally increasing
+`event_sequence` identify a bounded 4,096-record lifecycle/controller event
+ring; clients can page up to 1,024 records after a cursor:
+
+```sh
+sudo wg-quic-quick events wg0 --json
+sudo wg-quic-quick events wg0 \
+  --event-stream-id EVENT_STREAM_ID --after-sequence LAST_SEQUENCE \
+  --limit 1024 --json
+```
+
+Linux status reports the interface-scoped UDP socket drop counter from
+`SO_RXQ_OVFL`. Other platforms return the same
+`stats.receive_queue_overflow` object with `supported=false`, `source`, and
+`platform`, so an unavailable counter is never mistaken for an authoritative
+zero.
+
+For a bounded field capture, select one peer by its complete public key:
+
+```sh
+sudo wg-quic-quick collect wg0 \
+  --peer 'PEER_PUBLIC_KEY_BASE64' \
+  --duration 30s --interval 100ms --max-bytes 16M \
+  --output /var/lib/wg-quic/traces/TRIAL_ID
+```
+
+The output directory must not already exist. It is mode `0700` on Unix and
+uses a protected Administrators/LocalSystem DACL on Windows; artifacts are
+root-only and contain `manifest.json`, raw `status.ndjson`, derived
+`peer-telemetry.csv`, `controller-events.ndjson`, and `summary.json`.
+`COMPLETE` is created atomically only after a clean finish. A handled failure
+creates `INCOMPLETE`, while the line-oriented partial artifacts remain
+parseable. The collector refuses ambiguous peer/session associations unless
+`--session-id` selects the exact active session, never computes a delta across
+an epoch or generation boundary, and consumes the old retained final snapshot
+before opening a replacement series. An explicit session ID intentionally
+pins collection to that session instead of following its replacement.
+
 The CLI is the reference client for the privileged local management API:
 
 | CLI | Protocol operation | Required capability | Effect |
@@ -100,6 +142,8 @@ The CLI is the reference client for the privileged local management API:
 | `reconcile` | `reconcile` | `peer_reconcile_v1` | Validate and apply a protected candidate using epoch/generation CAS |
 | `transaction-status` | `transaction_status` | management protocol | Recover the result of an accepted request ID |
 | `refresh-endpoints` | `refresh_endpoints` | `endpoint_refresh_v1` | Refresh all hostname peers or one public key immediately |
+| `events` | `events` | `session_events_v1` | Page the bounded controller/session event stream after a cursor |
+| `collect` | `status` + `events` | session, recent-session, and event capabilities | Capture one peer/session with generation-safe deltas and bounded local artifacts |
 
 This is not a remote HTTP API. Linux/OpenWrt use
 `/run/wg-quic/<interface>.manage.sock`, FreeBSD/OPNsense use

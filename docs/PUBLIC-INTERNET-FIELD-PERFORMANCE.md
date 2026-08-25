@@ -9,10 +9,15 @@
 - Document purpose: preserve the first complex public-path observations,
   distinguish path faults from implementation limits, and define the telemetry
   required for reproducible controller research
-- Follow-up: `session_telemetry_v1` now supplies bounded, portable active-session
-  attribution plus cumulative PTO and spurious-loss counters. Controller events,
-  bounded trace capture, and kernel receive-overflow attribution remain future
-  work.
+- Follow-up release reviewed: `wg-quic v0.3.3`
+- Follow-up implementation status: the development tree after `v0.3.3` now
+  supplies active and retained final session telemetry, bounded sequenced
+  controller/session events, a peer-selecting generation-aware collector, and
+  explicit cross-platform receive-overflow availability. This satisfies the
+  minimum instrumentation gate for a controlled controller-recovery rerun.
+  Bounded qlog/CPU trace capture, sequence-level field evidence, privileged
+  release validation, and a new public trial are still outstanding; the data
+  still cannot justify changing the production congestion-controller default.
 - Data sensitivity: node labels are region aliases. Public addresses,
   credentials, WireGuard keys, and application payloads are intentionally not
   recorded here.
@@ -260,11 +265,35 @@ further field controller work. The later `session_telemetry_v1` status schema
 addresses that active-session baseline without changing this historical
 measurement record.
 
-## 7. Required Per-Peer Telemetry
+## 7. Per-Session Telemetry Status and Requirements
 
-Add a versioned per-session observation to management status. It should use a
-stable peer identity and include enough generation information to distinguish
-a reconnected or replaced session.
+### 7.1 Delivered in v0.3.3
+
+`v0.3.3` delivers the first portable attribution layer without changing the
+wire protocol:
+
+- versioned observations for every currently active QUIC session;
+- process-local session ID and endpoint-local reconnect generation;
+- inbound/outbound role, configured/current endpoint, establishment time, and
+  common sample time;
+- plural configured and WireGuard-authenticated peer associations;
+- independent WireGuard, carrier, FEC, local-queue, QUIC, RTT, cwnd, BWE, and
+  pacing values;
+- cumulative PTO and spurious-loss counters plus RTT variation;
+- a 256-session enumeration bound, configured-outbound priority, and an
+  explicit omitted-session count;
+- capability-based forwarding through the existing portable management
+  protocol.
+
+The affected Go unit suite and race-enabled bind/core/quick tests passed during
+the 2026-08-25 review. This verifies the implemented status path but does not
+replace a privileged container run or a new public field trial.
+
+### 7.2 Target schema
+
+The versioned per-session observation must continue to use a stable peer
+identity and enough generation information to distinguish a reconnected or
+replaced session.
 
 Suggested identity fields:
 
@@ -288,7 +317,7 @@ wire_rx_packets / wire_rx_bytes
 quic_packets_acked / quic_bytes_acked
 quic_packets_lost / quic_bytes_lost
 quic_spurious_loss_packets
-quic_pto_count / quic_rto_count
+quic_pto_count
 quic_cwnd_bytes / quic_bytes_in_flight
 quic_bandwidth_estimate_bps / quic_pacing_rate_bps
 quic_min_rtt_us / latest_rtt_us / smoothed_rtt_us / rttvar_us
@@ -301,7 +330,6 @@ fec_data_tx / fec_parity_tx
 fec_raw_lost / fec_recovered / fec_unrecovered
 fec_current_parity_shards / fec_loss_estimate_ppm
 fec_group_expired / fec_feedback_age_us
-kernel_rx_queue_overflow
 reconnect_attempts / reconnect_failures
 ```
 
@@ -310,20 +338,74 @@ from or presented alongside per-peer values. Aggregating gauges such as RTT,
 cwnd, and BWE must document whether the result is a sum, maximum, minimum, or
 weighted value.
 
-Linux receive-path instrumentation should expose `SO_RXQ_OVFL` or an
-equivalent socket-drop counter. Without it, network loss and kernel receive
-queue overflow cannot be separated reliably.
+Kernel receive overflow belongs to the interface/shared UDP socket rather than
+one session. The development tree exposes a structured
+`stats.receive_queue_overflow` object with `supported`, `source`, `platform`,
+and cumulative `packets`. Linux uses `SO_RXQ_OVFL`; FreeBSD/OPNsense, Windows,
+and unavailable receive paths explicitly report `supported=false` instead of
+encoding absence as a zero-loss observation. Without an authoritative
+supported counter, network loss and kernel receive queue overflow still cannot
+be separated reliably.
 
-## 8. Required Controller Events
+### 7.3 Closed-session final snapshots implemented after v0.3.3
+
+`v0.3.3` enumerates only active sessions. The current development tree closes
+that polling gap with `recent_session_telemetry_v1`.
+
+The management schema exposes retained records separately as
+`recent_sessions`, so an old connection is never mistaken for a usable path.
+
+Required final-state fields are:
+
+```text
+state=closed
+final_sequence
+closed_at
+close_reason
+error_class
+last_error
+final_stats
+replaced_by_session_id
+replaces_session_id
+final=true
+```
+
+`close_reason` is a stable enum with:
+
+```text
+local_shutdown
+remote_close
+idle_timeout
+handshake_timeout
+transport_error
+endpoint_replaced
+configuration_removed
+unknown
+```
+
+The implementation:
+
+- takes the final connection/controller snapshot before references are removed;
+- retains at most 64 final snapshots and expires each after five minutes;
+- preserves the same supervisor-epoch, session-ID, and generation identity used
+  while active;
+- records a redacted error class/message, never configuration secrets;
+- exposes cumulative capacity/TTL eviction in
+  `recent_sessions_evicted_total` and a monotonic `final_sequence`;
+- permits a collector to reconcile the final counter delta before starting the
+  replacement generation;
+- loses process-local history on a core restart rather than pretending it is
+  durable; the supervisor epoch already marks that boundary.
+
+## 8. Bounded Controller Events Implemented After v0.3.3
 
 Point-in-time gauges are insufficient to diagnose a collapse that recovers
-before the next sample. Add bounded event records for:
+before the next sample. The development tree now records:
 
 - controller state transition and reason;
 - slow-start/startup exit and re-entry;
 - congestion window reduction, old value, new value, and reason;
-- PTO/RTO firing;
-- persistent congestion declaration;
+- QUIC PTO firing (QUIC has PTO, not a TCP-style RTO event);
 - loss event and later spurious-loss classification;
 - path RTT baseline update;
 - FEC parity/profile transition and reason;
@@ -334,7 +416,53 @@ Events need both monotonic elapsed time and wall-clock time. They must never
 include private keys, preshared keys, application payloads, or unredacted
 configuration files.
 
+Each collected event record carries:
+
+```text
+event_sequence
+event_stream_id
+supervisor_epoch
+session_id
+session_generation
+event_type
+reason
+before
+after
+monotonic_elapsed_ns
+wall_time
+```
+
+The core event contains the stream/session fields; the portable quick response
+and collector record attach `supervisor_epoch` to that process-local stream.
+
+The stable cursor tuple is `(supervisor_epoch, event_stream_id,
+event_sequence)`. Sequence is monotonic within one process-local event stream;
+a core restart changes the stream ID even if the quick supervisor epoch is
+unchanged. The interface ring retains at most 4,096 records, allows at most
+1,024 records per query, and reports `first_available_sequence`,
+`last_sequence`, and cumulative `events_dropped_total`. A skipped cursor is an
+explicit data gap. Event responses also sample the core wall and monotonic
+clocks so collector rows can be placed on the same monotonic event timeline.
+
+Typed `before` and `after` snapshots carry cwnd, in-flight bytes, BWE, pacing,
+RTT, path RTT, queue delay, model state, PTO/loss/spurious counters, queue
+drops, FEC policy, endpoint, and receive overflow as applicable. Production
+does not emit one record per ACK. High-volume packet/qlog events and a distinct
+persistent-congestion declaration remain part of the future bounded trace
+work; the implementation must not fabricate a persistent-congestion event
+when the current recovery code made no such declaration.
+
+For the four-packet post-timeout hypothesis, a forced timeout now produces a
+PTO record with the typed controller snapshot. Any actual subsequent cwnd or
+controller transition, session close, replacement, or recovery is correlated
+by the same stream/session identity rather than inferred from log text.
+
 ## 9. Bounded Local Trace Interface
+
+This section remains a design requirement. The implemented `collect` command
+captures bounded status, derived telemetry, and controller events, but it does
+not enable qlog or CPU profiling and must not be described as the trace API
+below.
 
 Expose an authenticated local-management operation rather than a public debug
 HTTP endpoint. A proposed operator interface is:
@@ -428,6 +556,50 @@ Repeat the staircase through the tunnel below its first observed local-drop
 or saturation point. Record raw outer loss, QUIC loss, FEC recovery, and inner
 residual loss in the same time window.
 
+The field collector must select a session by authenticated/configured peer key,
+not by array position or the interface aggregate. It must:
+
+- record supervisor epoch, session ID, and generation on every row;
+- detect a generation change and close the previous series using its retained
+  final snapshot;
+- refuse an ambiguous association unless the operator explicitly selects one
+  session;
+- preserve the raw status sample alongside derived CSV rows;
+- compute counter deltas only within one epoch/session/generation tuple;
+- align trial lifecycle and controller events on monotonic elapsed time;
+- report a missing or omitted target session as a failed sample, never as zero
+  loss or zero traffic.
+
+The development tree implements that contract as a bounded portable command:
+
+```bash
+wg-quic-quick collect mzwq0 \
+  --peer PUBLIC_KEY \
+  --duration 30s \
+  --interval 100ms \
+  --max-bytes 16M \
+  --output /var/lib/wg-quic/traces/TRIAL_ID
+```
+
+It emits `manifest.json`, `status.ndjson`, `peer-telemetry.csv`,
+`controller-events.ndjson`, and `summary.json`. The directory is newly created
+with root-only Unix permissions or a protected Windows Administrators/
+LocalSystem DACL. `COMPLETE` appears atomically only after success; handled
+failures write `INCOMPLETE`, and abrupt termination is detectable by the
+absence of `COMPLETE`. Output is hard-limited to 16 MiB by default and accepts
+an explicit bound from 64 KiB through 256 MiB. Duration is capped at ten
+minutes and the polling interval at 10 ms through one minute.
+
+Selection prefers exactly one WireGuard-authenticated association, falls back
+to exactly one configured association, and refuses ambiguity. `--session-id`
+can pin an exact active session, but intentionally does not follow its
+replacement. Without that pin, a replacement is followed only after the old
+tuple's retained final delta is written. Raw status and failed samples are
+kept; counter regressions, status omission, event cursor gaps, epoch/stream
+changes, and missing final snapshots make the run incomplete rather than
+inventing zero values. Sessionless receive-overflow events remain in the
+bundle because the UDP socket is interface-scoped.
+
 Then compare controllers on an isolated temporary interface and port, without
 changing the production `mzwq0` interface:
 
@@ -510,23 +682,47 @@ No one hypothesis should be accepted from one short field sample.
 
 ## 14. Implementation Order
 
-1. Add per-peer/session telemetry without changing wire protocol behavior.
-2. Add PTO, cwnd-transition, FEC-transition, spurious-loss, and socket-overflow
-   counters/events.
-3. Add the bounded local trace operation and redacted artifact manifest.
-4. Add field-runner support for sequence-level raw and inner UDP evidence.
-5. Reproduce the three representative public link classes.
-6. Run isolated `model`/CUBIC/Reno and FEC comparisons.
-7. Change controller behavior only after traces identify a reproducible cause.
+1. **Delivered in v0.3.3:** add active per-peer/session telemetry, cumulative
+   PTO/spurious-loss counters, schema versioning, and bounded enumeration.
+2. **Implemented after v0.3.3:** retain bounded closed-session final snapshots
+   and close reasons.
+3. **Implemented after v0.3.3:** add PTO, cwnd-transition, controller-state,
+   FEC-transition, and session lifecycle events with a bounded sequence-aware
+   ring.
+4. **Implemented after v0.3.3:** add a field collector that selects a
+   peer/session and follows generation changes without using interface
+   aggregates.
+5. **Implemented after v0.3.3:** add Linux `SO_RXQ_OVFL` attribution and report
+   support/source explicitly on every platform.
+6. Add the bounded local trace operation, redacted artifact manifest, qlog
+   subset, and on-demand CPU profile.
+7. Add field-runner support for sequence-level raw and inner UDP evidence.
+8. Reproduce the three representative public link classes.
+9. Run isolated `model`/CUBIC/Reno and FEC comparisons.
+10. Change controller behavior only after traces identify a reproducible cause.
 
 ## 15. Acceptance Criteria for Diagnostics
 
-- Two concurrently active peers expose independent counters and gauges.
-- A transfer to one peer does not materially change another peer's counters.
-- Per-peer counter sums reconcile with documented interface aggregates.
+- Two concurrently active peers on distinct sessions expose independent
+  counters and gauges. Peers intentionally sharing one outer session share
+  that session's transport metrics and must not be double-counted.
+- A transfer on one session does not materially change another session's
+  counters.
+- Active plus retained-final session deltas reconcile with the documented
+  interval-scoped interface counters without summing the same shared session
+  once per associated peer. Lifetime interface counters are not compared to an
+  active-only snapshot.
+- A reconnect retains the old session's final counters, close reason, and
+  closure timestamp while exposing the replacement under a new generation.
+- A collector polling more slowly than the reconnect still consumes the final
+  old-session delta instead of silently losing it.
 - A forced timeout produces a timestamped controller event containing old and
   new cwnd and the transition reason.
+- Controller events have monotonic sequence numbers, bounded retention, and an
+  explicit dropped/omitted count.
 - Kernel receive overflow is distinguishable from public sequence loss.
+- The benchmark collector follows exactly one selected peer/session and never
+  computes a delta across an epoch or generation boundary.
 - A 30-second trace terminates automatically and cannot exceed its byte limit.
 - Interrupted traces remain parseable and are clearly marked incomplete.
 - Trace output contains no private key, preshared key, token, or application
@@ -535,15 +731,42 @@ No one hypothesis should be accepted from one short field sample.
   without exposing secrets.
 - The same analysis script can compare clean, lossy, and asymmetric trials.
 
-## 16. Immediate Operational Conclusion
+## 16. Post-v0.3.3 Development Readiness Gate
+
+| Activity | Current development readiness | Reason |
+| --- | --- | --- |
+| Inspect one active peer independently | Ready | Active per-session counters and gauges are attributable |
+| Controlled controller-recovery rerun | Ready for execution, not yet field-validated | The bounded collector follows one peer/session, consumes final snapshots, and retains controller events |
+| Compare steady active-session model/CUBIC/Reno behavior | Ready with caveats | Session-safe CSV/event evidence exists; qlog and CPU profiling are still absent |
+| Diagnose reconnect or failure collapse | Ready for a controlled rerun | Final state, close reason, replacement links, and lifecycle/controller events are retained |
+| Prove public loss instead of kernel socket overflow | Linux ready; other platforms explicit-unavailable | Linux reports `SO_RXQ_OVFL`; unsupported platforms cannot make this attribution |
+| Diagnose clean-path CPU/data-path ceiling | Not ready | Bounded pprof/qlog trace is absent |
+| Change the production default controller | Not ready | Root-cause and repeated field evidence are incomplete |
+
+The minimum gate before the next evidence-bearing public research run is now
+implemented in the development tree:
+
+1. closed-session final snapshot retention;
+2. PTO/cwnd/controller transition events; and
+3. a peer-selecting, generation-aware collector.
+
+Linux `SO_RXQ_OVFL` attribution was included in the same implementation batch,
+with explicit unavailable semantics elsewhere. Bounded qlog and CPU profiling
+may follow if the immediate experiment is limited to controller recovery
+rather than clean-path implementation profiling. This readiness statement is
+an implementation/test result, not a claim that a new public field matrix has
+already run.
+
+## 17. Immediate Operational Conclusion
 
 The deployment is functional, and the first field run found no evidence of
 local wg-quic send queue overflow. It also found genuine public-path loss and
 directional impairment, plus a separate short-transfer penalty on the clean
 Tokyo control path.
 
-The correct next step is not a global production controller change. It is to
-make telemetry attributable to one peer, preserve bounded traces, and rerun a
-small controlled public matrix. That evidence can then drive controller,
-FEC, batching, and routing changes without confusing path faults with software
-faults.
+The correct next step is not a global production controller change. The
+development tree now retains attributable active/final telemetry and
+controller transitions, while the bounded collector follows peer generation
+explicitly. The next action is to run the small controlled public matrix and
+use those artifacts to drive controller, FEC, batching, and routing changes
+without confusing path faults with software faults.

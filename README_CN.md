@@ -81,6 +81,42 @@ cwnd、pacing 和带宽估计均按 session 独立统计。计数从连接创建
 schema 与字段语义。枚举有固定上限并优先保留配置的出站 session；如果还有活跃
 连接未返回，`session_telemetry_omitted` 会给出其数量。
 
+当前开发树还会发布 `recent_session_telemetry_v1`、`session_events_v1` 和
+`receive_queue_overflow_v1`。`recent_sessions` 最多保留 64 条、最长保留五分钟的
+不可变 final session 快照，其中包括稳定关闭原因、替换关系、脱敏错误类别/消息和
+`final_stats`。进程内 `event_stream_id` 与全局递增的 `event_sequence` 标识一个
+最多 4096 条的 session/controller 事件环；客户端每次可从 cursor 之后读取最多
+1024 条：
+
+```sh
+sudo wg-quic-quick events wg0 --json
+sudo wg-quic-quick events wg0 \
+  --event-stream-id EVENT_STREAM_ID --after-sequence LAST_SEQUENCE \
+  --limit 1024 --json
+```
+
+Linux 会通过 `SO_RXQ_OVFL` 报告接口级 UDP socket 丢包计数。其他平台返回相同的
+`stats.receive_queue_overflow` 对象，但明确设置 `supported=false`，并保留
+`source` 与 `platform`；因此“平台不可用”不会被误当成可信的零丢包。
+
+需要有界现场采集时，使用完整 peer 公钥选择唯一目标：
+
+```sh
+sudo wg-quic-quick collect wg0 \
+  --peer 'PEER_PUBLIC_KEY_BASE64' \
+  --duration 30s --interval 100ms --max-bytes 16M \
+  --output /var/lib/wg-quic/traces/TRIAL_ID
+```
+
+输出目录必须尚不存在。Unix 权限为 `0700`，Windows 使用只允许 Administrators/
+LocalSystem 的受保护 DACL；其中包含 `manifest.json`、原始 `status.ndjson`、派生
+`peer-telemetry.csv`、`controller-events.ndjson` 和 `summary.json`。只有正常完成后
+才会原子创建 `COMPLETE`；可处理的失败会创建 `INCOMPLETE`，逐行写入的部分结果
+仍可解析。采集器会拒绝有歧义的 peer/session 关联，除非用 `--session-id` 指定
+准确活动 session；它绝不会跨 epoch 或 generation 计算 delta，并且一定先消费旧
+session 的 final snapshot，再开启替代 session 的序列。显式 session ID 会固定到
+该 session，不会继续跟随替代连接。
+
 CLI 是特权本地管理 API 的标准客户端：
 
 | CLI | 协议 operation | 所需 capability | 作用 |
@@ -90,6 +126,8 @@ CLI 是特权本地管理 API 的标准客户端：
 | `reconcile` | `reconcile` | `peer_reconcile_v1` | 使用 epoch/generation CAS 校验并应用受保护候选配置 |
 | `transaction-status` | `transaction_status` | 管理协议 | 按 request ID 恢复已接受事务的结果 |
 | `refresh-endpoints` | `refresh_endpoints` | `endpoint_refresh_v1` | 立即刷新全部域名 peer 或指定公钥 |
+| `events` | `events` | `session_events_v1` | 从 cursor 之后分页读取有界 controller/session 事件流 |
+| `collect` | `status` + `events` | session、recent-session 与 event capabilities | 按一个 peer/session 采集 generation-safe delta 和有界本地产物 |
 
 它不是远程 HTTP API。Linux/OpenWrt 使用
 `/run/wg-quic/<接口>.manage.sock`，FreeBSD/OPNsense 使用
