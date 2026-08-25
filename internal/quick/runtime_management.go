@@ -3,6 +3,7 @@ package quick
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -300,6 +301,8 @@ func (r *runtimeManagement) status() *management.Status {
 		Peers:                   peers,
 		Sessions:                sessionsFromCoreStatus(coreStatus),
 		SessionTelemetryOmitted: sessionTelemetryOmittedFromCoreStatus(coreStatus),
+		RecentSessions:          recentSessionsFromCoreStatus(coreStatus),
+		RecentSessionsEvicted:   recentSessionsEvictedFromCoreStatus(coreStatus),
 	}
 }
 
@@ -315,6 +318,20 @@ func sessionTelemetryOmittedFromCoreStatus(status *control.Status) uint64 {
 		return 0
 	}
 	return status.SessionTelemetryOmitted
+}
+
+func recentSessionsFromCoreStatus(status *control.Status) []telemetry.ClosedSessionObservation {
+	if status == nil {
+		return nil
+	}
+	return status.RecentSessions
+}
+
+func recentSessionsEvictedFromCoreStatus(status *control.Status) uint64 {
+	if status == nil {
+		return 0
+	}
+	return status.RecentSessionsEvicted
 }
 
 func (r *runtimeManagement) refreshCanonicalProjection() {
@@ -368,15 +385,13 @@ func withCoreCapabilities(capabilities []string, status *control.Status) []strin
 		return capabilities
 	}
 	for _, capability := range status.Capabilities {
-		if capability != "session_telemetry_v1" {
+		if capability != "session_telemetry_v1" &&
+			capability != "recent_session_telemetry_v1" {
 			continue
 		}
-		for _, existing := range capabilities {
-			if existing == capability {
-				return capabilities
-			}
+		if !slices.Contains(capabilities, capability) {
+			capabilities = append(capabilities, capability)
 		}
-		return append(capabilities, capability)
 	}
 	return capabilities
 }

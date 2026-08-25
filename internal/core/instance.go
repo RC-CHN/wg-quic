@@ -377,6 +377,7 @@ func (i *Instance) status() control.Status {
 	}
 	i.endpointMu.RUnlock()
 	sessions, sessionTelemetryOmitted := i.bind.SessionTelemetry()
+	recentSessions, recentSessionsEvicted := i.bind.RecentSessionTelemetry()
 	associateConfiguredSessionPeers(sessions, peers)
 	addresses := make([]string, 0, len(cfg.Interface.Addresses))
 	for _, addr := range cfg.Interface.Addresses {
@@ -388,6 +389,8 @@ func (i *Instance) status() control.Status {
 		ObfsMode: cfg.Transport.Obfs, Addresses: addresses,
 		Peers: peers, Sessions: sessions,
 		SessionTelemetryOmitted: sessionTelemetryOmitted,
+		RecentSessions:          recentSessions,
+		RecentSessionsEvicted:   recentSessionsEvicted,
 		Capabilities: []string{
 			"core_control_v1",
 			"typed_peer_transactions_v1",
@@ -395,6 +398,7 @@ func (i *Instance) status() control.Status {
 			"dynamic_peer_fec_policy",
 			"authenticated_endpoint_generation",
 			"session_telemetry_v1",
+			"recent_session_telemetry_v1",
 		},
 		Stats: i.Stats(),
 	}

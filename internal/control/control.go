@@ -15,18 +15,20 @@ import (
 const requestTimeout = 5 * time.Second
 
 type Status struct {
-	Interface               string                         `json:"interface"`
-	State                   string                         `json:"state"`
-	ListenPort              uint16                         `json:"listen_port"`
-	Carrier                 string                         `json:"carrier"`
-	FECMode                 string                         `json:"fec_mode"`
-	ObfsMode                string                         `json:"obfs_mode"`
-	Addresses               []string                       `json:"addresses,omitempty"`
-	Peers                   []PeerStatus                   `json:"peers,omitempty"`
-	Sessions                []telemetry.SessionObservation `json:"sessions,omitempty"`
-	SessionTelemetryOmitted uint64                         `json:"session_telemetry_omitted,omitempty"`
-	Capabilities            []string                       `json:"capabilities,omitempty"`
-	Stats                   telemetry.Stats                `json:"stats"`
+	Interface               string                               `json:"interface"`
+	State                   string                               `json:"state"`
+	ListenPort              uint16                               `json:"listen_port"`
+	Carrier                 string                               `json:"carrier"`
+	FECMode                 string                               `json:"fec_mode"`
+	ObfsMode                string                               `json:"obfs_mode"`
+	Addresses               []string                             `json:"addresses,omitempty"`
+	Peers                   []PeerStatus                         `json:"peers,omitempty"`
+	Sessions                []telemetry.SessionObservation       `json:"sessions,omitempty"`
+	SessionTelemetryOmitted uint64                               `json:"session_telemetry_omitted,omitempty"`
+	RecentSessions          []telemetry.ClosedSessionObservation `json:"recent_sessions,omitempty"`
+	RecentSessionsEvicted   uint64                               `json:"recent_sessions_evicted_total,omitempty"`
+	Capabilities            []string                             `json:"capabilities,omitempty"`
+	Stats                   telemetry.Stats                      `json:"stats"`
 }
 
 type PeerStatus struct {

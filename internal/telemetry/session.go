@@ -7,6 +7,23 @@ import "time"
 // semantics or counter lifetimes become incompatible.
 const SessionTelemetryVersion = 1
 
+// RecentSessionTelemetryVersion is the schema version for final observations
+// retained after a session leaves the active set.
+const RecentSessionTelemetryVersion = 1
+
+// Session close reasons are stable protocol values. Callers must treat values
+// they don't recognize as unknown instead of deriving behavior from error text.
+const (
+	SessionCloseLocalShutdown        = "local_shutdown"
+	SessionCloseRemote               = "remote_close"
+	SessionCloseIdleTimeout          = "idle_timeout"
+	SessionCloseHandshakeTimeout     = "handshake_timeout"
+	SessionCloseTransportError       = "transport_error"
+	SessionCloseEndpointReplaced     = "endpoint_replaced"
+	SessionCloseConfigurationRemoved = "configuration_removed"
+	SessionCloseUnknown              = "unknown"
+)
+
 // SessionPeerObservation describes why a QUIC session is associated with a
 // WireGuard peer. Multiple peers may legitimately share one outer endpoint,
 // so session telemetry must not assume a one-to-one relationship.
@@ -31,7 +48,33 @@ type SessionObservation struct {
 	EstablishedAt      *time.Time               `json:"established_at,omitempty"`
 	SampledAt          time.Time                `json:"sampled_at"`
 	Peers              []SessionPeerObservation `json:"peers,omitempty"`
+	ReplacesSessionID  uint64                   `json:"replaces_session_id,omitempty"`
 	Stats              SessionStats             `json:"stats"`
+}
+
+// ClosedSessionObservation is the immutable final observation of a session.
+// FinalSequence is monotonic for one core event stream and lets a polling
+// collector de-duplicate retained records and detect an eviction gap.
+type ClosedSessionObservation struct {
+	TelemetryVersion    int                      `json:"telemetry_version"`
+	FinalSequence       uint64                   `json:"final_sequence"`
+	SessionID           uint64                   `json:"session_id"`
+	SessionGeneration   uint64                   `json:"session_generation"`
+	Role                string                   `json:"role"`
+	State               string                   `json:"state"`
+	ConfiguredEndpoint  string                   `json:"configured_endpoint,omitempty"`
+	CurrentEndpoint     string                   `json:"current_endpoint,omitempty"`
+	EstablishedAt       *time.Time               `json:"established_at,omitempty"`
+	ClosedAt            time.Time                `json:"closed_at"`
+	SampledAt           time.Time                `json:"sampled_at"`
+	Peers               []SessionPeerObservation `json:"peers,omitempty"`
+	CloseReason         string                   `json:"close_reason"`
+	ErrorClass          string                   `json:"error_class,omitempty"`
+	LastError           string                   `json:"last_error,omitempty"`
+	ReplacedBySessionID uint64                   `json:"replaced_by_session_id,omitempty"`
+	ReplacesSessionID   uint64                   `json:"replaces_session_id,omitempty"`
+	Final               bool                     `json:"final"`
+	FinalStats          SessionStats             `json:"final_stats"`
 }
 
 // SessionStats contains connection-scoped counters and gauges. Counters start

@@ -391,6 +391,18 @@ func printRuntimeStatus(status *management.Status, jsonOutput bool) error {
 	if status.SessionTelemetryOmitted != 0 {
 		fmt.Printf("transport sessions omitted: %d\n", status.SessionTelemetryOmitted)
 	}
+	for _, session := range status.RecentSessions {
+		fmt.Printf(
+			"closed transport session %d/%d: reason=%s closed=%s replaced_by=%d lost=%d pto=%d queue_drops=%d\n",
+			session.SessionID, session.SessionGeneration, session.CloseReason,
+			session.ClosedAt.Format(time.RFC3339Nano), session.ReplacedBySessionID,
+			session.FinalStats.QUICPacketsLost, session.FinalStats.QUICPTOCount,
+			session.FinalStats.QueueDrops,
+		)
+	}
+	if status.RecentSessionsEvicted != 0 {
+		fmt.Printf("closed transport sessions evicted: %d\n", status.RecentSessionsEvicted)
+	}
 	return nil
 }
 

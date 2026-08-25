@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
+	quicgo "github.com/quic-go/quic-go"
 )
 
 func TestCarrierRoutesQUICThroughSalamander(t *testing.T) {
@@ -81,6 +82,26 @@ func TestCarrierRoutesQUICThroughSalamander(t *testing.T) {
 func TestAddrPortRejectsNonUDPAddress(t *testing.T) {
 	if _, err := addrPort(stringAddr("not UDP")); err == nil {
 		t.Fatal("accepted a non-UDP remote address")
+	}
+}
+
+func TestClassifyConnectionErrorUsesTypedQUICErrors(t *testing.T) {
+	tests := []struct {
+		name, reason, class string
+		err                 error
+	}{
+		{name: "idle", err: &quicgo.IdleTimeoutError{}, reason: "idle_timeout", class: "quic_idle_timeout"},
+		{name: "handshake", err: context.DeadlineExceeded, reason: "handshake_timeout", class: "quic_handshake_timeout"},
+		{name: "remote application", err: &quicgo.ApplicationError{Remote: true}, reason: "remote_close", class: "remote_application_close"},
+		{name: "local transport", err: &quicgo.TransportError{}, reason: "transport_error", class: "quic_transport_error"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reason, class, message := ClassifyConnectionError(test.err)
+			if reason != test.reason || class != test.class || message == "" {
+				t.Fatalf("classification = %q, %q, %q", reason, class, message)
+			}
+		})
 	}
 }
 

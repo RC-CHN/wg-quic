@@ -118,6 +118,16 @@ func Show(name string, jsonOutput bool) error {
 		if status.SessionTelemetryOmitted != 0 {
 			fmt.Printf("  transport sessions omitted: %d\n", status.SessionTelemetryOmitted)
 		}
+		for _, session := range status.RecentSessions {
+			fmt.Printf(
+				"  closed transport session: %d/%d (%s at %s, replaced by %d)\n",
+				session.SessionID, session.SessionGeneration, session.CloseReason,
+				session.ClosedAt.Format(time.RFC3339Nano), session.ReplacedBySessionID,
+			)
+		}
+		if status.RecentSessionsEvicted != 0 {
+			fmt.Printf("  closed transport sessions evicted: %d\n", status.RecentSessionsEvicted)
+		}
 		for _, peer := range status.Peers {
 			fmt.Printf("  peer: %s\n", peer.PublicKey)
 			if peer.Endpoint != "" {

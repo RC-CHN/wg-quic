@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"net"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
@@ -186,6 +187,46 @@ func (c *Connection) MaxDatagramPayloadSize() int {
 
 func (c *Connection) ObserveFECFeedback(total, missing, recovered uint64) {
 	c.conn.ObserveFECFeedback(total, missing, recovered)
+}
+
+// ClassifyConnectionError maps typed QUIC termination errors onto the stable
+// management close-reason vocabulary. The returned message is bounded and
+// single-line so it is safe to retain in local diagnostic status.
+func ClassifyConnectionError(err error) (reason, class, message string) {
+	if err == nil {
+		return "unknown", "unknown", ""
+	}
+	message = strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	var idle *quicgo.IdleTimeoutError
+	if errors.As(err, &idle) {
+		return "idle_timeout", "quic_idle_timeout", message
+	}
+	var handshake *quicgo.HandshakeTimeoutError
+	if errors.As(err, &handshake) || errors.Is(err, context.DeadlineExceeded) {
+		return "handshake_timeout", "quic_handshake_timeout", message
+	}
+	var application *quicgo.ApplicationError
+	if errors.As(err, &application) {
+		if application.Remote {
+			return "remote_close", "remote_application_close", message
+		}
+		return "transport_error", "local_application_close", message
+	}
+	var transport *quicgo.TransportError
+	if errors.As(err, &transport) {
+		if transport.Remote {
+			return "remote_close", "remote_transport_close", message
+		}
+		return "transport_error", "quic_transport_error", message
+	}
+	var statelessReset *quicgo.StatelessResetError
+	if errors.As(err, &statelessReset) {
+		return "remote_close", "quic_stateless_reset", message
+	}
+	return "transport_error", "transport_error", message
 }
 
 func (c *Carrier) Accept(ctx context.Context) (*Connection, netip.AddrPort, error) {

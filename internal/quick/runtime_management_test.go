@@ -122,18 +122,26 @@ func TestRuntimeManagementForwardsPortableSessionTelemetry(t *testing.T) {
 	runtime.core = &telemetryCoreClient{
 		fakePeerSetClient: &fakePeerSetClient{},
 		status: control.Status{
-			Capabilities:            []string{"session_telemetry_v1"},
+			Capabilities:            []string{"session_telemetry_v1", "recent_session_telemetry_v1"},
 			SessionTelemetryOmitted: 3,
+			RecentSessionsEvicted:   4,
 			Sessions: []telemetry.SessionObservation{{
 				TelemetryVersion: telemetry.SessionTelemetryVersion,
 				SessionID:        9, SessionGeneration: 2, Role: "outbound",
+			}},
+			RecentSessions: []telemetry.ClosedSessionObservation{{
+				TelemetryVersion: telemetry.RecentSessionTelemetryVersion,
+				SessionID:        8, SessionGeneration: 1, State: "closed", Final: true,
 			}},
 		},
 	}
 	status := runtime.status()
 	if !slices.Contains(status.Capabilities, "session_telemetry_v1") ||
+		!slices.Contains(status.Capabilities, "recent_session_telemetry_v1") ||
 		len(status.Sessions) != 1 || status.Sessions[0].SessionID != 9 ||
-		status.Sessions[0].SessionGeneration != 2 || status.SessionTelemetryOmitted != 3 {
+		status.Sessions[0].SessionGeneration != 2 || status.SessionTelemetryOmitted != 3 ||
+		len(status.RecentSessions) != 1 || status.RecentSessions[0].SessionID != 8 ||
+		status.RecentSessionsEvicted != 4 {
 		t.Fatalf("forwarded session telemetry = %#v", status)
 	}
 	if !slices.Contains(runtime.capabilities(), "session_telemetry_v1") {

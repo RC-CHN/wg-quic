@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 	"github.com/RC-CHN/wg-quic/internal/transport/obfs"
 	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 	"github.com/RC-CHN/wg-quic/third_party/wireguard-go/conn"
@@ -287,6 +288,32 @@ func TestSessionTelemetryIsBoundedAndPrioritizesConfiguredSessions(t *testing.T)
 	}
 	if sessions[0].Role != "outbound" || sessions[0].SessionID != maxSessionTelemetry+2 {
 		t.Fatalf("configured session was not prioritized: first = %#v", sessions[0])
+	}
+}
+
+func TestRecentSessionTelemetryIsBoundedAndExpires(t *testing.T) {
+	bind := New(DefaultConfig())
+	now := time.Now()
+	bind.recentSessions = []telemetry.ClosedSessionObservation{{
+		FinalSequence: 1, SessionID: 1,
+		ClosedAt: now.Add(-recentSessionTelemetryTTL),
+	}}
+	for id := uint64(2); id <= maxRecentSessionTelemetry+2; id++ {
+		bind.retainClosedSession(telemetry.ClosedSessionObservation{
+			SessionID: id, ClosedAt: now, State: "closed", Final: true,
+		})
+	}
+	recent, evicted := bind.RecentSessionTelemetry()
+	if len(recent) != maxRecentSessionTelemetry || evicted != 2 {
+		t.Fatalf("recent sessions = %d, evicted = %d", len(recent), evicted)
+	}
+	if recent[0].SessionID != 3 || recent[len(recent)-1].SessionID != maxRecentSessionTelemetry+2 {
+		t.Fatalf("bounded recent session order = %#v", recent)
+	}
+	for index := 1; index < len(recent); index++ {
+		if recent[index].FinalSequence <= recent[index-1].FinalSequence {
+			t.Fatalf("final sequences are not monotonic: %#v", recent)
+		}
 	}
 }
 
@@ -710,6 +737,11 @@ func TestBindRedialEndpointDoesNotWaitForWireGuardTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	receiveOne(t, bReceive[0])
+	active, _ := a.SessionTelemetry()
+	if len(active) != 1 {
+		t.Fatalf("active sessions before redial = %#v", active)
+	}
+	oldSessionID := active[0].SessionID
 
 	a.RedialEndpoint(aToB.(*Endpoint).addr)
 	waitForCondition(t, "explicit endpoint redial", func() bool {
@@ -718,6 +750,23 @@ func TestBindRedialEndpointDoesNotWaitForWireGuardTraffic(t *testing.T) {
 	})
 	if got := a.EndpointReconnectStatus(aToB.(*Endpoint).addr).Attempts; got != 1 {
 		t.Fatalf("automatic reconnect attempts after explicit redial = %d, want 1", got)
+	}
+	waitForCondition(t, "redial final session telemetry", func() bool {
+		recent, _ := a.RecentSessionTelemetry()
+		return len(recent) != 0 && recent[len(recent)-1].SessionID == oldSessionID &&
+			recent[len(recent)-1].ReplacedBySessionID != 0
+	})
+	recent, evicted := a.RecentSessionTelemetry()
+	final := recent[len(recent)-1]
+	if evicted != 0 || final.CloseReason != telemetry.SessionCloseEndpointReplaced ||
+		!final.Final || final.State != "closed" || final.FinalSequence == 0 ||
+		final.ReplacedBySessionID == oldSessionID || final.FinalStats.WGTxPackets == 0 {
+		t.Fatalf("redial final session telemetry = %#v, evicted = %d", final, evicted)
+	}
+	active, _ = a.SessionTelemetry()
+	if len(active) != 1 || active[0].SessionID != final.ReplacedBySessionID ||
+		active[0].ReplacesSessionID != oldSessionID || active[0].SessionGeneration <= final.SessionGeneration {
+		t.Fatalf("replacement session telemetry = %#v, final = %#v", active, final)
 	}
 }
 

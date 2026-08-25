@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,8 +22,10 @@ import (
 )
 
 const (
-	fecExpiryPoll       = 500 * time.Millisecond
-	maxSessionTelemetry = 256
+	fecExpiryPoll             = 500 * time.Millisecond
+	maxSessionTelemetry       = 256
+	maxRecentSessionTelemetry = 64
+	recentSessionTelemetryTTL = 5 * time.Minute
 )
 
 type Config struct {
@@ -123,6 +126,11 @@ type Bind struct {
 	obfsDynamic     map[netip.AddrPort]endpointKeyLease
 	obfsReceive     map[obfs.Key]receiveKeyLease
 	fecPolicies     map[netip.AddrPort]endpointFECPolicyLease
+	telemetryMu     sync.Mutex
+	recentSessions  []telemetry.ClosedSessionObservation
+	recentSequence  uint64
+	recentEvicted   uint64
+	replacements    map[uint64]uint64
 }
 
 // ReceiveSequence returns the last carrier-ingress sequence assigned to a
@@ -247,9 +255,10 @@ func New(cfg Config) *Bind {
 	cfg.ObfsKeys = append([]obfs.Key(nil), cfg.ObfsKeys...)
 	return &Bind{
 		cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key),
-		obfsDynamic: make(map[netip.AddrPort]endpointKeyLease),
-		obfsReceive: make(map[obfs.Key]receiveKeyLease),
-		fecPolicies: make(map[netip.AddrPort]endpointFECPolicyLease),
+		obfsDynamic:  make(map[netip.AddrPort]endpointKeyLease),
+		obfsReceive:  make(map[obfs.Key]receiveKeyLease),
+		fecPolicies:  make(map[netip.AddrPort]endpointFECPolicyLease),
+		replacements: make(map[uint64]uint64),
 	}
 }
 
@@ -328,6 +337,7 @@ func (b *Bind) Close() error {
 	state.mu.Lock()
 	state.closing = true
 	for _, sess := range state.sessions {
+		sess.setCloseCause(telemetry.SessionCloseLocalShutdown, "local_shutdown", nil)
 		sess.cancel()
 	}
 	state.mu.Unlock()
@@ -442,6 +452,66 @@ func (b *Bind) SessionTelemetry() ([]telemetry.SessionObservation, uint64) {
 		result = append(result, sess.telemetry(sampledAt))
 	}
 	return result, omitted
+}
+
+// RecentSessionTelemetry returns immutable final observations retained after
+// sessions leave the active set. The list is ordered by FinalSequence. Entries
+// are evicted when either the fixed capacity or TTL is exceeded.
+func (b *Bind) RecentSessionTelemetry() ([]telemetry.ClosedSessionObservation, uint64) {
+	b.telemetryMu.Lock()
+	b.pruneRecentSessionsLocked(time.Now())
+	result := append([]telemetry.ClosedSessionObservation(nil), b.recentSessions...)
+	evicted := b.recentEvicted
+	b.telemetryMu.Unlock()
+	return result, evicted
+}
+
+func (b *Bind) pruneRecentSessionsLocked(now time.Time) {
+	first := 0
+	for first < len(b.recentSessions) &&
+		now.Sub(b.recentSessions[first].ClosedAt) >= recentSessionTelemetryTTL {
+		first++
+	}
+	if first == 0 {
+		return
+	}
+	b.recentEvicted += uint64(first)
+	copy(b.recentSessions, b.recentSessions[first:])
+	b.recentSessions = b.recentSessions[:len(b.recentSessions)-first]
+}
+
+func (b *Bind) retainClosedSession(observation telemetry.ClosedSessionObservation) {
+	b.telemetryMu.Lock()
+	b.pruneRecentSessionsLocked(observation.ClosedAt)
+	b.recentSequence++
+	observation.FinalSequence = b.recentSequence
+	if replacement := b.replacements[observation.SessionID]; replacement != 0 {
+		observation.ReplacedBySessionID = replacement
+		delete(b.replacements, observation.SessionID)
+	}
+	b.recentSessions = append(b.recentSessions, observation)
+	if excess := len(b.recentSessions) - maxRecentSessionTelemetry; excess > 0 {
+		b.recentEvicted += uint64(excess)
+		copy(b.recentSessions, b.recentSessions[excess:])
+		b.recentSessions = b.recentSessions[:len(b.recentSessions)-excess]
+	}
+	b.telemetryMu.Unlock()
+}
+
+func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
+	if oldSessionID == 0 || newSessionID == 0 {
+		return
+	}
+	b.telemetryMu.Lock()
+	for index := range b.recentSessions {
+		if b.recentSessions[index].SessionID == oldSessionID {
+			b.recentSessions[index].ReplacedBySessionID = newSessionID
+			b.telemetryMu.Unlock()
+			return
+		}
+	}
+	b.replacements[oldSessionID] = newSessionID
+	b.telemetryMu.Unlock()
 }
 
 // AssociateSessionPeer records that WireGuard authenticated a packet from a
@@ -892,6 +962,11 @@ func (b *Bind) RetireEndpoint(endpoint netip.AddrPort) {
 	ep.session = nil
 	ep.mu.Unlock()
 	if session != nil {
+		session.setCloseCause(
+			telemetry.SessionCloseConfigurationRemoved,
+			"configuration_removed",
+			nil,
+		)
 		session.cancel()
 	}
 }
@@ -917,6 +992,14 @@ func (b *Bind) RedialEndpoint(endpoint netip.AddrPort) {
 	ep.session = nil
 	ep.mu.Unlock()
 	if session != nil {
+		ep.mu.Lock()
+		ep.pendingReplacement = session.id
+		ep.mu.Unlock()
+		session.setCloseCause(
+			telemetry.SessionCloseEndpointReplaced,
+			"endpoint_replaced",
+			nil,
+		)
 		session.cancel()
 	}
 	b.scheduleEndpointReconnect(state, ep, true)
@@ -1250,6 +1333,8 @@ func (b *Bind) newSessionLocked(
 ) *session {
 	ctx, cancel := context.WithCancel(state.ctx)
 	ep.sessionGeneration++
+	replacesSessionID := ep.pendingReplacement
+	ep.pendingReplacement = 0
 	role := "inbound"
 	configuredEndpoint := ""
 	if ep.configured {
@@ -1266,6 +1351,7 @@ func (b *Bind) newSessionLocked(
 		fecPolicyUpdates:   make(chan string, 1),
 		remoteAddr:         ep.addr,
 		authenticatedPeers: make(map[string]uint64),
+		replacesSessionID:  replacesSessionID,
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
@@ -1277,6 +1363,7 @@ func (b *Bind) newSessionLocked(
 		_ = sess.fecEncoder.SetInterleave(profile.interleave)
 	}
 	state.sessions[sess.id] = sess
+	b.recordSessionReplacement(replacesSessionID, sess.id)
 	b.stats.activeSessions.Add(1)
 	return sess
 }
@@ -1288,6 +1375,8 @@ func (b *Bind) dialSession(sess *session) {
 	defer cancel()
 	qconn, err := sess.state.carrier.Dial(ctx, sess.endpoint.addr)
 	if err != nil {
+		reason, class, message := quiccarrier.ClassifyConnectionError(err)
+		sess.setCloseCause(reason, class, errors.New(message))
 		sess.endpoint.mu.Lock()
 		attempt := sess.endpoint.reconnectAttempts
 		if sess.endpoint.configured && sess.endpoint.session == sess {
@@ -1364,6 +1453,10 @@ type session struct {
 	closeOnce           sync.Once
 	closed              atomic.Bool
 	reconnectAttempt    bool
+	replacesSessionID   uint64
+	closeReason         string
+	closeErrorClass     string
+	closeError          string
 	fecEncoder          *fec.Encoder
 	fecDecoder          *fec.Decoder
 	fecPathSampleFrames uint32
@@ -1446,7 +1539,50 @@ func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
 		SessionID:        s.id, SessionGeneration: s.generation,
 		Role: s.role, State: state, ConfiguredEndpoint: s.configuredEndpoint,
 		CurrentEndpoint: currentEndpoint, EstablishedAt: establishedAtValue,
-		SampledAt: sampledAt, Peers: peers, Stats: stats,
+		SampledAt: sampledAt, Peers: peers, ReplacesSessionID: s.replacesSessionID,
+		Stats: stats,
+	}
+}
+
+func (s *session) setCloseCause(reason, class string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeReason != "" && s.closeReason != telemetry.SessionCloseUnknown {
+		return
+	}
+	if reason == "" {
+		reason = telemetry.SessionCloseUnknown
+	}
+	s.closeReason = reason
+	s.closeErrorClass = class
+	if err == nil {
+		return
+	}
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	s.closeError = message
+}
+
+func (s *session) finalTelemetry(closedAt time.Time) telemetry.ClosedSessionObservation {
+	active := s.telemetry(closedAt)
+	s.mu.Lock()
+	reason, class, lastError := s.closeReason, s.closeErrorClass, s.closeError
+	s.mu.Unlock()
+	if reason == "" {
+		reason = telemetry.SessionCloseUnknown
+	}
+	return telemetry.ClosedSessionObservation{
+		TelemetryVersion: telemetry.RecentSessionTelemetryVersion,
+		SessionID:        active.SessionID, SessionGeneration: active.SessionGeneration,
+		Role: active.Role, State: "closed",
+		ConfiguredEndpoint: active.ConfiguredEndpoint,
+		CurrentEndpoint:    active.CurrentEndpoint,
+		EstablishedAt:      active.EstablishedAt, ClosedAt: closedAt, SampledAt: closedAt,
+		Peers: active.Peers, CloseReason: reason, ErrorClass: class,
+		LastError: lastError, ReplacesSessionID: active.ReplacesSessionID,
+		Final: true, FinalStats: active.Stats,
 	}
 }
 
@@ -1519,6 +1655,14 @@ func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 		s.cancel()
+		s.state.mu.Lock()
+		stateClosing := s.state.closing
+		s.state.mu.Unlock()
+		if stateClosing {
+			s.setCloseCause(telemetry.SessionCloseLocalShutdown, "local_shutdown", nil)
+		}
+		closedAt := time.Now()
+		final := s.finalTelemetry(closedAt)
 		s.mu.Lock()
 		establishedAt := s.establishedAt
 		if s.conn != nil {
@@ -1534,6 +1678,10 @@ func (s *session) close() {
 		current := s.endpoint.session == s
 		if current {
 			s.endpoint.session = nil
+			if configured && final.CloseReason != telemetry.SessionCloseLocalShutdown &&
+				final.CloseReason != telemetry.SessionCloseConfigurationRemoved {
+				s.endpoint.pendingReplacement = s.id
+			}
 			if configured && !establishedAt.IsZero() {
 				if time.Since(establishedAt) < s.state.cfg.ReconnectStable {
 					s.endpoint.consecutiveFailures++
@@ -1546,6 +1694,7 @@ func (s *session) close() {
 			}
 		}
 		s.endpoint.mu.Unlock()
+		s.endpoint.owner.retainClosedSession(final)
 		if !s.reconnectAttempt || !establishedAt.IsZero() {
 			s.endpoint.owner.eventf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
 		} else {
@@ -1824,6 +1973,8 @@ func (s *session) receiveLoop() {
 			if received.err != nil {
 				received.datagram.Release()
 				if s.ctx.Err() == nil {
+					reason, class, message := quiccarrier.ClassifyConnectionError(received.err)
+					s.setCloseCause(reason, class, errors.New(message))
 					s.endpoint.owner.debugf(
 						"QUIC receive stopped: session=%d remote=%s error=%v",
 						s.id, s.endpoint.addr, received.err,

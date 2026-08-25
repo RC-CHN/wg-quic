@@ -27,6 +27,7 @@ type Endpoint struct {
 	reconnectAttempts   uint64
 	reconnectFailures   uint64
 	nextReconnect       time.Time
+	pendingReplacement  uint64
 }
 
 func (e *Endpoint) cancelReconnectLocked() {
