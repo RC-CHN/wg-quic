@@ -398,6 +398,9 @@ func (c *collector) sample(ctx context.Context) error {
 		if writeErr := c.writeRawStatus(nil, err); writeErr != nil {
 			return writeErr
 		}
+		if writeErr := c.writeFailedCSV(management.Status{SupervisorEpoch: c.epoch}, err); writeErr != nil {
+			return writeErr
+		}
 		if eventErr := c.writeEventError(err); eventErr != nil {
 			return eventErr
 		}
@@ -437,6 +440,9 @@ func (c *collector) sample(ctx context.Context) error {
 	}
 	if eventErr := c.drainEvents(ctx, true); eventErr != nil {
 		c.failedSamples++
+		if writeErr := c.writeFailedCSV(status, eventErr); writeErr != nil {
+			return writeErr
+		}
 		return eventErr
 	}
 	return nil
