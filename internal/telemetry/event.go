@@ -17,6 +17,7 @@ const (
 	SessionEventPathRTT         = "path_rtt"
 	SessionEventFECPolicy       = "fec_policy"
 	SessionEventQueueDrop       = "queue_drop"
+	SessionEventReceiveOverflow = "receive_queue_overflow"
 )
 
 // SessionEventMetrics is a typed event snapshot. Zero is a valid value, so
@@ -34,6 +35,7 @@ type SessionEventMetrics struct {
 	PacketsLost           uint64 `json:"packets_lost"`
 	SpuriousLossPackets   uint64 `json:"spurious_loss_packets"`
 	QueueDrops            uint64 `json:"queue_drops"`
+	ReceiveQueueOverflow  uint64 `json:"receive_queue_overflow"`
 	FECPolicy             string `json:"fec_policy,omitempty"`
 	Endpoint              string `json:"endpoint,omitempty"`
 }

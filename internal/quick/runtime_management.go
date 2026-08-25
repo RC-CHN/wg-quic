@@ -401,7 +401,8 @@ func withCoreCapabilities(capabilities []string, status *control.Status) []strin
 	for _, capability := range status.Capabilities {
 		if capability != "session_telemetry_v1" &&
 			capability != "recent_session_telemetry_v1" &&
-			capability != "session_events_v1" {
+			capability != "session_events_v1" &&
+			capability != "receive_queue_overflow_v1" {
 			continue
 		}
 		if !slices.Contains(capabilities, capability) {

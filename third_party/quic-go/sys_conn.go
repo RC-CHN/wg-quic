@@ -25,6 +25,15 @@ type connCapabilities struct {
 	ECN bool
 }
 
+// ReceiveQueueOverflowStats describes kernel-reported UDP receive queue drops.
+// Supported is false on platforms or PacketConn implementations that don't
+// expose an authoritative counter. Packets is cumulative for this socket.
+type ReceiveQueueOverflowStats struct {
+	Supported bool
+	Source    string
+	Packets   uint64
+}
+
 // rawConn is a connection that allow reading of a receivedPackeh.
 type rawConn interface {
 	ReadPacket() (receivedPacket, error)
@@ -37,6 +46,7 @@ type rawConn interface {
 	io.Closer
 
 	capabilities() connCapabilities
+	receiveQueueOverflowStats() ReceiveQueueOverflowStats
 }
 
 // OOBCapablePacketConn is a connection that allows the reading of ECN bits from the IP header.
@@ -141,3 +151,7 @@ func (c *basicConn) WritePacket(b []byte, addr net.Addr, _ []byte, gsoSize uint1
 }
 
 func (c *basicConn) capabilities() connCapabilities { return connCapabilities{DF: c.supportsDF} }
+
+func (c *basicConn) receiveQueueOverflowStats() ReceiveQueueOverflowStats {
+	return ReceiveQueueOverflowStats{Source: "unavailable"}
+}

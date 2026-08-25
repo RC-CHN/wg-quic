@@ -2,31 +2,42 @@
 // by the data plane and its local control clients.
 package telemetry
 
+// ReceiveQueueOverflowObservation distinguishes an authoritative zero from an
+// unavailable OS counter. The kernel socket is shared by all QUIC sessions, so
+// this observation is intentionally interface-scoped.
+type ReceiveQueueOverflowObservation struct {
+	Supported bool   `json:"supported"`
+	Source    string `json:"source"`
+	Platform  string `json:"platform"`
+	Packets   uint64 `json:"packets"`
+}
+
 // Stats is a point-in-time snapshot of the userspace data plane counters.
 //
 // Keep this package free of bind, carrier, and operating-system dependencies so
 // management clients can consume status without compiling the data plane.
 type Stats struct {
-	WGTxPackets            uint64 `json:"wg_tx_packets"`
-	WGTxBytes              uint64 `json:"wg_tx_bytes"`
-	WGRxPackets            uint64 `json:"wg_rx_packets"`
-	WGRxBytes              uint64 `json:"wg_rx_bytes"`
-	WireTxPackets          uint64 `json:"wire_tx_packets"`
-	WireTxBytes            uint64 `json:"wire_tx_bytes"`
-	WireRxPackets          uint64 `json:"wire_rx_packets"`
-	WireRxBytes            uint64 `json:"wire_rx_bytes"`
-	QueueDrops             uint64 `json:"queue_drops"`
-	FECDataTx              uint64 `json:"fec_data_tx"`
-	FECParityTx            uint64 `json:"fec_parity_tx"`
-	FECRawLost             uint64 `json:"fec_raw_lost"`
-	FECRecovered           uint64 `json:"fec_recovered"`
-	FECUnrecovered         uint64 `json:"fec_unrecovered"`
-	FECCurrentParityShards uint64 `json:"fec_current_parity_shards"`
-	FECLossEstimatePPM     uint64 `json:"fec_loss_estimate_ppm"`
-	ActiveSessions         uint64 `json:"active_sessions"`
-	SendQueueDepth         uint64 `json:"send_queue_depth"`
-	PriorityQueueDepth     uint64 `json:"priority_queue_depth"`
-	ControlQueueDepth      uint64 `json:"control_queue_depth"`
+	WGTxPackets            uint64                          `json:"wg_tx_packets"`
+	WGTxBytes              uint64                          `json:"wg_tx_bytes"`
+	WGRxPackets            uint64                          `json:"wg_rx_packets"`
+	WGRxBytes              uint64                          `json:"wg_rx_bytes"`
+	WireTxPackets          uint64                          `json:"wire_tx_packets"`
+	WireTxBytes            uint64                          `json:"wire_tx_bytes"`
+	WireRxPackets          uint64                          `json:"wire_rx_packets"`
+	WireRxBytes            uint64                          `json:"wire_rx_bytes"`
+	QueueDrops             uint64                          `json:"queue_drops"`
+	FECDataTx              uint64                          `json:"fec_data_tx"`
+	FECParityTx            uint64                          `json:"fec_parity_tx"`
+	FECRawLost             uint64                          `json:"fec_raw_lost"`
+	FECRecovered           uint64                          `json:"fec_recovered"`
+	FECUnrecovered         uint64                          `json:"fec_unrecovered"`
+	FECCurrentParityShards uint64                          `json:"fec_current_parity_shards"`
+	FECLossEstimatePPM     uint64                          `json:"fec_loss_estimate_ppm"`
+	ActiveSessions         uint64                          `json:"active_sessions"`
+	SendQueueDepth         uint64                          `json:"send_queue_depth"`
+	PriorityQueueDepth     uint64                          `json:"priority_queue_depth"`
+	ControlQueueDepth      uint64                          `json:"control_queue_depth"`
+	ReceiveQueueOverflow   ReceiveQueueOverflowObservation `json:"receive_queue_overflow"`
 
 	QUICBytesAcked            uint64 `json:"quic_bytes_acked"`
 	QUICPacketsAcked          uint64 `json:"quic_packets_acked"`

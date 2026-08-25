@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"runtime"
 	"testing"
 	"time"
 
@@ -35,6 +36,13 @@ func TestCarrierRoutesQUICThroughSalamander(t *testing.T) {
 		adapter, ok := carrier.transport.Conn.(*obfs.SalamanderConn)
 		if !ok || adapter != carrier.obfsConn {
 			t.Fatalf("%s QUIC transport bypasses Salamander through %T", name, carrier.transport.Conn)
+		}
+		overflow := carrier.ReceiveQueueOverflowStats()
+		if runtime.GOOS == "linux" && (!overflow.Supported || overflow.Source != "linux_so_rxq_ovfl") {
+			t.Fatalf("%s receive queue overflow stats = %#v", name, overflow)
+		}
+		if runtime.GOOS != "linux" && (overflow.Supported || overflow.Source != "unavailable") {
+			t.Fatalf("%s receive queue overflow availability = %#v", name, overflow)
 		}
 	}
 

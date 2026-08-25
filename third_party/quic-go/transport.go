@@ -166,6 +166,16 @@ type Transport struct {
 	logger utils.Logger
 }
 
+// ReceiveQueueOverflowStats returns the UDP socket's cumulative receive queue
+// overflow counter when the operating system exposes one. Unsupported is
+// reported explicitly instead of being conflated with a supported zero value.
+func (t *Transport) ReceiveQueueOverflowStats() ReceiveQueueOverflowStats {
+	if err := t.init(false); err != nil || t.conn == nil {
+		return ReceiveQueueOverflowStats{Source: "unavailable"}
+	}
+	return t.conn.receiveQueueOverflowStats()
+}
+
 // Listen starts listening for incoming QUIC connections.
 // There can only be a single listener on any net.PacketConn.
 // Listen may only be called again after the current listener was closed.

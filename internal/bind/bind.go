@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -117,30 +118,35 @@ func (s *runState) startWorker(worker func()) bool {
 }
 
 type Bind struct {
-	cfg             Config
-	mu              sync.Mutex
-	state           *runState
-	sessionRestored func(netip.AddrPort)
-	nextPacket      atomic.Uint64
-	nextSession     atomic.Uint64
-	receiveSequence atomic.Uint64
-	mark            atomic.Uint32
-	stats           bindStats
-	obfsResolved    map[netip.AddrPort]obfs.Key
-	obfsDynamic     map[netip.AddrPort]endpointKeyLease
-	obfsReceive     map[obfs.Key]receiveKeyLease
-	fecPolicies     map[netip.AddrPort]endpointFECPolicyLease
-	telemetryMu     sync.Mutex
-	recentSessions  []telemetry.ClosedSessionObservation
-	recentSequence  uint64
-	recentEvicted   uint64
-	replacements    map[uint64]uint64
-	eventMu         sync.Mutex
-	eventOrigin     time.Time
-	eventStreamID   string
-	eventSequence   uint64
-	eventsDropped   uint64
-	events          []telemetry.SessionEvent
+	cfg                    Config
+	mu                     sync.Mutex
+	state                  *runState
+	sessionRestored        func(netip.AddrPort)
+	nextPacket             atomic.Uint64
+	nextSession            atomic.Uint64
+	receiveSequence        atomic.Uint64
+	mark                   atomic.Uint32
+	stats                  bindStats
+	obfsResolved           map[netip.AddrPort]obfs.Key
+	obfsDynamic            map[netip.AddrPort]endpointKeyLease
+	obfsReceive            map[obfs.Key]receiveKeyLease
+	fecPolicies            map[netip.AddrPort]endpointFECPolicyLease
+	telemetryMu            sync.Mutex
+	recentSessions         []telemetry.ClosedSessionObservation
+	recentSequence         uint64
+	recentEvicted          uint64
+	replacements           map[uint64]uint64
+	eventMu                sync.Mutex
+	eventOrigin            time.Time
+	eventStreamID          string
+	eventSequence          uint64
+	eventsDropped          uint64
+	events                 []telemetry.SessionEvent
+	receiveOverflowMu      sync.Mutex
+	receiveOverflowCarrier *quiccarrier.Carrier
+	receiveOverflowBase    uint64
+	receiveOverflowRawLast uint64
+	receiveOverflowTotal   uint64
 }
 
 // ReceiveSequence returns the last carrier-ingress sequence assigned to a
@@ -430,8 +436,57 @@ func (b *Bind) Stats() telemetry.Stats {
 		FECRecovered: b.stats.fecRecovered.Load(), FECUnrecovered: b.stats.fecUnrecovered.Load(),
 		ActiveSessions: b.stats.activeSessions.Load(),
 	}
+	b.mu.Lock()
+	state := b.state
+	b.mu.Unlock()
+	if state != nil {
+		overflow := state.carrier.ReceiveQueueOverflowStats()
+		stats.ReceiveQueueOverflow = b.observeReceiveQueueOverflow(state.carrier, overflow)
+	} else {
+		stats.ReceiveQueueOverflow = telemetry.ReceiveQueueOverflowObservation{
+			Source: "unavailable", Platform: runtime.GOOS,
+		}
+	}
 	b.addQUICStats(&stats)
 	return stats
+}
+
+func (b *Bind) observeReceiveQueueOverflow(
+	carrier *quiccarrier.Carrier,
+	observation quiccarrier.ReceiveQueueOverflowStats,
+) telemetry.ReceiveQueueOverflowObservation {
+	result := telemetry.ReceiveQueueOverflowObservation{
+		Supported: observation.Supported, Source: observation.Source,
+		Platform: runtime.GOOS, Packets: observation.Packets,
+	}
+	if !observation.Supported {
+		return result
+	}
+	b.receiveOverflowMu.Lock()
+	if b.receiveOverflowCarrier != carrier {
+		b.receiveOverflowCarrier = carrier
+		b.receiveOverflowBase = b.receiveOverflowTotal
+		b.receiveOverflowRawLast = 0
+	} else if observation.Packets < b.receiveOverflowRawLast {
+		// The quic-go adapter extends the 32-bit kernel counter, but treat an
+		// unexpected adapter reset as a new counter epoch instead of moving the
+		// public cumulative value backwards.
+		b.receiveOverflowBase = b.receiveOverflowTotal
+	}
+	before := b.receiveOverflowTotal
+	b.receiveOverflowRawLast = observation.Packets
+	b.receiveOverflowTotal = b.receiveOverflowBase + observation.Packets
+	result.Packets = b.receiveOverflowTotal
+	changed := b.receiveOverflowTotal > before
+	b.receiveOverflowMu.Unlock()
+	if changed {
+		b.recordSessionEventAt(
+			0, 0, telemetry.SessionEventReceiveOverflow, observation.Source, time.Now(),
+			&telemetry.SessionEventMetrics{ReceiveQueueOverflow: before},
+			&telemetry.SessionEventMetrics{ReceiveQueueOverflow: result.Packets},
+		)
+	}
+	return result
 }
 
 // SessionTelemetry returns independent observations for the currently active

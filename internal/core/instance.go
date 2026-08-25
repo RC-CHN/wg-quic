@@ -401,6 +401,7 @@ func (i *Instance) status() control.Status {
 			"session_telemetry_v1",
 			"recent_session_telemetry_v1",
 			"session_events_v1",
+			"receive_queue_overflow_v1",
 		},
 		Stats: i.Stats(),
 	}

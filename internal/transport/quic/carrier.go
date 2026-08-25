@@ -129,6 +129,7 @@ type Connection struct {
 
 type ConnectionEvent = quicgo.ConnectionEvent
 type ConnectionEventMetrics = quicgo.ConnectionEventMetrics
+type ReceiveQueueOverflowStats = quicgo.ReceiveQueueOverflowStats
 
 type ReceivedDatagram struct {
 	Data       []byte
@@ -268,6 +269,10 @@ func (c *Carrier) Dial(ctx context.Context, remote netip.AddrPort) (*Connection,
 
 func (c *Carrier) Port() uint16 {
 	return uint16(c.packetConn.LocalAddr().(*net.UDPAddr).Port)
+}
+
+func (c *Carrier) ReceiveQueueOverflowStats() ReceiveQueueOverflowStats {
+	return c.transport.ReceiveQueueOverflowStats()
 }
 
 func (c *Carrier) SetMark(mark uint32) error {

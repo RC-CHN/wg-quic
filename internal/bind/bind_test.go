@@ -343,6 +343,41 @@ func TestSessionEventsUseBoundedStreamCursor(t *testing.T) {
 	}
 }
 
+func TestReceiveQueueOverflowRemainsCumulativeAcrossCarrierRestarts(t *testing.T) {
+	bind := New(DefaultConfig())
+	firstCarrier := &quiccarrier.Carrier{}
+	first := bind.observeReceiveQueueOverflow(firstCarrier, quiccarrier.ReceiveQueueOverflowStats{
+		Supported: true, Source: "linux_so_rxq_ovfl", Packets: 7,
+	})
+	if first.Packets != 7 {
+		t.Fatalf("first counter = %d, want 7", first.Packets)
+	}
+	second := bind.observeReceiveQueueOverflow(firstCarrier, quiccarrier.ReceiveQueueOverflowStats{
+		Supported: true, Source: "linux_so_rxq_ovfl", Packets: 11,
+	})
+	if second.Packets != 11 {
+		t.Fatalf("second counter = %d, want 11", second.Packets)
+	}
+	secondCarrier := &quiccarrier.Carrier{}
+	restarted := bind.observeReceiveQueueOverflow(secondCarrier, quiccarrier.ReceiveQueueOverflowStats{
+		Supported: true, Source: "linux_so_rxq_ovfl", Packets: 3,
+	})
+	if restarted.Packets != 14 {
+		t.Fatalf("counter after carrier restart = %d, want 14", restarted.Packets)
+	}
+	events, err := bind.SessionEvents("", 0, maxSessionEventQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events.Events) != 3 ||
+		events.Events[2].EventType != telemetry.SessionEventReceiveOverflow ||
+		events.Events[2].SessionID != 0 ||
+		events.Events[2].Before.ReceiveQueueOverflow != 11 ||
+		events.Events[2].After.ReceiveQueueOverflow != 14 {
+		t.Fatalf("overflow events = %#v", events.Events)
+	}
+}
+
 func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	config := DefaultConfig()
 	config.ObfsMode = "salamander"

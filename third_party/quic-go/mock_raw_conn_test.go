@@ -271,3 +271,41 @@ func (c *MockRawConncapabilitiesCall) DoAndReturn(f func() connCapabilities) *Mo
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// receiveQueueOverflowStats mocks base method.
+func (m *MockRawConn) receiveQueueOverflowStats() ReceiveQueueOverflowStats {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "receiveQueueOverflowStats")
+	ret0, _ := ret[0].(ReceiveQueueOverflowStats)
+	return ret0
+}
+
+// receiveQueueOverflowStats indicates an expected call of receiveQueueOverflowStats.
+func (mr *MockRawConnMockRecorder) receiveQueueOverflowStats() *MockRawConnreceiveQueueOverflowStatsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "receiveQueueOverflowStats", reflect.TypeOf((*MockRawConn)(nil).receiveQueueOverflowStats))
+	return &MockRawConnreceiveQueueOverflowStatsCall{Call: call}
+}
+
+// MockRawConnreceiveQueueOverflowStatsCall wrap *gomock.Call
+type MockRawConnreceiveQueueOverflowStatsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRawConnreceiveQueueOverflowStatsCall) Return(arg0 ReceiveQueueOverflowStats) *MockRawConnreceiveQueueOverflowStatsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRawConnreceiveQueueOverflowStatsCall) Do(f func() ReceiveQueueOverflowStats) *MockRawConnreceiveQueueOverflowStatsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRawConnreceiveQueueOverflowStatsCall) DoAndReturn(f func() ReceiveQueueOverflowStats) *MockRawConnreceiveQueueOverflowStatsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

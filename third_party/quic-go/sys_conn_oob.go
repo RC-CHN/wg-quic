@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -74,6 +75,11 @@ type oobConn struct {
 	buffers  [batchSize]*packetBuffer
 
 	cap connCapabilities
+
+	receiveQueueOverflowSupported bool
+	receiveQueueOverflowSeen      bool
+	receiveQueueOverflowLast      uint32
+	receiveQueueOverflowPackets   atomic.Uint64
 }
 
 var _ rawConn = &oobConn{}
@@ -91,6 +97,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 	// Try enabling receiving of ECN and packet info for both IP versions.
 	// We expect at least one of those syscalls to succeed.
 	var errECNIPv4, errECNIPv6, errPIIPv4, errPIIPv6 error
+	var receiveQueueOverflowSupported bool
 	if err := rawConn.Control(func(fd uintptr) {
 		errECNIPv4 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVTOS, 1)
 		errECNIPv6 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IPV6, unix.IPV6_RECVTCLASS, 1)
@@ -99,6 +106,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 			errPIIPv4 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, ipv4PKTINFO, 1)
 			errPIIPv6 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IPV6, unix.IPV6_RECVPKTINFO, 1)
 		}
+		receiveQueueOverflowSupported = enableReceiveQueueOverflow(int(fd))
 	}); err != nil {
 		return nil, err
 	}
@@ -150,6 +158,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 			GSO: isGSOEnabled(rawConn),
 			ECN: isECNEnabled(),
 		},
+		receiveQueueOverflowSupported: receiveQueueOverflowSupported,
 	}
 	for i := range batchSize {
 		oobConn.messages[i].OOB = make([]byte, oobBufferSize)
@@ -238,6 +247,9 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 				}
 			}
 		}
+		if value, ok := parseReceiveQueueOverflow(hdr.Level, hdr.Type, body); ok {
+			c.recordReceiveQueueOverflow(value)
+		}
 		data = remainder
 	}
 	return p, nil
@@ -270,6 +282,29 @@ func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gso
 
 func (c *oobConn) capabilities() connCapabilities {
 	return c.cap
+}
+
+func (c *oobConn) recordReceiveQueueOverflow(value uint32) {
+	if !c.receiveQueueOverflowSeen {
+		c.receiveQueueOverflowSeen = true
+		c.receiveQueueOverflowLast = value
+		c.receiveQueueOverflowPackets.Store(uint64(value))
+		return
+	}
+	delta := value - c.receiveQueueOverflowLast
+	c.receiveQueueOverflowLast = value
+	c.receiveQueueOverflowPackets.Add(uint64(delta))
+}
+
+func (c *oobConn) receiveQueueOverflowStats() ReceiveQueueOverflowStats {
+	if !c.receiveQueueOverflowSupported {
+		return ReceiveQueueOverflowStats{Source: "unavailable"}
+	}
+	return ReceiveQueueOverflowStats{
+		Supported: true,
+		Source:    "linux_so_rxq_ovfl",
+		Packets:   c.receiveQueueOverflowPackets.Load(),
+	}
 }
 
 type packetInfo struct {
