@@ -432,6 +432,8 @@ collection_peer=$(printf '%s\n' "$quick_status" | jq -er '.peers[0].public_key')
 $compose exec -T a wg-quic-quick collect wg0 \
 	--peer "$collection_peer" --duration 500ms --interval 100ms \
 	--max-bytes 1M --output /tmp/wg-quic-observe-smoke
+# The substitutions below intentionally run in the guest shell, not this one.
+# shellcheck disable=SC2016
 $compose exec -T a sh -ec '
 	test "$(stat -c %a /tmp/wg-quic-observe-smoke)" = 700
 	test -f /tmp/wg-quic-observe-smoke/COMPLETE
