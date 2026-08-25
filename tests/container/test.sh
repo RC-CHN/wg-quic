@@ -411,19 +411,40 @@ if [ "$obfs" != "salamander" ]; then
 	echo "standard WireGuard config did not enable key-derived Salamander obfuscation" >&2
 	exit 1
 fi
-wg_tx=$(echo "$status" | sed -n 's/.*"wg_tx_packets": \([0-9][0-9]*\).*/\1/p')
-wg_rx=$(echo "$status" | sed -n 's/.*"wg_rx_packets": \([0-9][0-9]*\).*/\1/p')
+wg_tx=$(printf '%s\n' "$status" | jq -er '.stats.wg_tx_packets')
+wg_rx=$(printf '%s\n' "$status" | jq -er '.stats.wg_rx_packets')
 if [ -z "$wg_tx" ] || [ "$wg_tx" -eq 0 ] || [ -z "$wg_rx" ] || [ "$wg_rx" -eq 0 ]; then
 	echo "WireGuard status counters did not account for bidirectional traffic" >&2
 	exit 1
 fi
-fec_data_tx=$(echo "$status" | sed -n 's/.*"fec_data_tx": \([0-9][0-9]*\).*/\1/p')
-fec_parity_tx=$(echo "$status" | sed -n 's/.*"fec_parity_tx": \([0-9][0-9]*\).*/\1/p')
+fec_data_tx=$(printf '%s\n' "$status" | jq -er '.stats.fec_data_tx')
+fec_parity_tx=$(printf '%s\n' "$status" | jq -er '.stats.fec_parity_tx')
 if [ -z "$fec_data_tx" ] || [ "$fec_data_tx" -eq 0 ] ||
 	[ -z "$fec_parity_tx" ] || [ "$fec_parity_tx" -eq 0 ]; then
 	echo "FEC status did not report protected data and parity traffic" >&2
 	exit 1
 fi
+
+# Exercise the installed management client against a live privileged tunnel.
+# This catches transport, peer selection, filesystem permission, and artifact
+# finalization regressions that a fake collector client cannot expose.
+collection_peer=$(printf '%s\n' "$quick_status" | jq -er '.peers[0].public_key')
+$compose exec -T a wg-quic-quick collect wg0 \
+	--peer "$collection_peer" --duration 500ms --interval 100ms \
+	--max-bytes 1M --output /tmp/wg-quic-observe-smoke
+$compose exec -T a sh -ec '
+	test "$(stat -c %a /tmp/wg-quic-observe-smoke)" = 700
+	test -f /tmp/wg-quic-observe-smoke/COMPLETE
+	test ! -e /tmp/wg-quic-observe-smoke/INCOMPLETE
+	for artifact in manifest.json status.ndjson peer-telemetry.csv controller-events.ndjson summary.json; do
+		test -f "/tmp/wg-quic-observe-smoke/$artifact"
+		test "$(stat -c %a "/tmp/wg-quic-observe-smoke/$artifact")" = 600
+	done
+	jq -e . /tmp/wg-quic-observe-smoke/manifest.json >/dev/null
+	jq -e . /tmp/wg-quic-observe-smoke/summary.json >/dev/null
+	jq -e -s "length > 0" /tmp/wg-quic-observe-smoke/status.ndjson >/dev/null
+	test "$(wc -l </tmp/wg-quic-observe-smoke/peer-telemetry.csv)" -gt 1
+'
 
 $compose exec -T a ip -details link show wg0
 $compose exec -T b ip -details link show wg0
