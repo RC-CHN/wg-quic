@@ -83,6 +83,19 @@ func TestValidateAndDispatchBoundsRequiredCapabilities(t *testing.T) {
 	}
 }
 
+func TestValidateAndDispatchValidatesEventCursor(t *testing.T) {
+	handler := HandlerFunc(func(context.Context, Request) Response { return Response{} })
+	for _, request := range []Request{
+		{ProtocolVersion: ProtocolVersion, Operation: OperationEvents, Interface: "wg0", AfterSequence: 1},
+		{ProtocolVersion: ProtocolVersion, Operation: OperationEvents, Interface: "wg0", EventLimit: 1025},
+	} {
+		response := validateAndDispatch(context.Background(), handler, request)
+		if response.Failure == nil || response.Failure.Code != "validation_failed" {
+			t.Fatalf("invalid event cursor response = %#v", response)
+		}
+	}
+}
+
 func TestServerServesOneVersionedRequest(t *testing.T) {
 	serverConnection, clientConnection := net.Pipe()
 	defer clientConnection.Close()

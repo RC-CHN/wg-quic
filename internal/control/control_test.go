@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 func TestStatusServer(t *testing.T) {
@@ -37,9 +39,17 @@ func TestControlCommands(t *testing.T) {
 	var activated bool
 	var prepared PeerSetRequest
 	var committed, rolledBack, finalized string
+	var eventStream string
+	var after uint64
 	server, err := StartHandler(ctx, path, Handler{
 		Status: func() Status {
 			return Status{Interface: "wg0", State: "up"}
+		},
+		Events: func(stream string, sequence uint64, limit int) (telemetry.SessionEventBatch, error) {
+			eventStream, after = stream, sequence
+			return telemetry.SessionEventBatch{
+				EventStreamID: "stream", LastSequence: sequence + 1,
+			}, nil
 		},
 		SetPeerEndpoint: func(update SetPeerEndpointRequest) error {
 			got = update
@@ -95,6 +105,10 @@ func TestControlCommands(t *testing.T) {
 	}
 	if !activated {
 		t.Fatal("activate handler was not called")
+	}
+	events, err := NewClient(path).Events("stream", 9, 12)
+	if err != nil || eventStream != "stream" || after != 9 || events.LastSequence != 10 {
+		t.Fatalf("event cursor response = %#v, stream=%q after=%d error=%v", events, eventStream, after, err)
 	}
 	peerSet := PeerSetRequest{
 		TransactionID: "transaction-1",

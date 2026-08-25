@@ -11,6 +11,7 @@ import (
 	"github.com/RC-CHN/wg-quic/internal/control"
 	"github.com/RC-CHN/wg-quic/internal/platform"
 	"github.com/RC-CHN/wg-quic/internal/reconcile"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 type executorRecorder struct {
@@ -28,7 +29,10 @@ type fakePeerSetClient struct {
 	request  control.PeerSetRequest
 }
 
-func (*fakePeerSetClient) Status() (control.Status, error)                      { return control.Status{}, nil }
+func (*fakePeerSetClient) Status() (control.Status, error) { return control.Status{}, nil }
+func (*fakePeerSetClient) Events(string, uint64, int) (telemetry.SessionEventBatch, error) {
+	return telemetry.SessionEventBatch{}, nil
+}
 func (*fakePeerSetClient) SetPeerEndpoint(control.SetPeerEndpointRequest) error { return nil }
 func (*fakePeerSetClient) RedialPeer(string) error                              { return nil }
 func (*fakePeerSetClient) Activate() error                                      { return nil }

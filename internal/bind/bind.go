@@ -2,6 +2,8 @@ package armorbind
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -26,6 +28,8 @@ const (
 	maxSessionTelemetry       = 256
 	maxRecentSessionTelemetry = 64
 	recentSessionTelemetryTTL = 5 * time.Minute
+	maxSessionEvents          = 4096
+	maxSessionEventQuery      = 1024
 )
 
 type Config struct {
@@ -131,6 +135,12 @@ type Bind struct {
 	recentSequence  uint64
 	recentEvicted   uint64
 	replacements    map[uint64]uint64
+	eventMu         sync.Mutex
+	eventOrigin     time.Time
+	eventStreamID   string
+	eventSequence   uint64
+	eventsDropped   uint64
+	events          []telemetry.SessionEvent
 }
 
 // ReceiveSequence returns the last carrier-ingress sequence assigned to a
@@ -253,12 +263,17 @@ func New(cfg Config) *Bind {
 		cfg.ObfsMode = defaults.ObfsMode
 	}
 	cfg.ObfsKeys = append([]obfs.Key(nil), cfg.ObfsKeys...)
+	eventOrigin := time.Now()
+	var eventStreamBytes [16]byte
+	_, _ = cryptorand.Read(eventStreamBytes[:])
+	eventStreamID := hex.EncodeToString(eventStreamBytes[:])
 	return &Bind{
 		cfg: cfg, obfsResolved: make(map[netip.AddrPort]obfs.Key),
 		obfsDynamic:  make(map[netip.AddrPort]endpointKeyLease),
 		obfsReceive:  make(map[obfs.Key]receiveKeyLease),
 		fecPolicies:  make(map[netip.AddrPort]endpointFECPolicyLease),
 		replacements: make(map[uint64]uint64),
+		eventOrigin:  eventOrigin, eventStreamID: eventStreamID,
 	}
 }
 
@@ -512,6 +527,120 @@ func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
 	}
 	b.replacements[oldSessionID] = newSessionID
 	b.telemetryMu.Unlock()
+}
+
+// SessionEvents returns a bounded cursor page. A stream ID mismatch is an
+// explicit epoch boundary and must never be treated as an empty event range.
+func (b *Bind) SessionEvents(
+	eventStreamID string,
+	afterSequence uint64,
+	limit int,
+) (telemetry.SessionEventBatch, error) {
+	if limit <= 0 {
+		limit = 256
+	}
+	if limit > maxSessionEventQuery {
+		limit = maxSessionEventQuery
+	}
+	b.eventMu.Lock()
+	defer b.eventMu.Unlock()
+	if eventStreamID != "" && eventStreamID != b.eventStreamID {
+		return telemetry.SessionEventBatch{}, fmt.Errorf(
+			"event stream changed from %s to %s", eventStreamID, b.eventStreamID,
+		)
+	}
+	batch := telemetry.SessionEventBatch{
+		TelemetryVersion: telemetry.SessionEventTelemetryVersion,
+		EventStreamID:    b.eventStreamID, EventsDroppedTotal: b.eventsDropped,
+		LastSequence: min(afterSequence, b.eventSequence),
+	}
+	if len(b.events) == 0 {
+		return batch, nil
+	}
+	batch.FirstAvailableSequence = b.events[0].EventSequence
+	first := sort.Search(len(b.events), func(index int) bool {
+		return b.events[index].EventSequence > afterSequence
+	})
+	last := min(len(b.events), first+limit)
+	batch.Events = append([]telemetry.SessionEvent(nil), b.events[first:last]...)
+	if len(batch.Events) != 0 {
+		batch.LastSequence = batch.Events[len(batch.Events)-1].EventSequence
+	}
+	return batch, nil
+}
+
+func (b *Bind) recordSessionEventAt(
+	sessionID, sessionGeneration uint64,
+	eventType, reason string,
+	wallTime time.Time,
+	before, after *telemetry.SessionEventMetrics,
+) {
+	if wallTime.IsZero() {
+		wallTime = time.Now()
+	}
+	b.eventMu.Lock()
+	b.eventSequence++
+	elapsed := wallTime.Sub(b.eventOrigin)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	event := telemetry.SessionEvent{
+		TelemetryVersion: telemetry.SessionEventTelemetryVersion,
+		EventStreamID:    b.eventStreamID, EventSequence: b.eventSequence,
+		SessionID: sessionID, SessionGeneration: sessionGeneration,
+		EventType: eventType, Reason: reason,
+		MonotonicElapsedNS: elapsed.Nanoseconds(), WallTime: wallTime,
+		Before: before, After: after,
+	}
+	b.events = append(b.events, event)
+	if excess := len(b.events) - maxSessionEvents; excess > 0 {
+		b.eventsDropped += uint64(excess)
+		copy(b.events, b.events[excess:])
+		b.events = b.events[:len(b.events)-excess]
+	}
+	b.eventMu.Unlock()
+}
+
+func sessionEventMetricsFromStats(
+	stats telemetry.SessionStats,
+	fecPolicy, endpoint string,
+) *telemetry.SessionEventMetrics {
+	return &telemetry.SessionEventMetrics{
+		CongestionWindowBytes: stats.QUICCongestionWindowBytes,
+		BytesInFlight:         stats.QUICBytesInFlight,
+		BandwidthEstimateBps:  stats.QUICBandwidthEstimateBps,
+		PacingRateBps:         stats.QUICPacingRateBps,
+		SmoothedRTTUs:         stats.QUICSmoothedRTTUs,
+		PathRTTUs:             stats.QUICPathRTTUs,
+		QueueDelayUs:          stats.QUICQueueDelayUs,
+		CongestionModelState:  stats.QUICCongestionModelState,
+		PTOCount:              stats.QUICPTOCount,
+		PacketsLost:           stats.QUICPacketsLost,
+		SpuriousLossPackets:   stats.QUICSpuriousLossPackets,
+		QueueDrops:            stats.QueueDrops,
+		FECPolicy:             fecPolicy, Endpoint: endpoint,
+	}
+}
+
+func transportEventMetrics(
+	metrics *quiccarrier.ConnectionEventMetrics,
+) *telemetry.SessionEventMetrics {
+	if metrics == nil {
+		return nil
+	}
+	return &telemetry.SessionEventMetrics{
+		CongestionWindowBytes: metrics.CongestionWindowBytes,
+		BytesInFlight:         metrics.BytesInFlight,
+		BandwidthEstimateBps:  metrics.BandwidthEstimateBps,
+		PacingRateBps:         metrics.PacingRateBps,
+		SmoothedRTTUs:         metrics.SmoothedRTTUs,
+		PathRTTUs:             metrics.PathRTTUs,
+		QueueDelayUs:          metrics.QueueDelayUs,
+		CongestionModelState:  metrics.CongestionModelState,
+		PTOCount:              metrics.PTOCount,
+		PacketsLost:           metrics.PacketsLost,
+		SpuriousLossPackets:   metrics.SpuriousLossPackets,
+	}
 }
 
 // AssociateSessionPeer records that WireGuard authenticated a packet from a
@@ -1190,6 +1319,14 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 				b.stats.queueDrops.Add(1)
 				sess.stats.queueDrops.Add(1)
+				observation := sess.telemetry(time.Now())
+				b.recordSessionEventAt(
+					sess.id, sess.generation, telemetry.SessionEventQueueDrop,
+					"send_queue_full", observation.SampledAt, nil,
+					sessionEventMetricsFromStats(
+						observation.Stats, sess.currentFECPolicy(), observation.CurrentEndpoint,
+					),
+				)
 				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
 				return errors.New("wg-quic send queue is full")
 			}
@@ -1365,6 +1502,12 @@ func (b *Bind) newSessionLocked(
 	state.sessions[sess.id] = sess
 	b.recordSessionReplacement(replacesSessionID, sess.id)
 	b.stats.activeSessions.Add(1)
+	if role == "outbound" {
+		b.recordSessionEventAt(
+			sess.id, sess.generation, telemetry.SessionEventCreated, role,
+			time.Now(), nil, nil,
+		)
+	}
 	return sess
 }
 
@@ -1639,6 +1782,13 @@ func (s *session) setFECPolicy(policy string) {
 }
 
 func (s *session) setConn(qconn *quiccarrier.Connection) {
+	qconn.SetEventObserver(s.recordTransportEvent)
+	if s.role == "inbound" {
+		s.endpoint.owner.recordSessionEventAt(
+			s.id, s.generation, telemetry.SessionEventCreated, s.role,
+			time.Now(), nil, nil,
+		)
+	}
 	s.mu.Lock()
 	s.conn = qconn
 	s.establishedAt = time.Now()
@@ -1648,7 +1798,44 @@ func (s *session) setConn(qconn *quiccarrier.Connection) {
 		s.endpoint.nextReconnect = time.Time{}
 	}
 	s.endpoint.mu.Unlock()
+	observation := s.telemetry(time.Now())
+	s.endpoint.owner.recordSessionEventAt(
+		s.id, s.generation, telemetry.SessionEventEstablished, s.role,
+		observation.SampledAt, nil,
+		sessionEventMetricsFromStats(
+			observation.Stats, s.currentFECPolicy(), observation.CurrentEndpoint,
+		),
+	)
 	s.readyOnce.Do(func() { close(s.ready) })
+}
+
+func (s *session) recordTransportEvent(event quiccarrier.ConnectionEvent) {
+	eventType := event.Type
+	switch event.Type {
+	case "controller_state":
+		eventType = telemetry.SessionEventControllerState
+	case "cwnd_reduction":
+		eventType = telemetry.SessionEventCwndReduction
+	case "pto":
+		eventType = telemetry.SessionEventPTO
+	case "loss":
+		eventType = telemetry.SessionEventLoss
+	case "spurious_loss":
+		eventType = telemetry.SessionEventSpuriousLoss
+	case "path_rtt":
+		eventType = telemetry.SessionEventPathRTT
+	}
+	s.endpoint.owner.recordSessionEventAt(
+		s.id, s.generation, eventType, event.Reason, event.WallTime,
+		transportEventMetrics(event.Before), transportEventMetrics(event.After),
+	)
+}
+
+func (s *session) currentFECPolicy() string {
+	s.mu.Lock()
+	policy := s.fecPolicy
+	s.mu.Unlock()
+	return policy
 }
 
 func (s *session) close() {
@@ -1695,6 +1882,13 @@ func (s *session) close() {
 		}
 		s.endpoint.mu.Unlock()
 		s.endpoint.owner.retainClosedSession(final)
+		s.endpoint.owner.recordSessionEventAt(
+			s.id, s.generation, telemetry.SessionEventClosed, final.CloseReason,
+			closedAt, nil,
+			sessionEventMetricsFromStats(
+				final.FinalStats, s.currentFECPolicy(), final.CurrentEndpoint,
+			),
+		)
 		if !s.reconnectAttempt || !establishedAt.IsZero() {
 			s.endpoint.owner.eventf("QUIC session closed: session=%d remote=%s", s.id, s.endpoint.addr)
 		} else {
@@ -1782,7 +1976,8 @@ func (s *session) sendLoop() {
 			return true
 		}
 		profile := fecPolicyProfileFor(s.state.cfg, policy)
-		if profile.name == s.fecPolicy {
+		previousPolicy := s.currentFECPolicy()
+		if profile.name == previousPolicy {
 			return true
 		}
 		stopTimer()
@@ -1790,8 +1985,16 @@ func (s *session) sendLoop() {
 		if err != nil || !sendPackets(packets) {
 			return false
 		}
+		s.mu.Lock()
 		s.fecPolicy = profile.name
 		s.fecFlushDeadline = profile.flushDeadline
+		s.mu.Unlock()
+		s.endpoint.owner.recordSessionEventAt(
+			s.id, s.generation, telemetry.SessionEventFECPolicy, "runtime_update",
+			time.Now(),
+			&telemetry.SessionEventMetrics{FECPolicy: previousPolicy},
+			&telemetry.SessionEventMetrics{FECPolicy: profile.name},
+		)
 		return true
 	}
 	sendFrame := func(frame []byte) bool {
@@ -1937,8 +2140,17 @@ func (s *session) receiveLoop() {
 		defer datagram.Release()
 		wirePacket := datagram.Data
 		s.mu.Lock()
+		previousRemote := s.remoteAddr
 		s.remoteAddr = datagram.RemoteAddr
 		s.mu.Unlock()
+		if previousRemote.IsValid() && previousRemote != datagram.RemoteAddr {
+			s.endpoint.owner.recordSessionEventAt(
+				s.id, s.generation, telemetry.SessionEventEndpointMoved,
+				"authenticated_path_observed", time.Now(),
+				&telemetry.SessionEventMetrics{Endpoint: previousRemote.String()},
+				&telemetry.SessionEventMetrics{Endpoint: datagram.RemoteAddr.String()},
+			)
+		}
 		receiveEndpoint := s.endpointForAddrPort(datagram.RemoteAddr)
 		s.endpoint.owner.stats.wireRxPackets.Add(1)
 		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
@@ -2064,6 +2276,14 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
 		s.stats.queueDrops.Add(1)
+		observation := s.telemetry(time.Now())
+		s.endpoint.owner.recordSessionEventAt(
+			s.id, s.generation, telemetry.SessionEventQueueDrop,
+			"receive_queue_full", observation.SampledAt, nil,
+			sessionEventMetricsFromStats(
+				observation.Stats, s.currentFECPolicy(), observation.CurrentEndpoint,
+			),
+		)
 		if rp.release != nil {
 			rp.release(rp.data)
 		}

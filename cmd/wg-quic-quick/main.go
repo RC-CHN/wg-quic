@@ -127,7 +127,7 @@ func run(args []string) error {
 		}
 		fmt.Println("configuration is valid for wg-quic-quick")
 		return nil
-	case "reconcile", "reload", "transaction-status", "refresh-endpoints":
+	case "reconcile", "reload", "transaction-status", "refresh-endpoints", "events":
 		parsed, err := parseRuntimeCommand(args[0], args[1:])
 		if err != nil {
 			return err
@@ -193,6 +193,9 @@ type runtimeCommandArgs struct {
 	expectedGeneration uint64
 	requestID          string
 	jsonOutput         bool
+	eventStreamID      string
+	afterSequence      uint64
+	eventLimit         int
 }
 
 func parseRuntimeCommand(operation string, args []string) (runtimeCommandArgs, error) {
@@ -220,7 +223,8 @@ func parseRuntimeCommand(operation string, args []string) (runtimeCommandArgs, e
 		case "--json":
 			result.jsonOutput = true
 			remaining = remaining[1:]
-		case "--expected-epoch", "--expected-generation", "--request-id", "--peer":
+		case "--expected-epoch", "--expected-generation", "--request-id", "--peer",
+			"--event-stream-id", "--after-sequence", "--limit":
 			if len(remaining) < 2 || remaining[1] == "" {
 				return result, fmt.Errorf("%s requires a value", remaining[0])
 			}
@@ -239,6 +243,20 @@ func parseRuntimeCommand(operation string, args []string) (runtimeCommandArgs, e
 				result.requestID = value
 			case "--peer":
 				result.peer = value
+			case "--event-stream-id":
+				result.eventStreamID = value
+			case "--after-sequence":
+				sequence, err := strconv.ParseUint(value, 10, 64)
+				if err != nil {
+					return result, errors.New("after sequence must be a non-negative integer")
+				}
+				result.afterSequence = sequence
+			case "--limit":
+				limit, err := strconv.Atoi(value)
+				if err != nil || limit < 1 || limit > 1024 {
+					return result, errors.New("event limit must be between 1 and 1024")
+				}
+				result.eventLimit = limit
 			}
 		default:
 			return result, fmt.Errorf("unsupported %s option %q", operation, remaining[0])
@@ -246,6 +264,13 @@ func parseRuntimeCommand(operation string, args []string) (runtimeCommandArgs, e
 	}
 	if operation != "refresh-endpoints" && result.peer != "" {
 		return result, errors.New("--peer is only valid for refresh-endpoints")
+	}
+	if operation != "events" &&
+		(result.eventStreamID != "" || result.afterSequence != 0 || result.eventLimit != 0) {
+		return result, errors.New("event cursor options are only valid for events")
+	}
+	if operation == "events" && result.afterSequence != 0 && result.eventStreamID == "" {
+		return result, errors.New("events requires --event-stream-id with --after-sequence")
 	}
 	if operation == "transaction-status" && result.requestID == "" {
 		return result, errors.New("transaction-status requires --request-id")
@@ -273,6 +298,12 @@ func runRuntimeCommand(ctx context.Context, operation string, args runtimeComman
 		request.Operation = management.OperationRefreshEndpoints
 		request.RequiredCapabilities = []string{"endpoint_refresh_v1"}
 		request.PublicKey = args.peer
+	case "events":
+		request.Operation = management.OperationEvents
+		request.RequiredCapabilities = []string{"session_events_v1"}
+		request.EventStreamID = args.eventStreamID
+		request.AfterSequence = args.afterSequence
+		request.EventLimit = args.eventLimit
 	default:
 		return fmt.Errorf("unsupported runtime operation %q", operation)
 	}
@@ -336,6 +367,20 @@ func printRuntimeResponse(response management.Response) {
 				response.OperationResult.Operation,
 				response.OperationResult.Interface,
 				response.OperationResult.Peer,
+			)
+		}
+	case response.Events != nil:
+		fmt.Printf(
+			"event stream %s (epoch %s): first=%d last=%d dropped=%d\n",
+			response.Events.EventStreamID, response.Events.SupervisorEpoch,
+			response.Events.FirstAvailableSequence, response.Events.LastSequence,
+			response.Events.EventsDroppedTotal,
+		)
+		for _, event := range response.Events.Events {
+			fmt.Printf(
+				"event %d session %d/%d: %s reason=%s at=%s\n",
+				event.EventSequence, event.SessionID, event.SessionGeneration,
+				event.EventType, event.Reason, event.WallTime.Format(time.RFC3339Nano),
 			)
 		}
 	case response.Failure != nil:
@@ -513,6 +558,7 @@ func usage() error {
   wg-quic-quick reload INTERFACE [--expected-epoch EPOCH --expected-generation N] [--request-id ID] [--json]
   wg-quic-quick transaction-status INTERFACE --request-id ID [--json]
   wg-quic-quick refresh-endpoints INTERFACE [--peer PUBLIC_KEY] [--json]
+	  wg-quic-quick events INTERFACE [--event-stream-id ID --after-sequence N] [--limit N] [--json]
   wg-quic-quick up INTERFACE
   wg-quic-quick down INTERFACE [--repair]
   wg-quic-quick version`)

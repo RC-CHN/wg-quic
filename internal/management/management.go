@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/reconcile"
+	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
 
 const (
@@ -151,13 +152,25 @@ func validateAndDispatch(ctx context.Context, handler Handler, request Request) 
 	}
 	switch request.Operation {
 	case OperationStatus, OperationReconcile, OperationReload,
-		OperationTransactionStatus, OperationRefreshEndpoints:
+		OperationTransactionStatus, OperationRefreshEndpoints, OperationEvents:
 	default:
 		return ErrorResponse(
 			"unsupported_operation",
 			fmt.Sprintf("management operation %q is unsupported", request.Operation),
 			false,
 		)
+	}
+	if request.Operation == OperationEvents {
+		if request.AfterSequence != 0 && request.EventStreamID == "" {
+			return ErrorResponse(
+				"validation_failed",
+				"event_stream_id is required with after_sequence",
+				false,
+			)
+		}
+		if request.EventLimit < 0 || request.EventLimit > 1024 {
+			return ErrorResponse("validation_failed", "event_limit must be between 0 and 1024", false)
+		}
 	}
 	response := handler.Handle(ctx, request)
 	response.ProtocolVersion = ProtocolVersion
@@ -252,4 +265,27 @@ func (c *Client) Status(ctx context.Context, interfaceName string) (Status, erro
 		return Status{}, errors.New("management response did not include status")
 	}
 	return *response.Status, nil
+}
+
+func (c *Client) Events(
+	ctx context.Context,
+	interfaceName, eventStreamID string,
+	afterSequence uint64,
+	limit int,
+) (telemetry.SessionEventBatch, error) {
+	response, err := c.Call(ctx, Request{
+		ProtocolVersion: ProtocolVersion, Operation: OperationEvents,
+		Interface: interfaceName, RequiredCapabilities: []string{"session_events_v1"},
+		EventStreamID: eventStreamID, AfterSequence: afterSequence, EventLimit: limit,
+	})
+	if err != nil {
+		return telemetry.SessionEventBatch{}, err
+	}
+	if response.Failure != nil {
+		return telemetry.SessionEventBatch{}, errors.New(response.Failure.Message)
+	}
+	if response.Events == nil {
+		return telemetry.SessionEventBatch{}, errors.New("management response did not include events")
+	}
+	return *response.Events, nil
 }

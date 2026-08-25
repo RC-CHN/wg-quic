@@ -227,6 +227,7 @@ func (i *Instance) prepareLocked(ctx context.Context) error {
 	}
 	server, err := control.StartHandler(ctx, i.controlPath, control.Handler{
 		Status:           i.status,
+		Events:           i.bind.SessionEvents,
 		SetPeerEndpoint:  i.setPeerEndpoint,
 		RedialPeer:       i.redialPeer,
 		Activate:         i.activate,
@@ -399,6 +400,7 @@ func (i *Instance) status() control.Status {
 			"authenticated_endpoint_generation",
 			"session_telemetry_v1",
 			"recent_session_telemetry_v1",
+			"session_events_v1",
 		},
 		Stats: i.Stats(),
 	}

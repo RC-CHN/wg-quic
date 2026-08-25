@@ -134,6 +134,20 @@ func (r *runtimeManagement) handle(ctx context.Context, request management.Reque
 	switch request.Operation {
 	case management.OperationStatus:
 		return management.Response{Status: r.status()}
+	case management.OperationEvents:
+		if r.core == nil {
+			return management.ErrorResponse(
+				"unsupported_capability", "session events are unavailable", false,
+			)
+		}
+		batch, err := r.core.Events(
+			request.EventStreamID, request.AfterSequence, request.EventLimit,
+		)
+		if err != nil {
+			return management.ErrorResponse("event_query_failed", err.Error(), false)
+		}
+		batch.SupervisorEpoch = r.coordinator.Status().Epoch
+		return management.Response{Events: &batch}
 	case management.OperationTransactionStatus:
 		result, exists := r.coordinator.TransactionStatus(request.RequestID)
 		if !exists {
@@ -386,7 +400,8 @@ func withCoreCapabilities(capabilities []string, status *control.Status) []strin
 	}
 	for _, capability := range status.Capabilities {
 		if capability != "session_telemetry_v1" &&
-			capability != "recent_session_telemetry_v1" {
+			capability != "recent_session_telemetry_v1" &&
+			capability != "session_events_v1" {
 			continue
 		}
 		if !slices.Contains(capabilities, capability) {

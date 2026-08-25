@@ -113,8 +113,9 @@ func newCubicSender(
 		maxDatagramSize:            initialMaxDatagramSize,
 	}
 	c.pacer = newPacer(c.BandwidthEstimate)
+	c.lastState = qlog.CongestionStateSlowStart
+	c.connStats.RecordEvent("controller_state", qlog.CongestionStateSlowStart.String())
 	if c.qlogger != nil {
-		c.lastState = qlog.CongestionStateSlowStart
 		c.qlogger.RecordEvent(qlog.CongestionStateUpdated{
 			State: qlog.CongestionStateSlowStart,
 		})
@@ -318,10 +319,13 @@ func (c *cubicSender) OnConnectionMigration() {
 }
 
 func (c *cubicSender) maybeQlogStateChange(new qlog.CongestionState) {
-	if c.qlogger == nil || new == c.lastState {
+	if new == c.lastState {
 		return
 	}
-	c.qlogger.RecordEvent(qlog.CongestionStateUpdated{State: new})
+	if c.qlogger != nil {
+		c.qlogger.RecordEvent(qlog.CongestionStateUpdated{State: new})
+	}
+	c.connStats.RecordEvent("controller_state", new.String())
 	c.lastState = new
 }
 

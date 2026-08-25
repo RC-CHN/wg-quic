@@ -37,9 +37,13 @@ func (f endpointStatusFixture) Status() []endpoint.Status { return f }
 type telemetryCoreClient struct {
 	*fakePeerSetClient
 	status control.Status
+	events telemetry.SessionEventBatch
 }
 
 func (c *telemetryCoreClient) Status() (control.Status, error) { return c.status, nil }
+func (c *telemetryCoreClient) Events(string, uint64, int) (telemetry.SessionEventBatch, error) {
+	return c.events, nil
+}
 
 func (f *fakeEndpointRefresher) RefreshAll(context.Context) error {
 	f.allCalls++
@@ -146,6 +150,29 @@ func TestRuntimeManagementForwardsPortableSessionTelemetry(t *testing.T) {
 	}
 	if !slices.Contains(runtime.capabilities(), "session_telemetry_v1") {
 		t.Fatalf("request capability set = %#v", runtime.capabilities())
+	}
+}
+
+func TestRuntimeManagementForwardsSessionEventCursor(t *testing.T) {
+	runtime := testRuntimeManagement(t, &fakeEndpointRefresher{})
+	runtime.core = &telemetryCoreClient{
+		fakePeerSetClient: &fakePeerSetClient{},
+		status:            control.Status{Capabilities: []string{"session_events_v1"}},
+		events: telemetry.SessionEventBatch{
+			TelemetryVersion: telemetry.SessionEventTelemetryVersion,
+			EventStreamID:    "core-stream", LastSequence: 7,
+			Events: []telemetry.SessionEvent{{EventSequence: 7}},
+		},
+	}
+	response := runtime.handle(context.Background(), management.Request{
+		Operation: management.OperationEvents, Interface: "wg0",
+		RequiredCapabilities: []string{"session_events_v1"},
+		EventStreamID:        "core-stream", AfterSequence: 6, EventLimit: 10,
+	})
+	if response.Events == nil || response.Events.SupervisorEpoch != "epoch" ||
+		response.Events.EventStreamID != "core-stream" || response.Events.LastSequence != 7 ||
+		len(response.Events.Events) != 1 {
+		t.Fatalf("forwarded event cursor = %#v", response)
 	}
 }
 

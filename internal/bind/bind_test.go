@@ -317,6 +317,32 @@ func TestRecentSessionTelemetryIsBoundedAndExpires(t *testing.T) {
 	}
 }
 
+func TestSessionEventsUseBoundedStreamCursor(t *testing.T) {
+	bind := New(DefaultConfig())
+	for id := uint64(1); id <= maxSessionEvents+3; id++ {
+		bind.recordSessionEventAt(
+			id, 1, telemetry.SessionEventPTO, "test", time.Now(), nil,
+			&telemetry.SessionEventMetrics{PTOCount: id},
+		)
+	}
+	batch, err := bind.SessionEvents("", 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.EventStreamID == "" || batch.FirstAvailableSequence != 4 ||
+		batch.EventsDroppedTotal != 3 || len(batch.Events) != 2 ||
+		batch.Events[0].EventSequence != 4 || batch.LastSequence != 5 {
+		t.Fatalf("first event page = %#v", batch)
+	}
+	next, err := bind.SessionEvents(batch.EventStreamID, batch.LastSequence, 2)
+	if err != nil || len(next.Events) != 2 || next.Events[0].EventSequence != 6 {
+		t.Fatalf("second event page = %#v, error = %v", next, err)
+	}
+	if _, err := bind.SessionEvents("stale-stream", batch.LastSequence, 2); err == nil {
+		t.Fatal("stale event stream cursor was accepted")
+	}
+}
+
 func TestBindRoundTripWithKeyDerivedSalamander(t *testing.T) {
 	config := DefaultConfig()
 	config.ObfsMode = "salamander"
@@ -767,6 +793,27 @@ func TestBindRedialEndpointDoesNotWaitForWireGuardTraffic(t *testing.T) {
 	if len(active) != 1 || active[0].SessionID != final.ReplacedBySessionID ||
 		active[0].ReplacesSessionID != oldSessionID || active[0].SessionGeneration <= final.SessionGeneration {
 		t.Fatalf("replacement session telemetry = %#v, final = %#v", active, final)
+	}
+	events, err := a.SessionEvents("", 0, maxSessionEventQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created, established, closed bool
+	for _, event := range events.Events {
+		if event.SessionID != oldSessionID {
+			continue
+		}
+		switch event.EventType {
+		case telemetry.SessionEventCreated:
+			created = true
+		case telemetry.SessionEventEstablished:
+			established = true
+		case telemetry.SessionEventClosed:
+			closed = event.Reason == telemetry.SessionCloseEndpointReplaced && event.After != nil
+		}
+	}
+	if !created || !established || !closed {
+		t.Fatalf("redial lifecycle events = %#v", events)
 	}
 }
 

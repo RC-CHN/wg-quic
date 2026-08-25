@@ -107,6 +107,7 @@ func NewModelSender(
 		m.propagationRTT = rttStats.MinRTT()
 	}
 	m.pacer = newPacer(m.pacerBandwidth)
+	connStats.RecordEvent("controller_state", "startup")
 	return m
 }
 

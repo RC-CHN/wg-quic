@@ -82,6 +82,7 @@ type PeerSetRequest struct {
 
 type Handler struct {
 	Status           func() Status
+	Events           func(string, uint64, int) (telemetry.SessionEventBatch, error)
 	SetPeerEndpoint  func(SetPeerEndpointRequest) error
 	RedialPeer       func(string) error
 	Activate         func() error
@@ -96,6 +97,7 @@ type Handler struct {
 // LocalClient currently carries it over a Unix socket or Windows named pipe.
 type Client interface {
 	Status() (Status, error)
+	Events(eventStreamID string, afterSequence uint64, limit int) (telemetry.SessionEventBatch, error)
 	SetPeerEndpoint(SetPeerEndpointRequest) error
 	RedialPeer(publicKey string) error
 	Activate() error
@@ -121,11 +123,15 @@ type request struct {
 	PeerSet         *PeerSetRequest         `json:"peer_set,omitempty"`
 	TransactionID   string                  `json:"transaction_id,omitempty"`
 	Generation      uint64                  `json:"generation,omitempty"`
+	EventStreamID   string                  `json:"event_stream_id,omitempty"`
+	AfterSequence   uint64                  `json:"after_sequence,omitempty"`
+	EventLimit      int                     `json:"event_limit,omitempty"`
 }
 
 type response struct {
-	Status *Status `json:"status,omitempty"`
-	Error  string  `json:"error,omitempty"`
+	Status *Status                      `json:"status,omitempty"`
+	Events *telemetry.SessionEventBatch `json:"events,omitempty"`
+	Error  string                       `json:"error,omitempty"`
 }
 
 type Server struct {
@@ -228,6 +234,15 @@ func dispatch(handler Handler, req request) response {
 	case "status":
 		status := handler.Status()
 		return response{Status: &status}
+	case "events":
+		if handler.Events == nil {
+			return response{Error: "events are not supported"}
+		}
+		events, err := handler.Events(req.EventStreamID, req.AfterSequence, req.EventLimit)
+		if err != nil {
+			return response{Error: err.Error()}
+		}
+		return response{Events: &events}
 	case "set_peer_endpoint":
 		if req.SetPeerEndpoint == nil {
 			return response{Error: "set_peer_endpoint payload is required"}
@@ -339,6 +354,25 @@ func (c *LocalClient) Status() (Status, error) {
 		return Status{}, errors.New("control response did not include status")
 	}
 	return *resp.Status, nil
+}
+
+func (c *LocalClient) Events(
+	eventStreamID string,
+	afterSequence uint64,
+	limit int,
+) (telemetry.SessionEventBatch, error) {
+	var resp response
+	err := c.call(request{
+		Operation: "events", EventStreamID: eventStreamID,
+		AfterSequence: afterSequence, EventLimit: limit,
+	}, &resp)
+	if err != nil {
+		return telemetry.SessionEventBatch{}, err
+	}
+	if resp.Events == nil {
+		return telemetry.SessionEventBatch{}, errors.New("control response did not include events")
+	}
+	return *resp.Events, nil
 }
 
 func SetPeerEndpoint(path string, update SetPeerEndpointRequest) error {

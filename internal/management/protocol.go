@@ -18,6 +18,7 @@ const (
 	OperationReload            = "reload"
 	OperationTransactionStatus = "transaction_status"
 	OperationRefreshEndpoints  = "refresh_endpoints"
+	OperationEvents            = "events"
 )
 
 type Request struct {
@@ -31,6 +32,9 @@ type Request struct {
 	DeadlineUnixMillis   int64    `json:"deadline_unix_millis,omitempty"`
 	CandidatePath        string   `json:"candidate_path,omitempty"`
 	PublicKey            string   `json:"public_key,omitempty"`
+	EventStreamID        string   `json:"event_stream_id,omitempty"`
+	AfterSequence        uint64   `json:"after_sequence,omitempty"`
+	EventLimit           int      `json:"event_limit,omitempty"`
 }
 
 func (r Request) Deadline() time.Time {
@@ -104,11 +108,12 @@ type PeerStatus struct {
 }
 
 type Response struct {
-	ProtocolVersion int                `json:"protocol_version"`
-	Status          *Status            `json:"status,omitempty"`
-	Result          *reconcile.Result  `json:"result,omitempty"`
-	OperationResult *OperationResult   `json:"operation_result,omitempty"`
-	Failure         *reconcile.Failure `json:"error,omitempty"`
+	ProtocolVersion int                          `json:"protocol_version"`
+	Status          *Status                      `json:"status,omitempty"`
+	Result          *reconcile.Result            `json:"result,omitempty"`
+	OperationResult *OperationResult             `json:"operation_result,omitempty"`
+	Events          *telemetry.SessionEventBatch `json:"events,omitempty"`
+	Failure         *reconcile.Failure           `json:"error,omitempty"`
 }
 
 type OperationResult struct {

@@ -127,6 +127,9 @@ type Connection struct {
 	conn *quicgo.Conn
 }
 
+type ConnectionEvent = quicgo.ConnectionEvent
+type ConnectionEventMetrics = quicgo.ConnectionEventMetrics
+
 type ReceivedDatagram struct {
 	Data       []byte
 	RemoteAddr netip.AddrPort
@@ -179,6 +182,10 @@ func (c *Connection) RemoteAddr() net.Addr {
 
 func (c *Connection) Stats() quicgo.ConnectionStats {
 	return c.conn.ConnectionStats()
+}
+
+func (c *Connection) SetEventObserver(observer func(ConnectionEvent)) {
+	c.conn.SetEventObserver(observer)
 }
 
 func (c *Connection) MaxDatagramPayloadSize() int {

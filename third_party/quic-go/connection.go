@@ -874,6 +874,11 @@ type ConnectionStats struct {
 	DatagramSendQueueLen uint64
 }
 
+// ConnectionEventMetrics and ConnectionEvent are the typed, low-volume
+// always-on observability records emitted by this pinned transport fork.
+type ConnectionEventMetrics = utils.ConnectionEventMetrics
+type ConnectionEvent = utils.ConnectionEvent
+
 func (c *Conn) ConnectionStats() ConnectionStats {
 	return ConnectionStats{
 		MinRTT:        c.rttStats.MinRTT(),
@@ -902,6 +907,12 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		CongestionModelState:  c.connStats.CongestionModelState.Load(),
 		DatagramSendQueueLen:  uint64(c.datagramQueue.Len()),
 	}
+}
+
+// SetEventObserver installs one observer and first drains the bounded events
+// recorded before the connection became visible to the application.
+func (c *Conn) SetEventObserver(observer func(ConnectionEvent)) {
+	c.connStats.SetEventObserver(observer)
 }
 
 // ObserveFECFeedback supplies application-level loss outcomes to the model

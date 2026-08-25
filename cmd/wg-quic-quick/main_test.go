@@ -209,6 +209,17 @@ func TestParseRuntimeReconcileAndRefreshArgs(t *testing.T) {
 	if refreshArgs.name != "wg0" || refreshArgs.peer != "public-key" || !refreshArgs.jsonOutput {
 		t.Fatalf("refresh args = %#v", refreshArgs)
 	}
+	eventArgs, err := parseRuntimeCommand("events", []string{
+		"wg0", "--event-stream-id", "stream", "--after-sequence", "7",
+		"--limit", "32", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eventArgs.eventStreamID != "stream" || eventArgs.afterSequence != 7 ||
+		eventArgs.eventLimit != 32 || !eventArgs.jsonOutput {
+		t.Fatalf("event args = %#v", eventArgs)
+	}
 }
 
 func TestParseRuntimeCommandRejectsMissingCASAndRequestID(t *testing.T) {
@@ -217,6 +228,8 @@ func TestParseRuntimeCommandRejectsMissingCASAndRequestID(t *testing.T) {
 		{"reconcile", "wg0", "candidate.conf", "--expected-epoch", "epoch"},
 		{"transaction-status", "wg0"},
 		{"refresh-endpoints", "wg0", "--peer"},
+		{"events", "wg0", "--after-sequence", "1"},
+		{"events", "wg0", "--limit", "1025"},
 	}
 	for _, test := range tests {
 		if _, err := parseRuntimeCommand(test[0], test[1:]); err == nil {

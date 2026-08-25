@@ -187,11 +187,11 @@ func NewSentPacketHandler(
 		h.enableECN = true
 		h.ecnTracker = newECNTracker(logger, qlogger)
 	}
-	h.updateCongestionStats()
+	h.updateCongestionStats("initial")
 	return h
 }
 
-func (h *sentPacketHandler) updateCongestionStats() {
+func (h *sentPacketHandler) updateCongestionStats(reason string) {
 	if provider, ok := h.congestion.(congestion.SendAlgorithmWithStats); ok {
 		stats := provider.Stats()
 		h.connStats.CongestionWindow.Store(uint64(stats.CongestionWindow))
@@ -204,6 +204,8 @@ func (h *sentPacketHandler) updateCongestionStats() {
 		h.connStats.CongestionModelState.Store(stats.ModelState)
 	}
 	h.connStats.BytesInFlight.Store(uint64(h.bytesInFlight))
+	h.connStats.SmoothedRTT.Store(h.rttStats.SmoothedRTT().Nanoseconds())
+	h.connStats.RecordControllerSnapshot(reason)
 }
 
 func (h *sentPacketHandler) removeFromBytesInFlight(p *packet) {
@@ -265,7 +267,7 @@ func (h *sentPacketHandler) DropPackets(encLevel protocol.EncryptionLevel, now m
 	h.ptoCount = 0
 	h.numProbesToSend = 0
 	h.ptoMode = SendNone
-	h.updateCongestionStats()
+	h.updateCongestionStats("packet_space_dropped")
 	h.setLossDetectionTimer(now)
 }
 
@@ -346,7 +348,7 @@ func (h *sentPacketHandler) SentPacket(
 		}
 	}
 	h.congestion.OnPacketSent(t, h.bytesInFlight, pn, size, isAckEliciting)
-	h.updateCongestionStats()
+	h.updateCongestionStats("packet_sent")
 
 	if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
 		h.ecnTracker.SentPacket(pn, ecn)
@@ -499,7 +501,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 			putPacket(p.packet)
 		}
 	}
-	h.updateCongestionStats()
+	h.updateCongestionStats("ack")
 
 	// detect spurious losses for application data packets, if the ACK was not reordered
 	if encLevel == protocol.Encryption1RTT && largestAcked == pnSpace.largestAcked {
@@ -573,6 +575,9 @@ func (h *sentPacketHandler) detectSpuriousLosses(ack *wire.AckFrame, ackTime mon
 		h.lostPackets.Delete(pn)
 	}
 	h.connStats.SpuriousLossPackets.Add(uint64(len(spuriousLosses)))
+	if len(spuriousLosses) != 0 {
+		h.connStats.RecordEvent("spurious_loss", "late_ack")
+	}
 }
 
 // Packets are returned in ascending packet number order.
@@ -915,7 +920,7 @@ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protoc
 			}
 		}
 	}
-	h.updateCongestionStats()
+	h.updateCongestionStats("loss_detection")
 }
 
 func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
@@ -950,6 +955,7 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 	if h.bytesInFlight == 0 && !h.peerCompletedAddressValidation {
 		h.ptoCount++
 		h.connStats.PTOCount.Add(1)
+		h.connStats.RecordEvent("pto", "address_validation")
 		h.numProbesToSend++
 		if h.initialPackets != nil {
 			h.ptoMode = SendPTOInitial
@@ -971,6 +977,7 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 	}
 	h.ptoCount++
 	h.connStats.PTOCount.Add(1)
+	h.connStats.RecordEvent("pto", encLevel.String())
 	if h.logger.Debug() {
 		h.logger.Debugf("Loss detection alarm for %s fired in PTO mode. PTO count: %d", encLevel, h.ptoCount)
 	}
@@ -1106,7 +1113,7 @@ func (h *sentPacketHandler) QueueProbePacket(encLevel protocol.EncryptionLevel) 
 	pnSpace.history.DeclareLost(pn)
 	h.removeFromBytesInFlight(p)
 	h.queueFramesForRetransmission(p)
-	h.updateCongestionStats()
+	h.updateCongestionStats("pto_probe")
 	return true
 }
 
@@ -1172,7 +1179,7 @@ func (h *sentPacketHandler) ResetForRetry(now monotime.Time) {
 		}
 	}
 	h.ptoCount = 0
-	h.updateCongestionStats()
+	h.updateCongestionStats("retry")
 }
 
 func (h *sentPacketHandler) MigratedPath(now monotime.Time, initialMaxDatagramSize protocol.ByteCount) {
@@ -1208,6 +1215,6 @@ func (h *sentPacketHandler) MigratedPath(now monotime.Time, initialMaxDatagramSi
 			h.qlogger,
 		)
 	}
-	h.updateCongestionStats()
+	h.updateCongestionStats("path_migration")
 	h.setLossDetectionTimer(now)
 }

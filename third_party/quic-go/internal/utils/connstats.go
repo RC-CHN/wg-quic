@@ -27,4 +27,6 @@ type ConnectionStats struct {
 	FECRecoverableLossPPM atomic.Uint64
 	FECResidualLossPPM    atomic.Uint64
 	CongestionModelState  atomic.Uint64
+	SmoothedRTT           atomic.Int64
+	events                connectionEventJournal
 }
