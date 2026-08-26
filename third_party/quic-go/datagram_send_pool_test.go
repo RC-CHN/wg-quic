@@ -3,16 +3,21 @@ package quic
 import "testing"
 
 func TestDatagramSendBufferRecycles(t *testing.T) {
-	buf := AcquireDatagramSendBuffer()
-	if cap(buf) != DatagramSendBufferSize {
-		t.Fatalf("acquired buffer capacity = %d, want %d", cap(buf), DatagramSendBufferSize)
+	// sync.Pool may drop entries at any GC, so one release/acquire pair
+	// cannot prove recycling; require at least one recycle within a bounded
+	// number of rounds.
+	for range 8 {
+		buf := AcquireDatagramSendBuffer()
+		if cap(buf) != DatagramSendBufferSize {
+			t.Fatalf("acquired buffer capacity = %d, want %d", cap(buf), DatagramSendBufferSize)
+		}
+		first := &buf[0]
+		releaseDatagramSendBuffer(buf[:100])
+		if again := AcquireDatagramSendBuffer(); &again[0] == first {
+			return
+		}
 	}
-	first := &buf[0]
-	releaseDatagramSendBuffer(buf[:100])
-	again := AcquireDatagramSendBuffer()
-	if &again[0] != first {
-		t.Fatal("released buffer was not recycled")
-	}
+	t.Fatal("released buffer was never recycled")
 }
 
 func TestReleaseDatagramSendBufferIgnoresForeignBuffers(t *testing.T) {

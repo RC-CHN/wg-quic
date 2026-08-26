@@ -127,4 +127,10 @@ type SessionStats struct {
 	QUICFECResidualLossPPM    uint64 `json:"quic_fec_residual_loss_ppm"`
 	QUICCongestionModelState  uint64 `json:"quic_congestion_model_state"`
 	QUICDatagramSendQueueLen  uint64 `json:"quic_datagram_send_queue_len"`
+	QUICDatagramRcvQueueLen   uint64 `json:"quic_datagram_rcv_queue_len"`
+	// QUICDatagramRcvQueueDrops counts received DATAGRAMs released because
+	// the application receive queue was full. A QUIC ACK does not cover this
+	// drop; it is the only post-ACK application-loss signal.
+	QUICDatagramRcvQueueDrops     uint64 `json:"quic_datagram_rcv_queue_drops"`
+	QUICDatagramRcvQueueHighWater uint64 `json:"quic_datagram_rcv_queue_high_water"`
 }

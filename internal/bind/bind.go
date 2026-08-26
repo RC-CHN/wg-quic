@@ -795,6 +795,12 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 			current.CongestionModelState,
 		)
 		stats.QUICDatagramSendQueueLen += current.DatagramSendQueueLen
+		stats.QUICDatagramRcvQueueLen += current.DatagramRcvQueueLen
+		stats.QUICDatagramRcvQueueDrops += current.DatagramRcvQueueDrops
+		stats.QUICDatagramRcvQueueHighWater = max(
+			stats.QUICDatagramRcvQueueHighWater,
+			current.DatagramRcvQueueHighWater,
+		)
 		minRTTUs := uint64(current.MinRTT / time.Microsecond)
 		if minRTTUs != 0 && (stats.QUICMinRTTUs == 0 || minRTTUs < stats.QUICMinRTTUs) {
 			stats.QUICMinRTTUs = minRTTUs
@@ -1736,6 +1742,9 @@ func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
 		stats.QUICFECResidualLossPPM = current.FECResidualLossPPM
 		stats.QUICCongestionModelState = current.CongestionModelState
 		stats.QUICDatagramSendQueueLen = current.DatagramSendQueueLen
+		stats.QUICDatagramRcvQueueLen = current.DatagramRcvQueueLen
+		stats.QUICDatagramRcvQueueDrops = current.DatagramRcvQueueDrops
+		stats.QUICDatagramRcvQueueHighWater = current.DatagramRcvQueueHighWater
 	}
 	return telemetry.SessionObservation{
 		TelemetryVersion: telemetry.SessionTelemetryVersion,

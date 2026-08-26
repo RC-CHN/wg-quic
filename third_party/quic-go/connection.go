@@ -872,6 +872,16 @@ type ConnectionStats struct {
 	// DatagramSendQueueLen is the number of application DATAGRAM frames waiting
 	// to be packed into QUIC packets.
 	DatagramSendQueueLen uint64
+	// DatagramRcvQueueLen is the number of received application DATAGRAMs
+	// waiting for the application.
+	DatagramRcvQueueLen uint64
+	// DatagramRcvQueueDrops is the cumulative number of received DATAGRAMs
+	// released because the receive queue was full. QUIC can ACK a packet
+	// whose DATAGRAM is dropped here, so this is the only signal for
+	// post-ACK application loss.
+	DatagramRcvQueueDrops uint64
+	// DatagramRcvQueueHighWater is the largest observed receive queue depth.
+	DatagramRcvQueueHighWater uint64
 }
 
 // ConnectionEventMetrics and ConnectionEvent are the typed, low-volume
@@ -904,8 +914,11 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		QueueDelay:            time.Duration(c.connStats.QueueDelay.Load()),
 		FECRecoverableLossPPM: c.connStats.FECRecoverableLossPPM.Load(),
 		FECResidualLossPPM:    c.connStats.FECResidualLossPPM.Load(),
-		CongestionModelState:  c.connStats.CongestionModelState.Load(),
-		DatagramSendQueueLen:  uint64(c.datagramQueue.Len()),
+		CongestionModelState:      c.connStats.CongestionModelState.Load(),
+		DatagramSendQueueLen:      uint64(c.datagramQueue.Len()),
+		DatagramRcvQueueLen:       uint64(c.datagramQueue.RcvQueueLen()),
+		DatagramRcvQueueDrops:     c.datagramQueue.RcvQueueDrops(),
+		DatagramRcvQueueHighWater: c.datagramQueue.RcvQueueHighWater(),
 	}
 }
 

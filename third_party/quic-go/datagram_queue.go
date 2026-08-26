@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
@@ -97,6 +98,13 @@ type datagramQueue struct {
 	rcvQueue ringbuffer.RingBuffer[ReceivedDatagram]
 	rcvd     chan struct{} // used to notify Receive that a new datagram was received
 
+	// rcvDrops counts received DATAGRAMs released because the receive queue
+	// was full; rcvHighWater is the largest observed receive queue depth.
+	// QUIC can ACK a packet whose DATAGRAM is later dropped here, so these
+	// are the only signal for post-ACK application loss.
+	rcvDrops     atomic.Uint64
+	rcvHighWater atomic.Uint64
+
 	closeErr error
 	closed   chan struct{}
 
@@ -171,6 +179,25 @@ func (h *datagramQueue) Len() int {
 	return h.sendQueue.Len()
 }
 
+// RcvQueueLen returns the number of received DATAGRAMs waiting for the
+// application.
+func (h *datagramQueue) RcvQueueLen() int {
+	h.rcvMx.Lock()
+	defer h.rcvMx.Unlock()
+	return h.rcvQueue.Len()
+}
+
+// RcvQueueDrops returns the cumulative number of received DATAGRAMs released
+// because the receive queue was full.
+func (h *datagramQueue) RcvQueueDrops() uint64 {
+	return h.rcvDrops.Load()
+}
+
+// RcvQueueHighWater returns the largest observed receive queue depth.
+func (h *datagramQueue) RcvQueueHighWater() uint64 {
+	return h.rcvHighWater.Load()
+}
+
 // HandleDatagramFrame handles a received DATAGRAM frame. The frame payload
 // borrows the decrypted packet buffer, so copy it into a pooled queue buffer
 // before packet processing returns.
@@ -202,6 +229,9 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
 		h.rcvQueue.PushBack(datagram)
 		queued = true
+		if depth := uint64(h.rcvQueue.Len()); depth > h.rcvHighWater.Load() {
+			h.rcvHighWater.Store(depth)
+		}
 		select {
 		case h.rcvd <- struct{}{}:
 		default:
@@ -209,6 +239,7 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 	}
 	h.rcvMx.Unlock()
 	if !queued {
+		h.rcvDrops.Add(1)
 		datagram.Release()
 		if h.logger.Debug() {
 			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))

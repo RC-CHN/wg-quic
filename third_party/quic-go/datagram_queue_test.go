@@ -89,6 +89,38 @@ func TestDatagramQueueReceive(t *testing.T) {
 	require.Equal(t, []byte("bar"), data)
 }
 
+func TestDatagramQueueReceiveDropsCounted(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+
+	// fill the receive queue
+	for range maxDatagramRcvQueueLen {
+		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
+	}
+	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
+	require.Equal(t, uint64(maxDatagramRcvQueueLen), queue.RcvQueueHighWater())
+	require.Zero(t, queue.RcvQueueDrops())
+
+	// further datagrams are released and counted
+	for range 3 {
+		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
+	}
+	require.Equal(t, uint64(3), queue.RcvQueueDrops())
+	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
+
+	// draining resets neither the high-water mark nor the drop counter
+	datagram, err := queue.ReceiveOwned(context.Background())
+	require.NoError(t, err)
+	datagram.Release()
+	require.Equal(t, maxDatagramRcvQueueLen-1, queue.RcvQueueLen())
+	require.Equal(t, uint64(maxDatagramRcvQueueLen), queue.RcvQueueHighWater())
+	require.Equal(t, uint64(3), queue.RcvQueueDrops())
+
+	// a freed slot queues again without a drop
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
+	require.Equal(t, uint64(3), queue.RcvQueueDrops())
+	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
+}
+
 func TestDatagramQueueReceiveOwnedUsesIndependentPooledBuffer(t *testing.T) {
 	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
 	payload := []byte("owned receive payload")
