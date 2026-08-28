@@ -309,4 +309,3 @@ func TestReadsMultipleMessagesInOneBatch(t *testing.T) {
 	}
 	require.Equal(t, 2, bc.callCounter)
 }
-
