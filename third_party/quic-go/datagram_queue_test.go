@@ -93,11 +93,11 @@ func TestDatagramQueueReceiveDropsCounted(t *testing.T) {
 	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
 
 	// fill the receive queue
-	for range maxDatagramRcvQueueLen {
+	for range defaultMaxDatagramRcvQueueLen {
 		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
 	}
-	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
-	require.Equal(t, uint64(maxDatagramRcvQueueLen), queue.RcvQueueHighWater())
+	require.Equal(t, defaultMaxDatagramRcvQueueLen, queue.RcvQueueLen())
+	require.Equal(t, uint64(defaultMaxDatagramRcvQueueLen), queue.RcvQueueHighWater())
 	require.Zero(t, queue.RcvQueueDrops())
 
 	// further datagrams are released and counted
@@ -105,20 +105,39 @@ func TestDatagramQueueReceiveDropsCounted(t *testing.T) {
 		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
 	}
 	require.Equal(t, uint64(3), queue.RcvQueueDrops())
-	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
+	require.Equal(t, defaultMaxDatagramRcvQueueLen, queue.RcvQueueLen())
 
 	// draining resets neither the high-water mark nor the drop counter
 	datagram, err := queue.ReceiveOwned(context.Background())
 	require.NoError(t, err)
 	datagram.Release()
-	require.Equal(t, maxDatagramRcvQueueLen-1, queue.RcvQueueLen())
-	require.Equal(t, uint64(maxDatagramRcvQueueLen), queue.RcvQueueHighWater())
+	require.Equal(t, defaultMaxDatagramRcvQueueLen-1, queue.RcvQueueLen())
+	require.Equal(t, uint64(defaultMaxDatagramRcvQueueLen), queue.RcvQueueHighWater())
 	require.Equal(t, uint64(3), queue.RcvQueueDrops())
 
 	// a freed slot queues again without a drop
 	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
 	require.Equal(t, uint64(3), queue.RcvQueueDrops())
-	require.Equal(t, maxDatagramRcvQueueLen, queue.RcvQueueLen())
+	require.Equal(t, defaultMaxDatagramRcvQueueLen, queue.RcvQueueLen())
+}
+
+func TestDatagramRcvQueueCapacityConfigurable(t *testing.T) {
+	SetMaxDatagramRcvQueueLen(4)
+	defer SetMaxDatagramRcvQueueLen(0)
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+
+	for range 6 {
+		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
+	}
+	require.Equal(t, 4, queue.RcvQueueLen())
+	require.Equal(t, uint64(4), queue.RcvQueueHighWater())
+	require.Equal(t, uint64(2), queue.RcvQueueDrops())
+
+	// a queue keeps the capacity frozen at creation across a reconfigure
+	SetMaxDatagramRcvQueueLen(8)
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
+	require.Equal(t, 4, queue.RcvQueueLen())
+	require.Equal(t, uint64(3), queue.RcvQueueDrops())
 }
 
 func TestDatagramQueueReceiveOwnedUsesIndependentPooledBuffer(t *testing.T) {

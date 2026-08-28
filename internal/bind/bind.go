@@ -35,6 +35,11 @@ const (
 
 type Config struct {
 	QueueSize int
+	// DatagramReceiveQueueCapacity tunes the quic-go DATAGRAM receive
+	// queue depth; zero keeps the fork default (128). Tune it against the
+	// quic_datagram_rcv_queue_drops and high-water counters, not by
+	// guesswork.
+	DatagramReceiveQueueCapacity int
 	// QueueDropEventInterval bounds how often a queue-full drop may build a
 	// telemetry snapshot and a session event. The queueDrops counter still
 	// counts every rejected packet; the interval only rate-limits the
@@ -329,6 +334,8 @@ func (b *Bind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		ObfsMode:         b.cfg.ObfsMode,
 		ObfsKeys:         b.cfg.ObfsKeys,
 		EndpointKeys:     b.obfsResolved,
+
+		DatagramReceiveQueueCapacity: b.cfg.DatagramReceiveQueueCapacity,
 	})
 	if err != nil {
 		cancel()

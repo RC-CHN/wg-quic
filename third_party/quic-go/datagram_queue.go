@@ -17,8 +17,35 @@ const (
 	// carrier's session loop blocks in Add whenever quic-go's run loop is
 	// busy packing, so give the queue enough depth to absorb that jitter.
 	maxDatagramSendQueueLen = 128
-	maxDatagramRcvQueueLen  = 128
+	// defaultMaxDatagramRcvQueueLen is the DATAGRAM receive queue capacity
+	// unless SetMaxDatagramRcvQueueLen configures another value.
+	defaultMaxDatagramRcvQueueLen = 128
 )
+
+// maxDatagramRcvQueueLen holds the process-wide DATAGRAM receive queue
+// capacity for connections created after the most recent
+// SetMaxDatagramRcvQueueLen call. Each datagramQueue freezes the value at
+// creation into rcvCap so a later reconfigure cannot let the enqueue check
+// outrun the ring buffer's allocated capacity.
+var maxDatagramRcvQueueLen atomic.Int64
+
+// SetMaxDatagramRcvQueueLen configures the DATAGRAM receive queue capacity
+// for connections created after this call. It is a process-wide tuning knob:
+// when several embedders configure different values, the most recent call
+// wins for future connections. Values below 1 restore the default.
+func SetMaxDatagramRcvQueueLen(n int) {
+	if n < 1 {
+		n = defaultMaxDatagramRcvQueueLen
+	}
+	maxDatagramRcvQueueLen.Store(int64(n))
+}
+
+func currentMaxDatagramRcvQueueLen() int {
+	if n := maxDatagramRcvQueueLen.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultMaxDatagramRcvQueueLen
+}
 
 type datagramReceiveBuffer [protocol.MaxPacketBufferSize]byte
 
@@ -96,6 +123,7 @@ type datagramQueue struct {
 
 	rcvMx    sync.Mutex
 	rcvQueue ringbuffer.RingBuffer[ReceivedDatagram]
+	rcvCap   int           // receive queue capacity frozen at creation
 	rcvd     chan struct{} // used to notify Receive that a new datagram was received
 
 	// rcvDrops counts received DATAGRAMs released because the receive queue
@@ -121,7 +149,8 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 		closed:  make(chan struct{}),
 		logger:  logger,
 	}
-	queue.rcvQueue.Init(maxDatagramRcvQueueLen)
+	queue.rcvCap = currentMaxDatagramRcvQueueLen()
+	queue.rcvQueue.Init(queue.rcvCap)
 	return queue
 }
 
@@ -226,7 +255,7 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 	}
 	var queued bool
 	h.rcvMx.Lock()
-	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
+	if h.rcvQueue.Len() < h.rcvCap {
 		h.rcvQueue.PushBack(datagram)
 		queued = true
 		if depth := uint64(h.rcvQueue.Len()); depth > h.rcvHighWater.Load() {

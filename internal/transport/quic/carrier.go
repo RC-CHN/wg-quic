@@ -58,6 +58,11 @@ type Config struct {
 	ObfsMode         string
 	ObfsKeys         []obfs.Key
 	EndpointKeys     map[netip.AddrPort]obfs.Key
+	// DatagramReceiveQueueCapacity tunes the quic-go DATAGRAM receive queue
+	// depth for connections created after this carrier opens. Zero keeps
+	// the fork default. Tune it against the
+	// quic_datagram_rcv_queue_drops and high-water counters.
+	DatagramReceiveQueueCapacity int
 }
 
 type Carrier struct {
@@ -75,6 +80,9 @@ func Open(port uint16, cfg Config) (*Carrier, error) {
 		endpointKeys[endpoint] = key
 	}
 	cfg.EndpointKeys = endpointKeys
+	if cfg.DatagramReceiveQueueCapacity > 0 {
+		quicgo.SetMaxDatagramRcvQueueLen(cfg.DatagramReceiveQueueCapacity)
+	}
 	tlsConfig, err := serverTLSConfig()
 	if err != nil {
 		return nil, err
