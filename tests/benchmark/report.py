@@ -95,6 +95,8 @@ def main():
         "send_queue_depth_max",
         "priority_queue_depth_max",
         "quic_datagram_queue_depth_max",
+        "receiver_datagram_queue_drops_median",
+        "receiver_datagram_queue_high_water_max",
         "fec_current_parity_median",
         "fec_loss_estimate_median_pct",
         "quic_acked_median_mbit",
@@ -171,6 +173,14 @@ def main():
                 ),
                 "quic_datagram_queue_depth_max": max(
                     number(row, "quic_datagram_queue_depth_max_a")
+                    for row in measured
+                ),
+                "receiver_datagram_queue_drops_median": statistics.median(
+                    number(row, "quic_datagram_rcv_queue_drops_b")
+                    for row in measured
+                ),
+                "receiver_datagram_queue_high_water_max": max(
+                    number(row, "quic_datagram_rcv_queue_high_water_b")
                     for row in measured
                 ),
                 "fec_current_parity_median": statistics.median(

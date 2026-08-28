@@ -772,7 +772,7 @@ init_run_directory() {
 		run_dir="$results_root/$run_id"
 		mkdir -p "$run_dir"
 		summary_csv="$run_dir/summary.csv"
-		expected_summary_header='trial_id,mode,congestion,protocol_policy,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,measured_duration_s,parallel,offered_mbit,disable_offloads,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,first_delivery_s,longest_stall_s,total_stall_s,stall_count,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,fec_current_parity_a,fec_loss_estimate_ppm_a,queue_drops_a,queue_drops_b,send_queue_depth_max_a,priority_queue_depth_max_a,quic_datagram_queue_depth_max_a,quic_bytes_acked_a,quic_acked_bps_a,quic_bytes_lost_a,quic_packets_lost_a,quic_min_rtt_us_a,quic_path_rtt_us_a,quic_smoothed_rtt_us_a,quic_latest_rtt_us_a,quic_cwnd_bytes_a,quic_bytes_in_flight_a,quic_bandwidth_estimate_bps_a,quic_pacing_rate_bps_a,quic_queue_delay_us_a,quic_fec_recoverable_loss_ppm_a,quic_fec_residual_loss_ppm_a,quic_model_state_a,runtime_alloc_bytes_a,runtime_alloc_bytes_b,runtime_alloc_objects_a,runtime_alloc_objects_b,runtime_heap_objects_max_a,runtime_gc_cycles_a,runtime_gc_cycles_b,runtime_gc_pause_cpu_ns_a,runtime_gc_pause_cpu_ns_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json'
+		expected_summary_header='trial_id,mode,congestion,protocol_policy,link_profile,link_schedule,workload,repeat,impairment,fwd_rate_mbit,rev_rate_mbit,fwd_delay_ms,rev_delay_ms,fwd_jitter_ms,rev_jitter_ms,fwd_loss_pct,rev_loss_pct,fwd_duplicate_pct,rev_duplicate_pct,fwd_reorder_pct,rev_reorder_pct,queue_packets,mtu,duration_s,measured_duration_s,parallel,offered_mbit,disable_offloads,outer_baseline_bps,goodput_bps,outer_utilization,retransmits,udp_lost_pct,first_delivery_s,longest_stall_s,total_stall_s,stall_count,wire_tx_bytes_a,wire_tx_bps_a,goodput_to_wire_ratio,outer_tx_bytes_a,outer_tx_bps_a,goodput_to_outer_ratio,wg_tx_bytes_a,fec_data_tx_a,fec_parity_tx_a,fec_raw_lost_b,fec_recovered_b,fec_unrecovered_b,fec_current_parity_a,fec_loss_estimate_ppm_a,queue_drops_a,queue_drops_b,send_queue_depth_max_a,priority_queue_depth_max_a,quic_datagram_queue_depth_max_a,quic_datagram_rcv_queue_drops_a,quic_datagram_rcv_queue_drops_b,quic_datagram_rcv_queue_high_water_a,quic_datagram_rcv_queue_high_water_b,quic_bytes_acked_a,quic_acked_bps_a,quic_bytes_lost_a,quic_packets_lost_a,quic_min_rtt_us_a,quic_path_rtt_us_a,quic_smoothed_rtt_us_a,quic_latest_rtt_us_a,quic_cwnd_bytes_a,quic_bytes_in_flight_a,quic_bandwidth_estimate_bps_a,quic_pacing_rate_bps_a,quic_queue_delay_us_a,quic_fec_recoverable_loss_ppm_a,quic_fec_residual_loss_ppm_a,quic_model_state_a,runtime_alloc_bytes_a,runtime_alloc_bytes_b,runtime_alloc_objects_a,runtime_alloc_objects_b,runtime_heap_objects_max_a,runtime_gc_cycles_a,runtime_gc_cycles_b,runtime_gc_pause_cpu_ns_a,runtime_gc_pause_cpu_ns_b,core_cpu_a_s,core_cpu_b_s,core_rss_a_kib,core_rss_b_kib,status,error,result_json'
 		if [[ ! -f $summary_csv ]]; then
 			printf '%s\n' "$expected_summary_header" >"$summary_csv"
 			{
@@ -1130,6 +1130,8 @@ run_trial() {
 	local wire_tx wg_tx fec_data fec_parity raw_lost recovered unrecovered
 	local fec_current_parity fec_loss_estimate drops_a drops_b
 	local send_queue_max priority_queue_max quic_datagram_queue_max
+	local quic_datagram_rcv_drops_a quic_datagram_rcv_drops_b
+	local quic_datagram_rcv_high_water_a quic_datagram_rcv_high_water_b
 	wire_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wire_tx_bytes)
 	wg_tx=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" wg_tx_bytes)
 	fec_data=$(stat_delta "$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" fec_data_tx)
@@ -1144,6 +1146,16 @@ run_trial() {
 	send_queue_max=$(csv_column_max "$trial_dir/controller.csv" send_queue_depth)
 	priority_queue_max=$(csv_column_max "$trial_dir/controller.csv" priority_queue_depth)
 	quic_datagram_queue_max=$(csv_column_max "$trial_dir/controller.csv" quic_datagram_queue_depth)
+	quic_datagram_rcv_drops_a=$(stat_delta \
+		"$trial_dir/status-a-before.json" "$trial_dir/status-a-after.json" \
+		quic_datagram_rcv_queue_drops)
+	quic_datagram_rcv_drops_b=$(stat_delta \
+		"$trial_dir/status-b-before.json" "$trial_dir/status-b-after.json" \
+		quic_datagram_rcv_queue_drops)
+	quic_datagram_rcv_high_water_a=$(jq -r \
+		'.stats.quic_datagram_rcv_queue_high_water // 0' "$trial_dir/status-a-after.json")
+	quic_datagram_rcv_high_water_b=$(jq -r \
+		'.stats.quic_datagram_rcv_queue_high_water // 0' "$trial_dir/status-b-after.json")
 	local quic_acked quic_acked_bps quic_lost quic_packets_lost
 	local quic_min_rtt quic_path_rtt quic_smoothed_rtt quic_latest_rtt quic_cwnd quic_inflight
 	local quic_bandwidth quic_pacing quic_queue_delay
@@ -1203,7 +1215,7 @@ run_trial() {
 	csv_schedule=${csv_schedule//,/;}
 
 	printf '%s\n' \
-		"$trial_id,$mode,$congestion,$benchmark_protocol_policy,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$measured_duration,$parallel,$offered_mbit,$benchmark_disable_offloads,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$first_delivery,$longest_stall,$total_stall,$stall_count,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$fec_current_parity,$fec_loss_estimate,$drops_a,$drops_b,$send_queue_max,$priority_queue_max,$quic_datagram_queue_max,$quic_acked,$quic_acked_bps,$quic_lost,$quic_packets_lost,$quic_min_rtt,$quic_path_rtt,$quic_smoothed_rtt,$quic_latest_rtt,$quic_cwnd,$quic_inflight,$quic_bandwidth,$quic_pacing,$quic_queue_delay,$quic_fec_recoverable,$quic_fec_residual,$quic_model_state,$runtime_alloc_bytes_a,$runtime_alloc_bytes_b,$runtime_alloc_objects_a,$runtime_alloc_objects_b,$runtime_heap_objects_max_a,$runtime_gc_cycles_a,$runtime_gc_cycles_b,$runtime_gc_pause_a,$runtime_gc_pause_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
+		"$trial_id,$mode,$congestion,$benchmark_protocol_policy,$link_profile,$csv_schedule,$workload,$repeat,$link_impairment,$link_fwd_rate,$link_rev_rate,$link_fwd_delay,$link_rev_delay,$link_fwd_jitter,$link_rev_jitter,$link_fwd_loss,$link_rev_loss,$link_fwd_duplicate,$link_rev_duplicate,$link_fwd_reorder,$link_rev_reorder,$link_queue_packets,$mtu,$duration,$measured_duration,$parallel,$offered_mbit,$benchmark_disable_offloads,$outer_baseline,$goodput,$outer_utilization,$retransmits,$udp_lost,$first_delivery,$longest_stall,$total_stall,$stall_count,$wire_tx,$wire_tx_bps,$goodput_to_wire,$outer_tx,$outer_tx_bps,$goodput_to_outer,$wg_tx,$fec_data,$fec_parity,$raw_lost,$recovered,$unrecovered,$fec_current_parity,$fec_loss_estimate,$drops_a,$drops_b,$send_queue_max,$priority_queue_max,$quic_datagram_queue_max,$quic_datagram_rcv_drops_a,$quic_datagram_rcv_drops_b,$quic_datagram_rcv_high_water_a,$quic_datagram_rcv_high_water_b,$quic_acked,$quic_acked_bps,$quic_lost,$quic_packets_lost,$quic_min_rtt,$quic_path_rtt,$quic_smoothed_rtt,$quic_latest_rtt,$quic_cwnd,$quic_inflight,$quic_bandwidth,$quic_pacing,$quic_queue_delay,$quic_fec_recoverable,$quic_fec_residual,$quic_model_state,$runtime_alloc_bytes_a,$runtime_alloc_bytes_b,$runtime_alloc_objects_a,$runtime_alloc_objects_b,$runtime_heap_objects_max_a,$runtime_gc_cycles_a,$runtime_gc_cycles_b,$runtime_gc_pause_a,$runtime_gc_pause_b,$cpu_a_s,$cpu_b_s,$rss_a,$rss_b,$workload_status,$workload_error,$trial_dir/iperf-client.json" \
 		>>"$summary_csv"
 	echo "$trial_id: $workload_status, $(awk -v bps="$goodput" -v outer="$outer_baseline" \
 		'BEGIN {printf "%.2f Mbit/s (outer %.2f Mbit/s)", bps / 1000000, outer / 1000000}')"

@@ -260,7 +260,9 @@ Stop any retained fixture:
 - connection minimum, current path baseline, latest, and smoothed RTT;
 - congestion window, in-flight bytes, delivery-capacity estimate, total pacing
   budget, queue delay, FEC-classified loss, and model state;
-- local queue drops and peak ArmorBind/QUIC DATAGRAM queue depth;
+- local queue drops, peak ArmorBind/QUIC DATAGRAM send queue depth, and
+  quic-go application DATAGRAM receive queue drops/high-water marks on both
+  endpoints;
 - actual measured workload duration, first-delivery bound, and
   zero/low-throughput stall measurements;
 - Go allocation bytes/objects and per-second rates, peak live heap objects, GC
@@ -268,11 +270,13 @@ Stop any retained fixture:
 - core process CPU seconds and final RSS;
 - explicit `status` and `error` fields for timeouts and failed paths.
 
-`controller.csv` records the dynamic fields throughout the workload, including
-all three local send queues, the quic-go DATAGRAM queue, and cumulative Go
-allocation/GC counters. The connection-lifetime `quic_min_rtt_us` and
-controller-local `quic_path_rtt_us` intentionally differ after an access-path
-change.
+`controller.csv` records sender-side dynamic fields throughout the workload,
+including all three local send queues, the quic-go DATAGRAM send queue, and
+cumulative Go allocation/GC counters. Receive queue drops and high-water marks
+are taken from the before/after status snapshots instead of polling the weak
+receiver through repeated container execs. The connection-lifetime
+`quic_min_rtt_us` and controller-local `quic_path_rtt_us` intentionally differ
+after an access-path change.
 
 `outer_baseline_bps` is a short protocol-matched sanity measurement, not an
 oracle for bottleneck capacity. In high-RTT TCP profiles such as `satellite`,
@@ -291,6 +295,11 @@ cross-mode efficiency comparisons because those fields use the same sender
 therefore zero for `direct-wireguard-go`, which has no equivalent ArmorBind
 queue. Inspect `tc-a.txt` and `tc-b.txt` when comparing qdisc loss or overflow
 across direct and wg-quic modes.
+
+`quic_datagram_rcv_queue_drops_a` and `_b` count post-ACK application loss in
+quic-go. A nonzero receiver value can coexist with zero QUIC packet loss and
+zero kernel `SO_RXQ_OVFL`; this means the application failed to drain received
+DATAGRAMs, not that the public path failed to deliver their QUIC packets.
 
 Always retain the raw JSON and qdisc output beside the CSV. A useful comparison
 requires at least three repetitions on an otherwise idle host. Report medians

@@ -3,8 +3,8 @@ services:
     image: wg-quic-bench:local
     privileged: true
     volumes:
-      - ${WGQ_BENCH_CONFIG_DIR}/a.conf:/etc/wg-quic/wg0.conf:ro
-      - ${WGQ_BENCH_CONFIG_DIR}/a.uapi:/etc/wg-quic/wg0.uapi:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/a.conf:/run/wg-quic-benchmark/wg0.conf:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/a.uapi:/run/wg-quic-benchmark/wg0.uapi:ro
     environment:
       WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
       WGQ_BENCH_ADDRESS: 10.88.0.1/32
@@ -19,8 +19,8 @@ services:
     image: wg-quic-bench:local
     privileged: true
     volumes:
-      - ${WGQ_BENCH_CONFIG_DIR}/b.conf:/etc/wg-quic/wg0.conf:ro
-      - ${WGQ_BENCH_CONFIG_DIR}/b.uapi:/etc/wg-quic/wg0.uapi:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/b.conf:/run/wg-quic-benchmark/wg0.conf:ro
+      - ${WGQ_BENCH_CONFIG_DIR}/b.uapi:/run/wg-quic-benchmark/wg0.uapi:ro
     environment:
       WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
       WGQ_BENCH_ADDRESS: 10.88.0.2/32

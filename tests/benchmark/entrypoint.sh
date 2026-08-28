@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# Bind mounts retain the host runner's uid. Materialize the generated fixture
+# as root-owned files so the benchmark exercises the production path checks.
+mkdir -p /etc/wg-quic
+cp /run/wg-quic-benchmark/wg0.conf /etc/wg-quic/wg0.conf
+cp /run/wg-quic-benchmark/wg0.uapi /etc/wg-quic/wg0.uapi
+chown 0:0 /etc/wg-quic /etc/wg-quic/wg0.conf /etc/wg-quic/wg0.uapi
+chmod 0700 /etc/wg-quic
+chmod 0600 /etc/wg-quic/wg0.conf /etc/wg-quic/wg0.uapi
+
 mkdir -p /dev/net
 if [ ! -c /dev/net/tun ]; then
 	mknod /dev/net/tun c 10 200
