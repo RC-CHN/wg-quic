@@ -34,34 +34,41 @@ const (
 )
 
 type Config struct {
-	QueueSize        int
-	HandshakeTimeout time.Duration
-	MaxIdleTimeout   time.Duration
-	KeepAlivePeriod  time.Duration
-	ReconnectMin     time.Duration
-	ReconnectMax     time.Duration
-	ReconnectStable  time.Duration
-	ReconnectJitter  func(time.Duration) time.Duration
-	CongestionMode   string
-	FECMode          string
-	FECDataShards    int
-	FECInterleave    int
-	FECFlushDeadline time.Duration
-	ObfsMode         string
-	ObfsKeys         []obfs.Key
-	Eventf           func(format string, args ...any)
-	Debugf           func(format string, args ...any)
+	QueueSize int
+	// QueueDropEventInterval bounds how often a queue-full drop may build a
+	// telemetry snapshot and a session event. The queueDrops counter still
+	// counts every rejected packet; the interval only rate-limits the
+	// per-drop diagnostic work, so diagnostic output cannot grow with the
+	// packet rate.
+	QueueDropEventInterval time.Duration
+	HandshakeTimeout       time.Duration
+	MaxIdleTimeout         time.Duration
+	KeepAlivePeriod        time.Duration
+	ReconnectMin           time.Duration
+	ReconnectMax           time.Duration
+	ReconnectStable        time.Duration
+	ReconnectJitter        func(time.Duration) time.Duration
+	CongestionMode         string
+	FECMode                string
+	FECDataShards          int
+	FECInterleave          int
+	FECFlushDeadline       time.Duration
+	ObfsMode               string
+	ObfsKeys               []obfs.Key
+	Eventf                 func(format string, args ...any)
+	Debugf                 func(format string, args ...any)
 }
 
 func DefaultConfig() Config {
 	return Config{
-		QueueSize:        1024,
-		HandshakeTimeout: 4 * time.Second,
-		MaxIdleTimeout:   15 * time.Second,
-		KeepAlivePeriod:  5 * time.Second,
-		ReconnectMin:     250 * time.Millisecond,
-		ReconnectMax:     30 * time.Second,
-		ReconnectStable:  10 * time.Second,
+		QueueSize:              1024,
+		QueueDropEventInterval: time.Second,
+		HandshakeTimeout:       4 * time.Second,
+		MaxIdleTimeout:         15 * time.Second,
+		KeepAlivePeriod:        5 * time.Second,
+		ReconnectMin:           250 * time.Millisecond,
+		ReconnectMax:           30 * time.Second,
+		ReconnectStable:        10 * time.Second,
 		ReconnectJitter: func(value time.Duration) time.Duration {
 			return value * time.Duration(900+rand.IntN(201)) / 1000
 		},
@@ -228,6 +235,9 @@ func New(cfg Config) *Bind {
 	defaults := DefaultConfig()
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = defaults.QueueSize
+	}
+	if cfg.QueueDropEventInterval <= 0 {
+		cfg.QueueDropEventInterval = defaults.QueueDropEventInterval
 	}
 	if cfg.HandshakeTimeout <= 0 {
 		cfg.HandshakeTimeout = defaults.HandshakeTimeout
@@ -1369,7 +1379,8 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 			// counter, so the duplicated send is protocol-safe.
 			copies = 2
 		}
-		for i := 0; i < copies; i++ {
+		admitted := true
+		for i := 0; i < copies && admitted; i++ {
 			preparedFrame := quiccarrier.AcquireDatagramSendBuffer(frameHeaderSize + len(buf))
 			copy(preparedFrame[frameHeaderSize:], buf)
 			packet := outboundPacket{
@@ -1385,16 +1396,25 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 				b.stats.queueDrops.Add(1)
 				sess.stats.queueDrops.Add(1)
-				observation := sess.telemetry(time.Now())
-				b.recordSessionEventAt(
-					sess.id, sess.generation, telemetry.SessionEventQueueDrop,
-					"send_queue_full", observation.SampledAt, nil,
-					sessionEventMetricsFromStats(
-						observation.Stats, sess.currentFECPolicy(), observation.CurrentEndpoint,
-					),
-				)
-				b.debugf("send queue full: session=%d endpoint=%s", sess.id, sess.endpoint.addr)
-				return errors.New("wg-quic send queue is full")
+				if sess.claimQueueDropEvent(time.Now()) {
+					observation := sess.telemetry(time.Now())
+					b.recordSessionEventAt(
+						sess.id, sess.generation, telemetry.SessionEventQueueDrop,
+						"send_queue_full", observation.SampledAt, nil,
+						sessionEventMetricsFromStats(
+							observation.Stats, sess.currentFECPolicy(), observation.CurrentEndpoint,
+						),
+					)
+					b.debugf(
+						"send queue full: session=%d endpoint=%s drops=%d",
+						sess.id, sess.endpoint.addr, sess.stats.queueDrops.Load(),
+					)
+				}
+				// Drop silently instead of returning an error: WireGuard
+				// logs one error per rejected packet, so a per-packet error
+				// amplifies overload. The authoritative per-packet signal is
+				// the queueDrops counter.
+				admitted = false
 			}
 		}
 	}
@@ -1555,6 +1575,8 @@ func (b *Bind) newSessionLocked(
 		remoteAddr:         ep.addr,
 		authenticatedPeers: make(map[string]uint64),
 		replacesSessionID:  replacesSessionID,
+
+		queueDropEventInterval: state.cfg.QueueDropEventInterval,
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
@@ -1673,6 +1695,31 @@ type session struct {
 	fecPolicyUpdates    chan string
 	fecFlushDeadline    time.Duration
 	stats               sessionCounters
+	// queueDropEventInterval bounds queue-drop telemetry snapshots and
+	// session events; drops inside one window only bump the queueDrops
+	// counters. lastQueueDropEventNS records the claimed window start.
+	queueDropEventInterval time.Duration
+	lastQueueDropEventNS   atomic.Int64
+}
+
+// claimQueueDropEvent reports whether this caller should build the coalesced
+// queue-drop telemetry snapshot and session event. Overload must not allocate
+// per rejected packet, so only the first drop inside each interval claims the
+// event; the queueDrops counters remain the per-packet signal.
+func (s *session) claimQueueDropEvent(now time.Time) bool {
+	if s.queueDropEventInterval <= 0 {
+		return false
+	}
+	next := now.UnixNano()
+	for {
+		last := s.lastQueueDropEventNS.Load()
+		if last != 0 && next-last < int64(s.queueDropEventInterval) {
+			return false
+		}
+		if s.lastQueueDropEventNS.CompareAndSwap(last, next) {
+			return true
+		}
+	}
 }
 
 func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
@@ -2345,14 +2392,16 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
 		s.stats.queueDrops.Add(1)
-		observation := s.telemetry(time.Now())
-		s.endpoint.owner.recordSessionEventAt(
-			s.id, s.generation, telemetry.SessionEventQueueDrop,
-			"receive_queue_full", observation.SampledAt, nil,
-			sessionEventMetricsFromStats(
-				observation.Stats, s.currentFECPolicy(), observation.CurrentEndpoint,
-			),
-		)
+		if s.claimQueueDropEvent(time.Now()) {
+			observation := s.telemetry(time.Now())
+			s.endpoint.owner.recordSessionEventAt(
+				s.id, s.generation, telemetry.SessionEventQueueDrop,
+				"receive_queue_full", observation.SampledAt, nil,
+				sessionEventMetricsFromStats(
+					observation.Stats, s.currentFECPolicy(), observation.CurrentEndpoint,
+				),
+			)
+		}
 		if rp.release != nil {
 			rp.release(rp.data)
 		}

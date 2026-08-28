@@ -10,6 +10,8 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -1029,6 +1031,106 @@ func TestReceivedEndpointsCarryImmutableIngressSequence(t *testing.T) {
 		t.Fatalf(
 			"receive sequences = %d, %d, bind %d",
 			first.ReceiveSequence(), second.ReceiveSequence(), bind.ReceiveSequence(),
+		)
+	}
+}
+
+func TestClaimQueueDropEventCoalescesWithinInterval(t *testing.T) {
+	s := &session{queueDropEventInterval: time.Second}
+	base := time.Now()
+	if !s.claimQueueDropEvent(base) {
+		t.Fatal("first drop should claim the event window")
+	}
+	if s.claimQueueDropEvent(base.Add(500 * time.Millisecond)) {
+		t.Fatal("drop inside the window must not claim a second event")
+	}
+	if !s.claimQueueDropEvent(base.Add(time.Second)) {
+		t.Fatal("drop after the window should claim again")
+	}
+}
+
+func TestClaimQueueDropEventHasSingleWinnerPerWindow(t *testing.T) {
+	s := &session{queueDropEventInterval: time.Minute}
+	now := time.Now()
+	var winners atomic.Int32
+	var group sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if s.claimQueueDropEvent(now) {
+				winners.Add(1)
+			}
+		}()
+	}
+	group.Wait()
+	if winners.Load() != 1 {
+		t.Fatalf("event window winners = %d, want 1", winners.Load())
+	}
+}
+
+func TestSendQueueFullDropsSilentlyWithCoalescedEvent(t *testing.T) {
+	config := DefaultConfig()
+	config.QueueSize = 4
+	a := New(config)
+	if _, _, err := a.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	// Port 1 accepts nothing, so the outbound session stays dialing and its
+	// sendLoop (which first waits on s.ready) never drains the send queue.
+	unreachable, err := a.ParseEndpoint("127.0.0.1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 64) // not a keepalive: one copy through sess.send
+	if err := a.Send([][]byte{data}, unreachable); err != nil {
+		t.Fatal(err)
+	}
+
+	a.mu.Lock()
+	state := a.state
+	a.mu.Unlock()
+	state.mu.Lock()
+	var sess *session
+	for _, candidate := range state.sessions {
+		sess = candidate
+	}
+	state.mu.Unlock()
+	if sess == nil {
+		t.Fatal("send did not create a session")
+	}
+fill:
+	for {
+		select {
+		case sess.send <- outboundPacket{}:
+		default:
+			break fill
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := a.Send([][]byte{data}, unreachable); err != nil {
+			t.Fatalf("Send under overload returned %v, want a silent drop", err)
+		}
+	}
+	if stats := a.Stats(); stats.QueueDrops != 3 {
+		t.Fatalf("queue drops = %d, want 3", stats.QueueDrops)
+	}
+	batch, err := a.SessionEvents("", 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coalesced := 0
+	for _, event := range batch.Events {
+		if event.Reason == "send_queue_full" {
+			coalesced++
+		}
+	}
+	if coalesced != 1 {
+		t.Fatalf(
+			"send_queue_full events = %d, want exactly one coalesced event",
+			coalesced,
 		)
 	}
 }
