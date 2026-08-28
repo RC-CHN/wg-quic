@@ -3,6 +3,7 @@ package obfs
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"net"
 	"net/netip"
 	"syscall"
@@ -301,5 +302,36 @@ func BenchmarkSalamanderDecode(b *testing.B) {
 		if _, _, ok := connection.decode(encoded, output); !ok {
 			b.Fatal("decode failed")
 		}
+	}
+}
+
+func BenchmarkSalamanderDecodeKeyCount(b *testing.B) {
+	for _, count := range []int{1, 5, 10} {
+		b.Run(fmt.Sprintf("keys-%d-worst", count), func(b *testing.B) {
+			udp := listenUDP(b)
+			defer udp.Close()
+			peers := make([]PeerKey, count)
+			for index := range peers {
+				peers[index].Key[0] = byte(index + 1)
+			}
+			connection, err := WrapKeyedSalamander(udp, peers)
+			if err != nil {
+				b.Fatal(err)
+			}
+			payload := bytes.Repeat([]byte{0x42}, 1300)
+			encoded := make([]byte, EncodedLength(len(payload)))
+			if _, err := encode(payload, encoded, peers[len(peers)-1].Key); err != nil {
+				b.Fatal(err)
+			}
+			output := make([]byte, len(payload))
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, _, ok := connection.decode(encoded, output); !ok {
+					b.Fatal("decode failed")
+				}
+			}
+		})
 	}
 }
