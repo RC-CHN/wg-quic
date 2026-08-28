@@ -95,6 +95,11 @@ type SalamanderConn struct {
 	keyOrder []Key
 	keyPairs map[Key]*digestPair
 	keySet   atomic.Pointer[[]receiveKey]
+	// lastKey caches the most recent receive key that decoded a packet. A
+	// hint match proves key possession exactly like the scan below, so
+	// decode tries it first; releaseReceiveKey clears it when its key is
+	// removed from the receive set.
+	lastKey atomic.Pointer[receiveKey]
 
 	cacheMu sync.RWMutex
 	learned map[netip.AddrPort]Key
@@ -183,6 +188,12 @@ func (c *SalamanderConn) releaseReceiveKey(key Key) {
 		}
 	} else {
 		c.keyRefs[key] = refs - 1
+	}
+	// The cached fast-path key must never outlive its registration: without
+	// this clear, a released key could keep decoding packets that the scan
+	// below would reject.
+	if cached := c.lastKey.Load(); cached != nil && cached.key == key {
+		c.lastKey.Store(nil)
 	}
 	c.publishReceiveKeysLocked()
 }
@@ -423,6 +434,14 @@ func (c *SalamanderConn) remember(addr *net.UDPAddr, key Key) {
 	if !ok {
 		return
 	}
+	// The common case is a steady sender whose learned mapping already
+	// holds this key; skip the exclusive lock and the map write.
+	c.cacheMu.RLock()
+	previous, learned := c.learned[addrPort]
+	c.cacheMu.RUnlock()
+	if learned && previous == key {
+		return
+	}
 	c.cacheMu.Lock()
 	if len(c.learned) >= maxLearnedEndpoints {
 		clear(c.learned)
@@ -442,7 +461,20 @@ func (c *SalamanderConn) decode(packet, output []byte) (int, Key, bool) {
 	if keys == nil {
 		return 0, zero, false
 	}
-	for _, decoder := range *keys {
+	// Fast path: try the last key that decoded a packet before scanning.
+	// One active sender per socket is the common deployment, so this
+	// collapses the O(keys) scan into a single derivation.
+	if cached := c.lastKey.Load(); cached != nil {
+		expected := cached.pair.deriveHint(salt)
+		if subtle.ConstantTimeCompare(hint, expected[:]) == 1 {
+			stream := cached.pair.deriveStream(salt)
+			payload := packet[SalamanderHeaderSize:]
+			xorWords(output, payload, &stream)
+			return len(payload), cached.key, true
+		}
+	}
+	for index := range *keys {
+		decoder := &(*keys)[index]
 		expected := decoder.pair.deriveHint(salt)
 		if subtle.ConstantTimeCompare(hint, expected[:]) != 1 {
 			continue
@@ -450,6 +482,7 @@ func (c *SalamanderConn) decode(packet, output []byte) (int, Key, bool) {
 		stream := decoder.pair.deriveStream(salt)
 		payload := packet[SalamanderHeaderSize:]
 		xorWords(output, payload, &stream)
+		c.lastKey.Store(decoder)
 		return len(payload), decoder.key, true
 	}
 	return 0, zero, false

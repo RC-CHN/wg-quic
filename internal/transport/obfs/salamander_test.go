@@ -258,6 +258,70 @@ func TestSalamanderConfiguredEndpointSelectsPeer(t *testing.T) {
 	}
 }
 
+func TestSalamanderDecodePrefersLastKeyAcrossKeySet(t *testing.T) {
+	udp := listenUDP(t)
+	defer udp.Close()
+	connection, err := WrapKeyedSalamander(udp, []PeerKey{{Key: Key{1}}, {Key: Key{2}}, {Key: Key{3}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("fast path payload")
+	encoded := make([]byte, EncodedLength(len(payload)))
+	output := make([]byte, len(payload))
+	if _, err := encode(payload, encoded, Key{3}); err != nil {
+		t.Fatal(err)
+	}
+	// The first decode scans; the second must go through the last-key fast
+	// path and still identify the same key.
+	want := Key{3}
+	for attempt := 0; attempt < 2; attempt++ {
+		n, key, ok := connection.decode(encoded, output)
+		if !ok || key != want || !bytes.Equal(output[:n], payload) {
+			t.Fatalf("decode attempt %d = ok=%t key=%x", attempt, ok, key[0])
+		}
+	}
+	// After the fast path cached Key{3}, a packet for a different key must
+	// still decode and switch the cache.
+	other := Key{1}
+	if _, err := encode(payload, encoded, other); err != nil {
+		t.Fatal(err)
+	}
+	n, key, ok := connection.decode(encoded, output)
+	if !ok || key != other || !bytes.Equal(output[:n], payload) {
+		t.Fatalf("decode after fast-path cache = ok=%t key=%x", ok, key[0])
+	}
+}
+
+func TestSalamanderReleasedKeyStopsDecodingAfterFastPath(t *testing.T) {
+	udp := listenUDP(t)
+	defer udp.Close()
+	first, second := Key{5}, Key{6}
+	connection, err := WrapKeyedSalamander(udp, []PeerKey{{Key: first}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := connection.AcquireReceiveKey(second)
+	payload := []byte("release payload")
+	encoded := make([]byte, EncodedLength(len(payload)))
+	output := make([]byte, len(payload))
+	if _, err := encode(payload, encoded, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, key, ok := connection.decode(encoded, output); !ok || key != second {
+		t.Fatalf("decode with acquired key = ok=%t", ok)
+	}
+	release()
+	if _, _, ok := connection.decode(encoded, output); ok {
+		t.Fatal("released key still decodes")
+	}
+	if _, err := encode(payload, encoded, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, key, ok := connection.decode(encoded, output); !ok || key != first {
+		t.Fatal("surviving key no longer decodes")
+	}
+}
+
 func listenUDP(t testing.TB) *net.UDPConn {
 	t.Helper()
 	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
