@@ -58,6 +58,8 @@ func (c *fakeClient) Events(
 
 func TestCollectorClosesOldGenerationBeforeStartingReplacement(t *testing.T) {
 	status1 := testStatus(testSession(1, 1, 12))
+	status1.Sessions[0].Stats.QUICDatagramRcvQueueDrops = 4
+	status1.Sessions[0].Stats.QUICDatagramRcvQueueHighWater = 8
 	status2 := testStatus(testSession(2, 2, 2))
 	status2.RecentSessions = []telemetry.ClosedSessionObservation{{
 		TelemetryVersion: telemetry.RecentSessionTelemetryVersion,
@@ -66,7 +68,10 @@ func TestCollectorClosesOldGenerationBeforeStartingReplacement(t *testing.T) {
 			PublicKey: testPeer, Authenticated: true, Configured: true,
 		}},
 		Final: true, CloseReason: telemetry.SessionCloseEndpointReplaced,
-		FinalStats: telemetry.SessionStats{WireTxBytes: 15, QUICPacketsLost: 3},
+		FinalStats: telemetry.SessionStats{
+			WireTxBytes: 15, QUICPacketsLost: 3,
+			QUICDatagramRcvQueueDrops: 7, QUICDatagramRcvQueueHighWater: 128,
+		},
 	}}
 	status3 := testStatus(testSession(2, 2, 5))
 	client := &fakeClient{
@@ -96,7 +101,9 @@ func TestCollectorClosesOldGenerationBeforeStartingReplacement(t *testing.T) {
 	}
 	columns := headerMap(rows[0])
 	if rows[2][columns["session_id"]] != "1" || rows[2][columns["final"]] != "true" ||
-		rows[2][columns["wire_tx_bytes_delta"]] != "3" {
+		rows[2][columns["wire_tx_bytes_delta"]] != "3" ||
+		rows[2][columns["quic_datagram_rcv_queue_drops_delta"]] != "3" ||
+		rows[2][columns["quic_datagram_rcv_queue_high_water"]] != "128" {
 		t.Fatalf("final old-generation row = %#v", rows[2])
 	}
 	if rows[3][columns["session_id"]] != "2" || rows[3][columns["delta_valid"]] != "false" ||
@@ -181,6 +188,19 @@ func TestCounterDeltaRejectsRegressionWithinGeneration(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("counter regression was accepted")
+	}
+}
+
+func TestCounterDeltaIncludesDatagramReceiveQueueDrops(t *testing.T) {
+	delta, err := counterDelta(
+		telemetry.SessionStats{QUICDatagramRcvQueueDrops: 4},
+		telemetry.SessionStats{QUICDatagramRcvQueueDrops: 9},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delta.QUICDatagramRcvQueueDrops != 5 {
+		t.Fatalf("DATAGRAM receive queue drop delta = %d, want 5", delta.QUICDatagramRcvQueueDrops)
 	}
 }
 

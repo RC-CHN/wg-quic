@@ -692,7 +692,11 @@ func (c *collector) writeSessionCSV(
 		"quic_spurious_loss_packets": u64(session.stats.QUICSpuriousLossPackets), "quic_spurious_loss_packets_delta": deltaValue(deltaValid, delta.QUICSpuriousLossPackets),
 		"quic_pto_count": u64(session.stats.QUICPTOCount), "quic_pto_count_delta": deltaValue(deltaValid, delta.QUICPTOCount),
 		"queue_drops": u64(session.stats.QueueDrops), "queue_drops_delta": deltaValue(deltaValid, delta.QueueDrops),
-		"fec_raw_lost": u64(session.stats.FECRawLost), "fec_raw_lost_delta": deltaValue(deltaValid, delta.FECRawLost),
+		"quic_datagram_rcv_queue_len":         u64(session.stats.QUICDatagramRcvQueueLen),
+		"quic_datagram_rcv_queue_drops":       u64(session.stats.QUICDatagramRcvQueueDrops),
+		"quic_datagram_rcv_queue_drops_delta": deltaValue(deltaValid, delta.QUICDatagramRcvQueueDrops),
+		"quic_datagram_rcv_queue_high_water":  u64(session.stats.QUICDatagramRcvQueueHighWater),
+		"fec_raw_lost":                        u64(session.stats.FECRawLost), "fec_raw_lost_delta": deltaValue(deltaValid, delta.FECRawLost),
 		"fec_recovered": u64(session.stats.FECRecovered), "fec_recovered_delta": deltaValue(deltaValid, delta.FECRecovered),
 		"fec_unrecovered": u64(session.stats.FECUnrecovered), "fec_unrecovered_delta": deltaValue(deltaValid, delta.FECUnrecovered),
 		"quic_cwnd_bytes":              u64(session.stats.QUICCongestionWindowBytes),
@@ -847,6 +851,7 @@ func counterDelta(previous, current telemetry.SessionStats) (telemetry.SessionSt
 		{"quic_packets_lost", previous.QUICPacketsLost, current.QUICPacketsLost, func(v uint64) { delta.QUICPacketsLost = v }},
 		{"quic_spurious_loss_packets", previous.QUICSpuriousLossPackets, current.QUICSpuriousLossPackets, func(v uint64) { delta.QUICSpuriousLossPackets = v }},
 		{"quic_pto_count", previous.QUICPTOCount, current.QUICPTOCount, func(v uint64) { delta.QUICPTOCount = v }},
+		{"quic_datagram_rcv_queue_drops", previous.QUICDatagramRcvQueueDrops, current.QUICDatagramRcvQueueDrops, func(v uint64) { delta.QUICDatagramRcvQueueDrops = v }},
 	}
 	for _, counter := range counters {
 		if counter.new < counter.old {
@@ -871,7 +876,9 @@ var csvHeader = []string{
 	"quic_packets_acked", "quic_packets_acked_delta", "quic_packets_lost",
 	"quic_packets_lost_delta", "quic_spurious_loss_packets",
 	"quic_spurious_loss_packets_delta", "quic_pto_count", "quic_pto_count_delta",
-	"queue_drops", "queue_drops_delta", "fec_raw_lost", "fec_raw_lost_delta",
+	"queue_drops", "queue_drops_delta", "quic_datagram_rcv_queue_len",
+	"quic_datagram_rcv_queue_drops", "quic_datagram_rcv_queue_drops_delta",
+	"quic_datagram_rcv_queue_high_water", "fec_raw_lost", "fec_raw_lost_delta",
 	"fec_recovered", "fec_recovered_delta", "fec_unrecovered", "fec_unrecovered_delta",
 	"quic_cwnd_bytes", "quic_bytes_in_flight", "quic_bandwidth_estimate_bps",
 	"quic_pacing_rate_bps", "quic_smoothed_rtt_us", "quic_path_rtt_us",
