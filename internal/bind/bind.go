@@ -851,9 +851,7 @@ func (b *Bind) EndpointSessionState(endpoint netip.AddrPort) EndpointSessionStat
 	configuredEndpoint := state.endpoints[endpoint]
 	sessions := make([]*session, 0, 1)
 	for _, candidate := range state.sessions {
-		candidate.mu.Lock()
-		remote := candidate.remoteAddr
-		candidate.mu.Unlock()
+		remote := candidate.currentRemoteAddr()
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 		if remote == endpoint {
 			sessions = append(sessions, candidate)
@@ -917,10 +915,10 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		return nil, fmt.Errorf("endpoint must be a numeric IP address: %w", err)
 	}
 	ep := &Endpoint{
-		owner:      b,
-		addr:       addrPort,
-		configured: true,
+		owner: b,
+		addr:  addrPort,
 	}
+	ep.route.Store(&endpointRoute{configured: true})
 	b.mu.Lock()
 	_, associated := b.obfsResolved[ep.addr]
 	policy := b.fecPolicies[ep.addr].policy
@@ -932,9 +930,9 @@ func (b *Bind) ParseEndpoint(value string) (conn.Endpoint, error) {
 		if existing := state.endpoints[ep.addr]; existing != nil {
 			ep = existing
 			ep.mu.Lock()
-			ep.configured = true
 			ep.retired = false
 			ep.fecPolicy = policy
+			ep.route.Store(&endpointRoute{configured: true})
 			ep.mu.Unlock()
 		} else {
 			state.endpoints[ep.addr] = ep
@@ -1216,7 +1214,7 @@ func (b *Bind) scheduleEndpointReconnect(
 	immediate bool,
 ) {
 	ep.mu.Lock()
-	if !ep.configured || !ep.activated || ep.retired ||
+	if !ep.isConfigured() || !ep.activated || ep.retired ||
 		ep.session != nil || state.ctx.Err() != nil {
 		ep.mu.Unlock()
 		return
@@ -1270,7 +1268,7 @@ func (b *Bind) scheduleEndpointReconnect(
 		ep.reconnectScheduled = false
 		ep.reconnectCancel = nil
 		ep.nextReconnect = time.Time{}
-		eligible := ep.configured && ep.activated && !ep.retired && ep.session == nil
+		eligible := ep.isConfigured() && ep.activated && !ep.retired && ep.session == nil
 		ep.mu.Unlock()
 		if !eligible || state.ctx.Err() != nil {
 			return
@@ -1485,7 +1483,7 @@ func (b *Bind) acceptLoop(state *runState) {
 			qconn.CloseWithError("")
 			return
 		}
-		ep.fallback = state.endpoints[remote]
+		ep.route.Store(&endpointRoute{fallback: state.endpoints[remote]})
 		ep.mu.Lock()
 		sess := b.newSessionLocked(state, ep, false)
 		ep.session = sess
@@ -1516,8 +1514,8 @@ func (b *Bind) sessionForEndpoint(
 		state.mu.Unlock()
 		return sess, nil
 	}
-	if !ep.configured {
-		fallback := ep.fallback
+	if !ep.isConfigured() {
+		fallback := ep.currentRoute().fallback
 		ep.mu.Unlock()
 		state.mu.Unlock()
 		if fallback != nil {
@@ -1560,7 +1558,7 @@ func (b *Bind) newSessionLocked(
 	ep.pendingReplacement = 0
 	role := "inbound"
 	configuredEndpoint := ""
-	if ep.configured {
+	if ep.isConfigured() {
 		role = "outbound"
 		configuredEndpoint = ep.addr.String()
 	}
@@ -1572,11 +1570,17 @@ func (b *Bind) newSessionLocked(
 		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
 		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
 		fecPolicyUpdates:   make(chan string, 1),
-		remoteAddr:         ep.addr,
 		authenticatedPeers: make(map[string]uint64),
 		replacesSessionID:  replacesSessionID,
 
 		queueDropEventInterval: state.cfg.QueueDropEventInterval,
+	}
+	initialRemote := ep.addr
+	sess.remoteAddr.Store(&initialRemote)
+	if route := ep.currentRoute(); route.configured {
+		sess.receiveRoute = &endpointRoute{fallback: ep}
+	} else {
+		sess.receiveRoute = ep.route.Load()
 	}
 	sess.fecDecoder = fec.NewDecoder()
 	if state.cfg.FECMode == "auto" {
@@ -1610,7 +1614,7 @@ func (b *Bind) dialSession(sess *session) {
 		sess.setCloseCause(reason, class, errors.New(message))
 		sess.endpoint.mu.Lock()
 		attempt := sess.endpoint.reconnectAttempts
-		if sess.endpoint.configured && sess.endpoint.session == sess {
+		if sess.endpoint.isConfigured() && sess.endpoint.session == sess {
 			sess.endpoint.consecutiveFailures++
 			if sess.reconnectAttempt {
 				sess.endpoint.reconnectFailures++
@@ -1663,21 +1667,26 @@ func (b *Bind) runSession(sess *session) {
 }
 
 type session struct {
-	id                  uint64
-	generation          uint64
-	role                string
-	configuredEndpoint  string
-	state               *runState
-	endpoint            *Endpoint
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	ready               chan struct{}
-	send                chan outboundPacket
-	priority            chan outboundPacket
-	control             chan []byte
-	mu                  sync.Mutex
-	conn                *quiccarrier.Connection
-	remoteAddr          netip.AddrPort
+	id                 uint64
+	generation         uint64
+	role               string
+	configuredEndpoint string
+	state              *runState
+	endpoint           *Endpoint
+	ctx                context.Context
+	cancel             context.CancelFunc
+	ready              chan struct{}
+	send               chan outboundPacket
+	priority           chan outboundPacket
+	control            chan []byte
+	mu                 sync.Mutex
+	conn               *quiccarrier.Connection
+	remoteAddr         atomic.Pointer[netip.AddrPort]
+	// receiveRoute is the routing snapshot stamped onto every per-datagram
+	// Endpoint snapshot. It is computed once at construction because the
+	// session's endpoint identity never changes afterwards; the pointer is
+	// shared with the endpoint's own immutable snapshot when possible.
+	receiveRoute        *endpointRoute
 	establishedAt       time.Time
 	authenticatedPeers  map[string]uint64
 	readyOnce           sync.Once
@@ -1722,10 +1731,20 @@ func (s *session) claimQueueDropEvent(now time.Time) bool {
 	}
 }
 
+// currentRemoteAddr reports the latest authenticated remote without taking
+// the session mutex; the receive path calls this per datagram. A nil pointer
+// (session constructed outside newSession) reads as the zero address.
+func (s *session) currentRemoteAddr() netip.AddrPort {
+	if p := s.remoteAddr.Load(); p != nil {
+		return *p
+	}
+	return netip.AddrPort{}
+}
+
 func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
 	s.mu.Lock()
 	conn := s.conn
-	remoteAddr := s.remoteAddr
+	remoteAddr := s.currentRemoteAddr()
 	establishedAt := s.establishedAt
 	peers := make([]telemetry.SessionPeerObservation, 0, len(s.authenticatedPeers))
 	for publicKey, generation := range s.authenticatedPeers {
@@ -1910,7 +1929,7 @@ func (s *session) setConn(qconn *quiccarrier.Connection) {
 	s.establishedAt = time.Now()
 	s.mu.Unlock()
 	s.endpoint.mu.Lock()
-	if s.endpoint.configured {
+	if s.endpoint.isConfigured() {
 		s.endpoint.nextReconnect = time.Time{}
 	}
 	s.endpoint.mu.Unlock()
@@ -1977,7 +1996,7 @@ func (s *session) close() {
 		s.state.mu.Unlock()
 		s.endpoint.owner.stats.activeSessions.Add(^uint64(0))
 		s.endpoint.mu.Lock()
-		configured := s.endpoint.configured
+		configured := s.endpoint.isConfigured()
 		current := s.endpoint.session == s
 		if current {
 			s.endpoint.session = nil
@@ -2254,25 +2273,27 @@ func (s *session) receiveLoop() {
 	}()
 	handleDatagram := func(datagram quiccarrier.ReceivedDatagram) {
 		defer datagram.Release()
+		now := time.Now()
 		wirePacket := datagram.Data
-		s.mu.Lock()
-		previousRemote := s.remoteAddr
-		s.remoteAddr = datagram.RemoteAddr
-		s.mu.Unlock()
-		if previousRemote.IsValid() && previousRemote != datagram.RemoteAddr {
-			s.endpoint.owner.recordSessionEventAt(
-				s.id, s.generation, telemetry.SessionEventEndpointMoved,
-				"authenticated_path_observed", time.Now(),
-				&telemetry.SessionEventMetrics{Endpoint: previousRemote.String()},
-				&telemetry.SessionEventMetrics{Endpoint: datagram.RemoteAddr.String()},
-			)
+		previousRemote := s.currentRemoteAddr()
+		if datagram.RemoteAddr != previousRemote {
+			nextRemote := datagram.RemoteAddr
+			s.remoteAddr.Store(&nextRemote)
+			if previousRemote.IsValid() {
+				s.endpoint.owner.recordSessionEventAt(
+					s.id, s.generation, telemetry.SessionEventEndpointMoved,
+					"authenticated_path_observed", now,
+					&telemetry.SessionEventMetrics{Endpoint: previousRemote.String()},
+					&telemetry.SessionEventMetrics{Endpoint: datagram.RemoteAddr.String()},
+				)
+			}
 		}
 		receiveEndpoint := s.endpointForAddrPort(datagram.RemoteAddr)
 		s.endpoint.owner.stats.wireRxPackets.Add(1)
 		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
 		s.stats.wireRxPackets.Add(1)
 		s.stats.wireRxBytes.Add(uint64(len(wirePacket)))
-		result, err := s.fecDecoder.Handle(time.Now(), wirePacket)
+		result, err := s.fecDecoder.Handle(now, wirePacket)
 		if err != nil {
 			return
 		}
@@ -2287,11 +2308,11 @@ func (s *session) receiveLoop() {
 			}
 			s.sendFECFeedback(result.SendFeedback)
 			for _, frame := range result.Frames {
-				s.deliverFrame(frame, true, receiveEndpoint)
+				s.deliverFrame(frame, true, receiveEndpoint, now)
 			}
 			return
 		}
-		s.deliverFrame(wirePacket, false, receiveEndpoint)
+		s.deliverFrame(wirePacket, false, receiveEndpoint, now)
 	}
 	expiry := time.NewTicker(fecExpiryPoll)
 	defer expiry.Stop()
@@ -2328,17 +2349,13 @@ func (s *session) receiveLoop() {
 // changing the session's configured/reconnect identity.
 func (s *session) endpointForAddrPort(remote netip.AddrPort) *Endpoint {
 	remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-	s.endpoint.mu.Lock()
-	fallback := s.endpoint.fallback
-	if s.endpoint.configured {
-		fallback = s.endpoint
-	}
-	s.endpoint.mu.Unlock()
-	return &Endpoint{
+	snapshot := &Endpoint{
 		owner: s.endpoint.owner, addr: remote,
 		receiveSequence: s.endpoint.owner.receiveSequence.Add(1),
-		session:         s, fallback: fallback,
+		session:         s,
 	}
+	snapshot.route.Store(s.receiveRoute)
+	return snapshot
 }
 
 func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
@@ -2361,14 +2378,12 @@ func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 // deliverFrame parses and reassembles one WGQ1 frame. owned reports whether
 // frame stays valid after this call returns (FEC decoder output) as opposed
 // to aliasing the pooled QUIC receive datagram.
-func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint) {
+func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint, now time.Time) {
 	frag, err := parseFragment(frame)
 	if err != nil {
 		return
 	}
-	s.state.mu.Lock()
-	packet, err := s.state.reassembly.add(time.Now(), s.id, frag, owned)
-	s.state.mu.Unlock()
+	packet, err := s.state.reassembly.add(now, s.id, frag, owned)
 	if err != nil || packet == nil {
 		return
 	}

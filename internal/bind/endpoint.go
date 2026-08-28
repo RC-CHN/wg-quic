@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,9 +15,12 @@ type Endpoint struct {
 	fecPolicy       string
 	mu              sync.Mutex
 	session         *session
-	fallback        *Endpoint
-
-	configured          bool
+	// route is the immutable per-datagram routing half of the endpoint:
+	// replies reuse the configured endpoint itself, otherwise the
+	// accept-time fallback. Writers publish before the endpoint becomes
+	// visible to the receive path or while holding mu; the receive path
+	// loads it lock-free per datagram.
+	route               atomic.Pointer[endpointRoute]
 	activated           bool
 	retired             bool
 	reconnectScheduled  bool
@@ -28,6 +32,27 @@ type Endpoint struct {
 	reconnectFailures   uint64
 	nextReconnect       time.Time
 	pendingReplacement  uint64
+}
+
+// endpointRoute is the immutable routing snapshot published on an Endpoint.
+// It changes only at ParseEndpoint reconfiguration.
+type endpointRoute struct {
+	fallback   *Endpoint
+	configured bool
+}
+
+func (e *Endpoint) isConfigured() bool {
+	if r := e.route.Load(); r != nil {
+		return r.configured
+	}
+	return false
+}
+
+func (e *Endpoint) currentRoute() endpointRoute {
+	if r := e.route.Load(); r != nil {
+		return *r
+	}
+	return endpointRoute{}
 }
 
 func (e *Endpoint) cancelReconnectLocked() {

@@ -706,16 +706,19 @@ func TestBindReconnectsAfterAbruptPeerRestartWithoutWireGuardTraffic(t *testing.
 func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
 	owner := New(DefaultConfig())
 	configured := &Endpoint{
-		owner:      owner,
-		addr:       netip.MustParseAddrPort("192.0.2.10:51820"),
-		configured: true,
+		owner: owner,
+		addr:  netip.MustParseAddrPort("192.0.2.10:51820"),
 	}
+	configured.route.Store(&endpointRoute{configured: true})
 	accepted := &Endpoint{
-		owner:    owner,
-		addr:     netip.MustParseAddrPort("198.51.100.20:52821"),
-		fallback: configured,
+		owner: owner,
+		addr:  netip.MustParseAddrPort("198.51.100.20:52821"),
 	}
-	sess := &session{endpoint: accepted, remoteAddr: accepted.addr}
+	accepted.route.Store(&endpointRoute{fallback: configured})
+	sess := &session{endpoint: accepted}
+	sess.receiveRoute = accepted.route.Load()
+	initialRemote := accepted.addr
+	sess.remoteAddr.Store(&initialRemote)
 	accepted.session = sess
 
 	migrated := sess.endpointForAddrPort(
@@ -730,12 +733,12 @@ func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
 	if migrated.session != sess {
 		t.Fatal("migrated endpoint lost the established session")
 	}
-	if migrated.fallback != configured {
+	if migrated.currentRoute().fallback != configured {
 		t.Fatal("migrated endpoint lost its configured fallback")
 	}
 	unchanged := sess.endpointForAddrPort(accepted.addr)
 	if unchanged == accepted || unchanged.addr != accepted.addr || unchanged.session != sess ||
-		unchanged.fallback != configured {
+		unchanged.currentRoute().fallback != configured {
 		t.Fatalf("unchanged QUIC path snapshot = %#v", unchanged)
 	}
 	if migrated.ReceiveSequence() == 0 || unchanged.ReceiveSequence() <= migrated.ReceiveSequence() {
@@ -758,18 +761,19 @@ func TestEndpointSessionStateFollowsCurrentRemotePath(t *testing.T) {
 		addr:  netip.MustParseAddrPort("198.51.100.20:52821"),
 	}
 	sess := &session{
-		id:         1,
-		state:      state,
-		endpoint:   accepted,
-		ctx:        context.Background(),
-		conn:       new(quiccarrier.Connection),
-		remoteAddr: netip.MustParseAddrPort("198.51.100.21:52821"),
+		id:       1,
+		state:    state,
+		endpoint: accepted,
+		ctx:      context.Background(),
+		conn:     new(quiccarrier.Connection),
 	}
+	migratedRemote := netip.MustParseAddrPort("198.51.100.21:52821")
+	sess.remoteAddr.Store(&migratedRemote)
 	state.sessions[sess.id] = sess
 	accepted.session = sess
 	bind.state = state
 
-	if got := bind.EndpointSessionState(sess.remoteAddr); got != EndpointSessionEstablished {
+	if got := bind.EndpointSessionState(sess.currentRemoteAddr()); got != EndpointSessionEstablished {
 		t.Fatalf("migrated endpoint session state = %q, want established", got)
 	}
 	if got := bind.EndpointSessionState(accepted.addr); got != EndpointSessionIdle {
@@ -1019,8 +1023,9 @@ func waitForCondition(t *testing.T, description string, ready func() bool) {
 func TestReceivedEndpointsCarryImmutableIngressSequence(t *testing.T) {
 	bind := New(DefaultConfig())
 	configured := &Endpoint{
-		owner: bind, addr: netip.MustParseAddrPort("192.0.2.10:443"), configured: true,
+		owner: bind, addr: netip.MustParseAddrPort("192.0.2.10:443"),
 	}
+	configured.route.Store(&endpointRoute{configured: true})
 	session := &session{endpoint: configured}
 	first := session.endpointForAddrPort(configured.addr)
 	second := session.endpointForAddrPort(configured.addr)

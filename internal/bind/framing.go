@@ -130,6 +130,7 @@ type reassembly struct {
 }
 
 type reassembler struct {
+	mu     sync.Mutex
 	groups map[reassemblyKey]*reassembly
 }
 
@@ -185,6 +186,11 @@ func (r *reassembler) add(now time.Time, sessionID uint64, f fragment, owned boo
 		copy(buf, f.data)
 		return buf, nil
 	}
+	// Only the multi-fragment path touches shared reassembly state; the lock
+	// is internal so the receive path no longer takes the shared runState
+	// mutex per frame.
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for key, group := range r.groups {
 		if now.Sub(group.created) > reassemblyTTL {
 			delete(r.groups, key)
