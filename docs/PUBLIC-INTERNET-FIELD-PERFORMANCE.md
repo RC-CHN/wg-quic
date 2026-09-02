@@ -11,14 +11,17 @@
   required for reproducible controller research
 - Follow-up release reviewed: `wg-quic v0.3.3`
 - Instrumentation release: `wg-quic v0.3.4`
-- Follow-up implementation status: `v0.3.4` supplies active and retained final
-  session telemetry, bounded sequenced controller/session events, a
-  peer-selecting generation-aware collector, and
-  explicit cross-platform receive-overflow availability. This satisfies the
-  minimum instrumentation gate for a controlled controller-recovery rerun.
-  Bounded qlog/CPU trace capture, sequence-level field evidence, and a new
-  public trial are still outstanding; the data still cannot justify changing
-  the production congestion-controller default.
+- Post-ACK receive observability and hot-path release: `wg-quic v0.3.5`
+- Follow-up implementation status: `v0.3.5` retains the active/final session
+  telemetry, bounded event stream, generation-aware collector, and explicit
+  cross-platform socket-overflow availability from `v0.3.4`. It additionally
+  reports QUIC DATAGRAM application receive-queue depth, cumulative drops, and
+  high-water marks at session and interface scope, exports them through the
+  collector and benchmark, bounds overload diagnostic work, and removes known
+  receive hot-path locking. Bounded qlog/CPU trace capture, sequence-level
+  field evidence, and a new public trial are still outstanding; the data still
+  cannot justify changing the production congestion-controller default or the
+  128-entry receive-queue default.
 - Data sensitivity: node labels are region aliases. Public addresses,
   credentials, WireGuard keys, and application payloads are intentionally not
   recorded here.
@@ -695,12 +698,20 @@ No one hypothesis should be accepted from one short field sample.
    aggregates.
 5. **Delivered in v0.3.4:** add Linux `SO_RXQ_OVFL` attribution and report
    support/source explicitly on every platform.
-6. Add the bounded local trace operation, redacted artifact manifest, qlog
+6. **Delivered in v0.3.5:** add per-session and interface QUIC DATAGRAM
+   application receive-queue depth, cumulative full-queue drops, and lifetime
+   high-water marks; export their deltas through field and benchmark artifacts.
+7. **Delivered in v0.3.5:** coalesce queue-overload diagnostics while retaining
+   a cumulative count for every rejected packet.
+8. **Delivered in v0.3.5:** remove locks from the common receive path and add a
+   most-recent-key Salamander fast path; retain the 128-entry queue default
+   until a controlled capacity experiment supports changing it.
+9. Add the bounded local trace operation, redacted artifact manifest, qlog
    subset, and on-demand CPU profile.
-7. Add field-runner support for sequence-level raw and inner UDP evidence.
-8. Reproduce the three representative public link classes.
-9. Run isolated `model`/CUBIC/Reno and FEC comparisons.
-10. Change controller behavior only after traces identify a reproducible cause.
+10. Add field-runner support for sequence-level raw and inner UDP evidence.
+11. Reproduce the three representative public link classes.
+12. Run isolated `model`/CUBIC/Reno and FEC comparisons.
+13. Change controller behavior only after traces identify a reproducible cause.
 
 ## 15. Acceptance Criteria for Diagnostics
 
@@ -732,15 +743,16 @@ No one hypothesis should be accepted from one short field sample.
   without exposing secrets.
 - The same analysis script can compare clean, lossy, and asymmetric trials.
 
-## 16. v0.3.4 Field-Run Readiness Gate
+## 16. v0.3.5 Field-Run Readiness Gate
 
-| Activity | v0.3.4 readiness | Reason |
+| Activity | v0.3.5 readiness | Reason |
 | --- | --- | --- |
 | Inspect one active peer independently | Ready | Active per-session counters and gauges are attributable |
 | Controlled controller-recovery rerun | Ready for execution, not yet field-validated | The bounded collector follows one peer/session, consumes final snapshots, and retains controller events |
 | Compare steady active-session model/CUBIC/Reno behavior | Ready with caveats | Session-safe CSV/event evidence exists; qlog and CPU profiling are still absent |
 | Diagnose reconnect or failure collapse | Ready for a controlled rerun | Final state, close reason, replacement links, and lifecycle/controller events are retained |
 | Prove public loss instead of kernel socket overflow | Linux ready; other platforms explicit-unavailable | Linux reports `SO_RXQ_OVFL`; unsupported platforms cannot make this attribution |
+| Prove post-ACK application receive loss | Ready for a controlled rerun | Session and interface counters report DATAGRAM receive-queue drops and high-water marks independently of QUIC loss |
 | Diagnose clean-path CPU/data-path ceiling | Not ready | Bounded pprof/qlog trace is absent |
 | Change the production default controller | Not ready | Root-cause and repeated field evidence are incomplete |
 
@@ -758,6 +770,13 @@ rather than clean-path implementation profiling. This readiness statement is
 an implementation/test result, not a claim that a new public field matrix has
 already run.
 
+`v0.3.5` closes the post-ACK attribution gap by reporting the application
+DATAGRAM receive queue directly and carrying its counters through the bounded
+collector and controlled fixture. It also bounds overload diagnostic work and
+removes measured receive-side locking, but deliberately leaves the queue
+capacity and congestion-controller defaults unchanged pending a controlled
+field rerun.
+
 ## 17. Immediate Operational Conclusion
 
 The deployment is functional, and the first field run found no evidence of
@@ -765,9 +784,10 @@ local wg-quic send queue overflow. It also found genuine public-path loss and
 directional impairment, plus a separate short-transfer penalty on the clean
 Tokyo control path.
 
-The correct next step is not a global production controller change. `v0.3.4`
+The correct next step is not a global production controller change. `v0.3.5`
 retains attributable active/final telemetry and controller transitions, while
-the bounded collector follows peer generation explicitly. The next action is
-to run the small controlled public matrix and use those artifacts to drive
+the bounded collector follows peer generation and now exposes post-ACK
+application queue loss explicitly. The next action is to run the small
+controlled public matrix and use those artifacts to drive queue sizing,
 controller, FEC, batching, and routing changes without confusing path faults
 with software faults.

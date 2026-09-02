@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## v0.3.5 - 2026-09-02
+
+Post-ACK receive-loss observability and receive-hot-path efficiency release.
+
+- Added portable per-session and interface QUIC DATAGRAM receive-queue depth,
+  cumulative full-queue drops, and lifetime high-water telemetry, exposing the
+  post-ACK application loss which network-loss and socket-overflow counters
+  cannot observe.
+- Extended `wg-quic-quick collect` and the controlled benchmark CSV/report with
+  receive-queue drop deltas and high-water values, preserving before/after
+  attribution without polling the constrained receiver during a trial.
+- Coalesced WireGuard bind send- and delivery-queue overload diagnostics to at
+  most one event and debug record per session per second while retaining an
+  authoritative cumulative counter for every rejected packet, preventing
+  overload from amplifying logging and allocation work.
+- Added a most-recent-key Salamander receive fast path and stopped rewriting an
+  unchanged learned endpoint association. Worst-case five- and ten-key decode
+  microbenchmarks improved by 59% and 77% respectively, with released-key and
+  cache-switch behavior covered by tests.
+- Removed session, endpoint-route, and shared reassembly locks from the common
+  owned single-fragment receive path, froze immutable receive-route snapshots,
+  and collapsed duplicate per-packet clock reads without changing roaming or
+  reassembly ordering.
+- Added a process-wide QUIC DATAGRAM receive-queue tuning hook plumbed through
+  the carrier and bind for controlled experiments. Each connection freezes its
+  capacity at creation; the production default remains 128 until field evidence
+  supports another value.
+- Added queue-capacity, receive-drop, collector-delta, overload-coalescing,
+  Salamander cache, endpoint lifetime, concurrency, benchmark-schema, and race
+  regression coverage across the affected paths.
+
 ## v0.3.4 - 2026-08-25
 
 Cross-platform field observability release.

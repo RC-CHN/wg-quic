@@ -15,7 +15,7 @@ Salamander-style packet obfuscation.
 > and `wg-quick`-style configuration files.
 
 The current public release is
-[`v0.3.4`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.4).
+[`v0.3.5`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.5).
 
 ## Platform status
 
@@ -59,7 +59,7 @@ sudo wg-quic-quick down wg0
 
 ### Runtime peer and DDNS management
 
-Release `v0.3.4` supports live peer reconciliation and automatic DDNS across
+Release `v0.3.5` supports live peer reconciliation and automatic DDNS across
 the platform service adapters listed above.
 
 Start by inspecting the running supervisor. On Unix, use root for the detailed
@@ -111,6 +111,17 @@ Linux status reports the interface-scoped UDP socket drop counter from
 `stats.receive_queue_overflow` object with `supported=false`, `source`, and
 `platform`, so an unavailable counter is never mistaken for an authoritative
 zero.
+
+Release `v0.3.5` adds `quic_datagram_rcv_queue_len`,
+`quic_datagram_rcv_queue_drops`, and
+`quic_datagram_rcv_queue_high_water` to both interface and session statistics,
+including retained final snapshots. These portable fields distinguish a QUIC
+packet that reached and was acknowledged by the peer from a DATAGRAM later
+dropped because the application's bounded receive queue was full. The field
+collector exports the current depth, cumulative drop delta, and high-water
+value. WireGuard bind queue-full events and debug records are coalesced per
+session, while the corresponding cumulative counters still include every
+rejected packet.
 
 For a bounded field capture, select one peer by its complete public key:
 
@@ -251,7 +262,7 @@ undifferentiated claim that every CPU has already completed native acceptance:
 | FreeBSD/OPNsense | Unix socket plus incremental `route` operations | root-owned/checksummed outer endpoint-route ledger; TUN peer routes disappear with the interface | rc.d/configd and each carried FreeBSD release train are tested separately |
 | Windows amd64/arm64 | ACL-protected named pipe, typed core transaction, and IP Helper peer routes | protected endpoint ledger plus a per-tunnel before/after/phase journal keyed by compartment and interface LUID | x64 installed SCM/MSI lifecycle; arm64 remains build/unit-only until a native service fixture passes |
 
-`v0.3.4` contains all four adapters. Release notes must use
+`v0.3.5` contains all four adapters. Release notes must use
 `build-supported`, `unit-verified`, `runtime-verified`, or
 `integration-verified` per exact OS/architecture; cross-compilation alone never
 raises that label.
@@ -263,7 +274,7 @@ TUN even under OpenRC, procd, rc.d, or a direct supervisor. FreeBSD also uses a
 parent-death signal, while Windows uses a kill-on-close Job Object. Service
 manager cgroups/process groups remain defense in depth.
 
-The `v0.3.4` binaries have passed the OpenWrt 25.12.5
+The `v0.3.5` binaries have passed the OpenWrt 25.12.5
 `runtime-smoke` fixture in both `armsr/armv8` and `x86/64` QEMU guests: TUN
 creation, procd lifecycle, hook ordering, peer add/remove, generation advance,
 and unchanged supervisor epoch. Because that run installed locally built
@@ -333,11 +344,11 @@ Download the archive matching the host architecture from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). For example, on amd64:
 
 ```sh
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.4/wg-quic-v0.3.4-linux-amd64.tar.gz
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.4/SHA256SUMS
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.5/wg-quic-v0.3.5-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.5/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf wg-quic-v0.3.4-linux-amd64.tar.gz
-cd wg-quic-v0.3.4-linux-amd64
+tar -xzf wg-quic-v0.3.5-linux-amd64.tar.gz
+cd wg-quic-v0.3.5-linux-amd64
 
 sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 sudo install -m 0644 wg-quic@.service /etc/systemd/system/
@@ -358,7 +369,7 @@ sudo wg-quic-quick down wg0
 The amd64 desktop Deb is an alternative for Linux desktop users:
 
 ```sh
-sudo apt install ./wg-quic-desktop-v0.3.4-linux-amd64.deb
+sudo apt install ./wg-quic-desktop-v0.3.5-linux-amd64.deb
 ```
 
 The desktop imports profiles into `/etc/wg-quic/` with mode `0600` and uses
@@ -393,7 +404,7 @@ process failure—not when reload returns `restart_required`.
 ## Windows
 
 For x64 Windows, the recommended installation is
-`wg-quic-desktop-v0.3.4-windows-x64.msi` from
+`wg-quic-desktop-v0.3.5-windows-x64.msi` from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). The per-machine MSI
 asks for elevation once, installs the UI under Program Files, and registers the
 restricted `wg-quic-manager` LocalSystem service. Use **Import** in the desktop
@@ -435,8 +446,8 @@ Download the amd64 or arm64 FreeBSD archive and install its two programs and
 rc.d script:
 
 ```sh
-tar -xzf wg-quic-v0.3.4-freebsd-amd64.tar.gz
-cd wg-quic-v0.3.4-freebsd-amd64
+tar -xzf wg-quic-v0.3.5-freebsd-amd64.tar.gz
+cd wg-quic-v0.3.5-freebsd-amd64
 install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
 install -d -m 0700 /usr/local/etc/wg-quic
@@ -460,14 +471,14 @@ After the rc.d script is installed, `wg-quic-quick up wg0` and
 
 Use the package whose OPNsense version exactly matches the firewall:
 
-- `os-wg-quic-0.3.4-opnsense-26.1-amd64.pkg`
-- `os-wg-quic-0.3.4-opnsense-26.7-amd64.pkg`
+- `os-wg-quic-0.3.5-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.3.5-opnsense-26.7-amd64.pkg`
 
 Copy it to the firewall and install it from a console or SSH session. For
 OPNsense 26.7:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.3.4-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.3.5-opnsense-26.7-amd64.pkg
 ```
 
 Then open `VPN > wg-quic`:
@@ -512,7 +523,7 @@ packages such as `kmod-tun` must match the running firmware. Install the APK
 on the router:
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.3.4-r1-openwrt-25.12.5-armsr-armv8.apk
+apk add --allow-untrusted ./wg-quic-0.3.5-r1-openwrt-25.12.5-armsr-armv8.apk
 ```
 
 The package pulls in `kmod-tun` and `ip-full`, installs both executables, and
@@ -635,9 +646,9 @@ native tooling, and `npm run version:check --prefix desktop` detects drift.
 Build and validate the six portable CLI archives locally with:
 
 ```sh
-make release-artifacts VERSION=0.3.4
+make release-artifacts VERSION=0.3.5
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.3.4-linux-amd64.tar.gz linux amd64 0.3.4
+  dist/wg-quic-v0.3.5-linux-amd64.tar.gz linux amd64 0.3.5
 ```
 
 OpenWrt and OPNsense packages must additionally match their exact target
