@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Reduced immutable receive-endpoint snapshots from 176 to 64 bytes on
+  amd64, preserving ingress sequence, roaming, and configured reply fallback.
+- Removed Salamander socket-address conversion allocations by using the
+  standard library's value-address UDP write methods.
+- Restored Linux GSO capability detection and its environment opt-out, and
+  omitted UDP_SEGMENT for single-packet writes. Made GSO failure publication
+  atomic and prevented zero-size segmentation retries on ordinary write errors.
+- Limited automatic-FEC GSO batching to healthy bypass with zero estimated
+  loss after model startup; initial bandwidth sampling and protected paths
+  use ordinary writes.
+- Corrected earlier performance attribution: the historical Linux GSO override
+  had kept the send-queue coalescer inactive in those trials.
 - Batched already-queued equal-size QUIC packets into GSO writes while
   preserving datagram boundaries, ECN, pacing admission, and MTU feedback.
 - Gave runnable DATAGRAM consumers one scheduling opportunity before dropping

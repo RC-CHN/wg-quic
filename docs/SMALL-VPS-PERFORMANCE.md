@@ -210,6 +210,9 @@ to claim a stable speedup given baseline variability and the small sample.
 At that stage the patch remained an experiment and production send batching
 was unchanged. The subsequent implementation and controller investigation are
 recorded in [Clean-link performance](CLEAN-LINK-PERFORMANCE.md).
+Later profiling also found that a historical Linux override disabled GSO in
+these trials. The apparent differences above cannot be attributed to the
+inactive GSO coalescer; see the attribution correction in that report.
 
 Validation for the retained fixes includes project tests, the complete
 quic-go suite, and race checks for bind and quic-go utilities. New regressions

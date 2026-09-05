@@ -4,6 +4,13 @@ Baseline: `cb8d193`, which includes the earlier small-VPS allocation work.
 This follow-up targets clean links while retaining WireGuard, QUIC encryption,
 automatic FEC, Salamander, and the existing production queue capacities.
 
+**Attribution correction:** subsequent profiling found that Linux GSO was
+still disabled unconditionally in `sys_conn_helper_linux.go` (an older local
+change). The send-queue coalescer below was implemented and unit-tested, but
+was not active in these Linux trials. Their measured throughput gains remain
+valid; they must not be attributed to GSO batching. The later investigation is
+recorded in [Receive-path performance](RECEIVE-PATH-PERFORMANCE.md).
+
 ## Implementation
 
 - The QUIC send queue combines equal-size, already-queued single-segment
@@ -57,7 +64,8 @@ on this host is not a measurement of a low-end VPS or hypervisor steal.
 GSO batching alone did not establish a clean TCP peak-throughput improvement:
 three interleaved trials had median 500.50 Mbit/s versus baseline 507.21.
 Under 0.5 CPU, one trial measured 115.90 versus 87.24 Mbit/s. That single pair
-is encouraging but cannot establish the size of a repeatable gain.
+cannot establish a batching gain: the Linux GSO path was disabled in both
+builds, as noted above.
 
 Offering UDP at 400 Mbit/s exposed a controller limitation: the baseline
 delivered only 61.25 Mbit/s while allocating 5.7–9.6 KiB of congestion window
