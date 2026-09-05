@@ -41,6 +41,41 @@ type endpointRoute struct {
 	configured bool
 }
 
+// receiveEndpoint is an immutable packet snapshot. Keeping reconnection and
+// configuration state on Endpoint avoids allocating that state for every
+// received datagram. WireGuard may retain this snapshot after packet delivery.
+type receiveEndpoint struct {
+	owner           *Bind
+	addr            netip.AddrPort
+	receiveSequence uint64
+	session         *session
+	route           *endpointRoute
+}
+
+func (e *receiveEndpoint) ClearSrc()           {}
+func (e *receiveEndpoint) SrcToString() string { return "" }
+func (e *receiveEndpoint) DstToString() string { return e.addr.String() }
+func (e *receiveEndpoint) DstToBytes() []byte {
+	b, _ := e.addr.MarshalBinary()
+	return b
+}
+func (e *receiveEndpoint) DstIP() netip.Addr       { return e.addr.Addr() }
+func (e *receiveEndpoint) SrcIP() netip.Addr       { return netip.Addr{} }
+func (e *receiveEndpoint) ReceiveSequence() uint64 { return e.receiveSequence }
+func (e *receiveEndpoint) SessionID() uint64 {
+	if e.session == nil {
+		return 0
+	}
+	return e.session.id
+}
+
+func (e *receiveEndpoint) currentRoute() endpointRoute {
+	if e.route != nil {
+		return *e.route
+	}
+	return endpointRoute{}
+}
+
 func (e *Endpoint) isConfigured() bool {
 	if r := e.route.Load(); r != nil {
 		return r.configured

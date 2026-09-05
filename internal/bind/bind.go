@@ -88,7 +88,7 @@ func DefaultConfig() Config {
 
 type receivedPacket struct {
 	data []byte
-	ep   *Endpoint
+	ep   *receiveEndpoint
 	// release returns data to its pool after the receive worker copies it
 	// out. Nil for frames owned by the FEC decoder.
 	release func([]byte)
@@ -1353,8 +1353,18 @@ func (b *Bind) resumeConfiguredReconnect(state *runState, remote netip.AddrPort)
 }
 
 func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
-	ep, ok := endpoint.(*Endpoint)
-	if !ok || ep.owner != b {
+	var owner *Bind
+	switch ep := endpoint.(type) {
+	case *Endpoint:
+		if ep != nil {
+			owner = ep.owner
+		}
+	case *receiveEndpoint:
+		if ep != nil {
+			owner = ep.owner
+		}
+	}
+	if owner != b {
 		return conn.ErrWrongEndpointType
 	}
 	b.mu.Lock()
@@ -1363,7 +1373,14 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 	if state == nil {
 		return net.ErrClosed
 	}
-	sess, err := b.sessionForEndpoint(state, ep, false)
+	var sess *session
+	var err error
+	switch ep := endpoint.(type) {
+	case *Endpoint:
+		sess, err = b.sessionForEndpoint(state, ep, false)
+	case *receiveEndpoint:
+		sess, err = b.sessionForReceivedEndpoint(state, ep)
+	}
 	if err != nil {
 		return err
 	}
@@ -1424,6 +1441,24 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		}
 	}
 	return nil
+}
+
+func (b *Bind) sessionForReceivedEndpoint(state *runState, ep *receiveEndpoint) (*session, error) {
+	state.mu.Lock()
+	if state.closing || state.ctx.Err() != nil {
+		state.mu.Unlock()
+		return nil, net.ErrClosed
+	}
+	sess := ep.session
+	if sess != nil && sess.state == state && !sess.closed.Load() {
+		state.mu.Unlock()
+		return sess, nil
+	}
+	state.mu.Unlock()
+	if fallback := ep.currentRoute().fallback; fallback != nil {
+		return b.sessionForEndpoint(state, fallback, false)
+	}
+	return nil, errors.New("cannot dial a connection-scoped peer endpoint")
 }
 
 func (b *Bind) receiveFunc(state *runState) conn.ReceiveFunc {
@@ -2354,15 +2389,14 @@ func (s *session) receiveLoop() {
 // initial path. WireGuard must receive the new immutable address so an
 // authenticated packet updates its roaming state and status output without
 // changing the session's configured/reconnect identity.
-func (s *session) endpointForAddrPort(remote netip.AddrPort) *Endpoint {
+func (s *session) endpointForAddrPort(remote netip.AddrPort) *receiveEndpoint {
 	remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-	snapshot := &Endpoint{
+	return &receiveEndpoint{
 		owner: s.endpoint.owner, addr: remote,
 		receiveSequence: s.endpoint.owner.receiveSequence.Add(1),
 		session:         s,
+		route:           s.receiveRoute,
 	}
-	snapshot.route.Store(s.receiveRoute)
-	return snapshot
 }
 
 func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
@@ -2385,7 +2419,7 @@ func (s *session) sendFECFeedback(feedbacks []fec.Feedback) {
 // deliverFrame parses and reassembles one WGQ1 frame. owned reports whether
 // frame stays valid after this call returns (FEC decoder output) as opposed
 // to aliasing the pooled QUIC receive datagram.
-func (s *session) deliverFrame(frame []byte, owned bool, endpoint *Endpoint, now time.Time) {
+func (s *session) deliverFrame(frame []byte, owned bool, endpoint *receiveEndpoint, now time.Time) {
 	frag, err := parseFragment(frame)
 	if err != nil {
 		return

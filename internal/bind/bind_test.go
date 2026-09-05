@@ -159,7 +159,7 @@ func TestBindRoundTripAndClose(t *testing.T) {
 	if !bytes.Equal(got, payload) {
 		t.Fatal("payload changed in transit")
 	}
-	if state := b.EndpointSessionState(source.(*Endpoint).addr); state != EndpointSessionEstablished {
+	if state := b.EndpointSessionState(source.(*receiveEndpoint).addr); state != EndpointSessionEstablished {
 		t.Fatalf("accepted endpoint session state = %q, want established", state)
 	}
 	if state := a.EndpointSessionState(aToB.(*Endpoint).addr); state != EndpointSessionEstablished {
@@ -262,7 +262,7 @@ func TestSessionTelemetrySeparatesConnectionsAndAuthenticatedPeers(t *testing.T)
 		t.Fatalf("inbound session telemetry = %#v", bSessions)
 	}
 	inbound := bSessions[0]
-	if inbound.SessionID != source.(*Endpoint).SessionID() || inbound.Role != "inbound" ||
+	if inbound.SessionID != source.(*receiveEndpoint).SessionID() || inbound.Role != "inbound" ||
 		inbound.ConfiguredEndpoint != "" || inbound.CurrentEndpoint == "" ||
 		inbound.Stats.WGRxPackets != 1 || inbound.Stats.WGRxBytes != uint64(len(payload)) ||
 		inbound.Stats.WireRxPackets == 0 || inbound.Stats.QUICPacketsReceived == 0 {
@@ -526,10 +526,8 @@ func TestBindSimultaneousDialKeepsAuthenticatedReplyPaths(t *testing.T) {
 	// If the accepted half of simultaneous dialing closes, WireGuard may
 	// briefly retain its connection-scoped endpoint. Sending through that
 	// stale identity must fall back to the maintained configured endpoint.
-	acceptedAtA := sourceAtA.(*Endpoint)
-	acceptedAtA.mu.Lock()
+	acceptedAtA := sourceAtA.(*receiveEndpoint)
 	acceptedSession := acceptedAtA.session
-	acceptedAtA.mu.Unlock()
 	acceptedSession.close()
 	fallbackPayload := []byte("A reply through maintained fallback")
 	if err := a.Send([][]byte{fallbackPayload}, sourceAtA); err != nil {
@@ -724,9 +722,6 @@ func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
 	migrated := sess.endpointForAddrPort(
 		netip.MustParseAddrPort("198.51.100.21:52821"),
 	)
-	if migrated == accepted {
-		t.Fatal("path migration reused the stale accepted endpoint")
-	}
 	if got := migrated.addr; got != netip.MustParseAddrPort("198.51.100.21:52821") {
 		t.Fatalf("migrated endpoint = %s", got)
 	}
@@ -737,7 +732,7 @@ func TestSessionPathMigrationSnapshotsCurrentRemoteEndpoint(t *testing.T) {
 		t.Fatal("migrated endpoint lost its configured fallback")
 	}
 	unchanged := sess.endpointForAddrPort(accepted.addr)
-	if unchanged == accepted || unchanged.addr != accepted.addr || unchanged.session != sess ||
+	if unchanged.addr != accepted.addr || unchanged.session != sess ||
 		unchanged.currentRoute().fallback != configured {
 		t.Fatalf("unchanged QUIC path snapshot = %#v", unchanged)
 	}
@@ -877,10 +872,8 @@ func TestBindDoesNotDialAClosedConnectionScopedEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, source := receiveOne(t, bReceive[0])
-	accepted := source.(*Endpoint)
-	accepted.mu.Lock()
+	accepted := source.(*receiveEndpoint)
 	acceptedSession := accepted.session
-	accepted.mu.Unlock()
 	acceptedSession.close()
 
 	err = b.Send([][]byte{[]byte("must not reverse dial")}, accepted)
@@ -1029,8 +1022,10 @@ func TestReceivedEndpointsCarryImmutableIngressSequence(t *testing.T) {
 	session := &session{endpoint: configured}
 	first := session.endpointForAddrPort(configured.addr)
 	second := session.endpointForAddrPort(configured.addr)
-	if first == configured || second == configured {
-		t.Fatal("received packet reused mutable configured endpoint identity")
+	want := configured.addr
+	configured.addr = netip.MustParseAddrPort("198.51.100.20:443")
+	if first.addr != want || second.addr != want {
+		t.Fatal("configuration changes mutated an outstanding packet endpoint")
 	}
 	if first.ReceiveSequence() != 1 || second.ReceiveSequence() != 2 || bind.ReceiveSequence() != 2 {
 		t.Fatalf(

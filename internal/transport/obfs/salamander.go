@@ -263,7 +263,7 @@ func (c *SalamanderConn) WriteToUDP(payload []byte, addr *net.UDPAddr) (int, err
 	if err != nil {
 		return 0, err
 	}
-	written, err := c.UDPConn.WriteToUDP(c.writeBuf[:n], addr)
+	written, err := c.UDPConn.WriteToUDPAddrPort(c.writeBuf[:n], addr.AddrPort())
 	if err != nil {
 		return 0, err
 	}
@@ -311,7 +311,7 @@ func (c *SalamanderConn) WriteMsgUDP(payload, oob []byte, addr *net.UDPAddr) (n,
 	if err != nil {
 		return 0, 0, err
 	}
-	written, oobn, err := c.UDPConn.WriteMsgUDP(c.writeBuf[:encoded], oob, addr)
+	written, oobn, err := c.UDPConn.WriteMsgUDPAddrPort(c.writeBuf[:encoded], oob, addr.AddrPort())
 	if err != nil {
 		return 0, oobn, err
 	}
