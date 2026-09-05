@@ -2,10 +2,15 @@ services:
   a:
     image: wg-quic-bench:local
     privileged: true
+    cpus: ${WGQ_BENCH_CPUS:-0}
+    mem_limit: ${WGQ_BENCH_MEMORY:-0}
+    memswap_limit: ${WGQ_BENCH_MEMORY:-0}
     volumes:
       - ${WGQ_BENCH_CONFIG_DIR}/a.conf:/run/wg-quic-benchmark/wg0.conf:ro
       - ${WGQ_BENCH_CONFIG_DIR}/a.uapi:/run/wg-quic-benchmark/wg0.uapi:ro
     environment:
+      GOMAXPROCS: ${WGQ_BENCH_GOMAXPROCS:-}
+      GOMEMLIMIT: ${WGQ_BENCH_GOMEMLIMIT:-}
       WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
       WGQ_BENCH_ADDRESS: 10.88.0.1/32
       WGQ_BENCH_PEER_ADDRESS: 10.88.0.2/32
@@ -18,10 +23,15 @@ services:
   b:
     image: wg-quic-bench:local
     privileged: true
+    cpus: ${WGQ_BENCH_CPUS:-0}
+    mem_limit: ${WGQ_BENCH_MEMORY:-0}
+    memswap_limit: ${WGQ_BENCH_MEMORY:-0}
     volumes:
       - ${WGQ_BENCH_CONFIG_DIR}/b.conf:/run/wg-quic-benchmark/wg0.conf:ro
       - ${WGQ_BENCH_CONFIG_DIR}/b.uapi:/run/wg-quic-benchmark/wg0.uapi:ro
     environment:
+      GOMAXPROCS: ${WGQ_BENCH_GOMAXPROCS:-}
+      GOMEMLIMIT: ${WGQ_BENCH_GOMEMLIMIT:-}
       WGQ_BENCH_TRANSPORT: ${WGQ_BENCH_TRANSPORT:-wg-quic}
       WGQ_BENCH_ADDRESS: 10.88.0.2/32
       WGQ_BENCH_PEER_ADDRESS: 10.88.0.1/32

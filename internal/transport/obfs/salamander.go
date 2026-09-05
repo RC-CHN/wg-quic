@@ -541,6 +541,9 @@ func encodeSegmentsWithPair(payload, output []byte, pair *digestPair, segmentSiz
 type digestPair struct {
 	hint   hash.Hash
 	stream hash.Hash
+	// Hash.Sum takes a slice through an interface. Keep its backing store
+	// here so the two per-packet sums don't escape as fresh heap objects.
+	sum [blake2b.Size256]byte
 }
 
 func newDigestPair(key Key) *digestPair {
@@ -556,23 +559,21 @@ func newDigestPair(key Key) *digestPair {
 }
 
 func (p *digestPair) deriveHint(salt []byte) [SalamanderHintSize]byte {
-	var sum [blake2b.Size256]byte
 	p.hint.Reset()
 	_, _ = p.hint.Write(hintDomain)
 	_, _ = p.hint.Write(salt)
-	p.hint.Sum(sum[:0])
+	p.hint.Sum(p.sum[:0])
 	var hint [SalamanderHintSize]byte
-	copy(hint[:], sum[:SalamanderHintSize])
+	copy(hint[:], p.sum[:SalamanderHintSize])
 	return hint
 }
 
 func (p *digestPair) deriveStream(salt []byte) [blake2b.Size256]byte {
-	var stream [blake2b.Size256]byte
 	p.stream.Reset()
 	_, _ = p.stream.Write(streamDomain)
 	_, _ = p.stream.Write(salt)
-	p.stream.Sum(stream[:0])
-	return stream
+	p.stream.Sum(p.sum[:0])
+	return p.sum
 }
 
 // digestPairFor returns the cached digest pair for key, building it on first
@@ -590,24 +591,24 @@ func digestPairFor(cache *map[Key]*digestPair, key Key) *digestPair {
 }
 
 // xorWords XORs src into dst with the 32-byte stream repeated. Processing
-// eight bytes per step produces exactly the same wire bytes as a per-byte
-// loop.
+// a whole stream period per step lets the compiler eliminate the inner
+// loop and its repeated bounds checks. The result is independent of host
+// endianness and supports disjoint buffers or exact in-place operation.
 func xorWords(dst, src []byte, stream *[blake2b.Size256]byte) {
-	words := [4]uint64{
-		binary.LittleEndian.Uint64(stream[0:8]),
-		binary.LittleEndian.Uint64(stream[8:16]),
-		binary.LittleEndian.Uint64(stream[16:24]),
-		binary.LittleEndian.Uint64(stream[24:32]),
+	w0 := binary.LittleEndian.Uint64(stream[0:8])
+	w1 := binary.LittleEndian.Uint64(stream[8:16])
+	w2 := binary.LittleEndian.Uint64(stream[16:24])
+	w3 := binary.LittleEndian.Uint64(stream[24:32])
+	for len(src) >= blake2b.Size256 {
+		_ = dst[31]
+		binary.LittleEndian.PutUint64(dst[0:8], binary.LittleEndian.Uint64(src[0:8])^w0)
+		binary.LittleEndian.PutUint64(dst[8:16], binary.LittleEndian.Uint64(src[8:16])^w1)
+		binary.LittleEndian.PutUint64(dst[16:24], binary.LittleEndian.Uint64(src[16:24])^w2)
+		binary.LittleEndian.PutUint64(dst[24:32], binary.LittleEndian.Uint64(src[24:32])^w3)
+		dst, src = dst[32:], src[32:]
 	}
-	offset := 0
-	for ; offset+blake2b.Size256 <= len(src); offset += blake2b.Size256 {
-		for i, word := range words {
-			at := offset + i*8
-			binary.LittleEndian.PutUint64(dst[at:], binary.LittleEndian.Uint64(src[at:])^word)
-		}
-	}
-	for ; offset < len(src); offset++ {
-		dst[offset] = src[offset] ^ stream[offset%blake2b.Size256]
+	for i := range src {
+		dst[i] = src[i] ^ stream[i]
 	}
 }
 

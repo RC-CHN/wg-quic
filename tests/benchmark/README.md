@@ -147,6 +147,29 @@ end-to-end aggregate.
 
 ## Commands
 
+For a small VPS trial, limit each endpoint container to one CPU and 512 MiB,
+disable swap, and give each Go process a 192 MiB soft memory budget:
+
+```sh
+WGQ_BENCH_CPUS=1 WGQ_BENCH_MEMORY=512m \
+WGQ_BENCH_GOMAXPROCS=1 WGQ_BENCH_GOMEMLIMIT=192MiB \
+MODE=fec-obfs WORKLOAD=tcp LINK_PROFILE=custom IMPAIRMENT=symmetric \
+RATE_MBIT=100 ONE_WAY_DELAY_MS=20 LOSS_PCT=1 DURATION=15 \
+./tests/benchmark/run.sh trial
+```
+
+Resource limits are recorded in each trial's `parameters.json`. The container
+memory limit covers the core, supervisor, traffic generator, and diagnostics;
+`GOMEMLIMIT` is a soft Go runtime limit per process, not a process RSS limit.
+Use a new `RUN_ID` for each resource setting. The defaults leave resources
+unrestricted. Repeat with `WGQ_BENCH_CPUS=0.5` to impose CPU quota throttling;
+this tests reduced CPU availability but does not reproduce hypervisor steal
+time. Real VPS measurements must also record guest CPU steal.
+
+Use the existing CPU, RSS, allocation, GC, stall, and receive-queue metrics to
+judge results alongside goodput. A higher throughput with sustained queue loss
+or much longer stalls is not an improvement for this target.
+
 Run one short sanity check:
 
 ```sh

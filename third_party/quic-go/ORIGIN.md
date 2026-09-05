@@ -18,3 +18,7 @@ repository.
 Local changes must be made in this directory, retain the upstream MIT license,
 and include tests in this module. CI runs both this module's own test suite and
 the root wg-quic integration tests.
+
+The owned DATAGRAM send pool stores fixed-size array pointers so returning a
+buffer does not allocate a slice header. The ownership and capacity checks are
+unchanged; pool lifecycle tests and benchmarks cover the local change.

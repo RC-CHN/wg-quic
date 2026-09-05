@@ -61,12 +61,11 @@ const DatagramSendBufferSize = protocol.MaxPacketBufferSize
 
 // datagramSendBufferPool recycles buffers handed to SendDatagramOwned. The
 // packer returns each buffer once the frame has been serialized into a QUIC
-// packet. The pool stores *[]byte so recycling needs only a capacity check; a
-// capacity mismatch simply falls back to the GC.
+// packet. Array pointers retain the backing store without allocating a new
+// slice header on every release. A capacity mismatch falls back to the GC.
 var datagramSendBufferPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, DatagramSendBufferSize)
-		return &b
+		return new([DatagramSendBufferSize]byte)
 	},
 }
 
@@ -74,8 +73,8 @@ var datagramSendBufferPool = sync.Pool{
 // datagram. Callers must slice it from offset zero and pass the result to
 // SendDatagramOwned; quic-go recycles the buffer after serialization.
 func AcquireDatagramSendBuffer() []byte {
-	p := datagramSendBufferPool.Get().(*[]byte)
-	return *p
+	p := datagramSendBufferPool.Get().(*[DatagramSendBufferSize]byte)
+	return p[:]
 }
 
 // releaseDatagramSendBuffer returns a buffer obtained from
@@ -86,8 +85,7 @@ func releaseDatagramSendBuffer(data []byte) {
 	if cap(data) != DatagramSendBufferSize {
 		return
 	}
-	full := data[:DatagramSendBufferSize]
-	datagramSendBufferPool.Put(&full)
+	datagramSendBufferPool.Put((*[DatagramSendBufferSize]byte)(data[:DatagramSendBufferSize]))
 }
 
 // ReleaseDatagramSendBuffer is the exported form of releaseDatagramSendBuffer

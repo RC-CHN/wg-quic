@@ -907,6 +907,10 @@ run_trial() {
 		--arg link_profile "$link_profile" \
 		--arg link_schedule "${LINK_SCHEDULE:-}" \
 		--arg workload "$workload" \
+		--arg cpu_limit "${WGQ_BENCH_CPUS:-0}" \
+		--arg memory_limit "${WGQ_BENCH_MEMORY:-0}" \
+		--arg gomaxprocs "${WGQ_BENCH_GOMAXPROCS:-}" \
+		--arg gomemlimit "${WGQ_BENCH_GOMEMLIMIT:-}" \
 		--arg impairment "$link_impairment" \
 		--argjson repeat "$repeat" \
 		--argjson fwd_rate_mbit "$link_fwd_rate" \
@@ -937,6 +941,13 @@ run_trial() {
 			link_profile: $link_profile,
 			link_schedule: $link_schedule,
 			workload: $workload,
+			resources: {
+				cpus: $cpu_limit,
+				memory: $memory_limit,
+				memory_swap: $memory_limit,
+				gomaxprocs: $gomaxprocs,
+				gomemlimit: $gomemlimit
+			},
 			repeat: $repeat,
 			link: {
 				impairment: $impairment,
@@ -1363,6 +1374,8 @@ The trial command is configured with environment variables. Common values:
   MODES='direct-wireguard-go nofec-plain nofec-obfs fec-plain fec-obfs'
   OFFERED_RATES='10 25 50 100 200 500'
   DURATION=10 PARALLEL=1 OFFERED_MBIT=50 MTU=1280
+  WGQ_BENCH_CPUS=1 WGQ_BENCH_MEMORY=512m
+  WGQ_BENCH_GOMAXPROCS=1 WGQ_BENCH_GOMEMLIMIT=192MiB
 EOF
 }
 

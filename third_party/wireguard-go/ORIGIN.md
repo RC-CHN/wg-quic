@@ -37,6 +37,10 @@ Initial local changes:
    consumes a one-shot shutdown notification but Windows reports a
    non-canonical cancellation error.
 
+7. Device creation caps encryption, decryption, and handshake worker counts
+   at the smaller of the visible CPU count and GOMAXPROCS. CPU-quota-limited
+   deployments no longer create workers for every host CPU.
+
 From this point, wg-quic production code and tests use this directory rather
 than downloading `golang.zx2c4.com/wireguard`. Future upstream synchronization
 is an explicit code-review operation; behavior changes are made and tested in

@@ -35,6 +35,10 @@ type Encoder struct {
 	codecs        map[codecDimensions]reedsolomon.Encoder
 	groups        []*encoderGroup
 	current       int
+	// Encoding is synchronous and session-local. Reuse parity workspace;
+	// marshalPacket copies it before any packet leaves the encoder.
+	shards [MaxDataShards + MaxParityShards][]byte
+	parity [MaxParityShards][]byte
 	// bypass reuses the single-frame result slice returned on the healthy
 	// fast path, where the encoder just forwards the frame without FEC work.
 	// The encoder is session-local and Add is only called from one goroutine,
@@ -163,7 +167,10 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 		e.epochSnapshot.Store(uint32(e.epoch))
 	}
 	e.lastParity = targetParity
-	e.groupParity = e.controller.Parity(MaxDataShards)
+	// Use the same atomic snapshot for epoch selection and group protection;
+	// a second, locked controller read on every frame can observe a different
+	// feedback generation and needlessly contends with the receive loop.
+	e.groupParity = targetParity
 	if e.groupParity == 0 {
 		// Probe after a run of raw healthy-path frames. Most frames avoid
 		// all FEC allocation, framing, close, and feedback work.
@@ -177,11 +184,21 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 		group.epoch = e.epoch
 		group.parity = e.groupParity
 	}
-	shard := make([]byte, 2+len(frame))
+	index := len(group.data)
+	if index < cap(group.data) {
+		group.data = group.data[:index+1]
+	} else {
+		group.data = append(group.data, nil)
+	}
+	shard := group.data[index]
+	if cap(shard) < 2+len(frame) {
+		shard = make([]byte, 2+len(frame))
+	} else {
+		shard = shard[:2+len(frame)]
+	}
 	binary.BigEndian.PutUint16(shard[:2], uint16(len(frame)))
 	copy(shard[2:], frame)
-	index := len(group.data)
-	group.data = append(group.data, shard)
+	group.data[index] = shard
 	output = append(output, marshalPacket(packet{
 		kind: KindData, epoch: group.epoch, groupID: group.groupID, index: uint16(index), payload: shard,
 	}))
@@ -236,14 +253,25 @@ func (e *Encoder) flushGroup(group *encoderGroup) ([][]byte, error) {
 		for _, shard := range group.data {
 			shardSize = max(shardSize, len(shard))
 		}
-		shards := make([][]byte, k+r)
+		shards := e.shards[:k+r]
+		// Don't keep old group buffers alive after a profile reconfiguration.
+		defer clear(shards)
 		for i, shard := range group.data {
-			// Encode only reads data shards, so a shard that already matches
-			// the group size is passed through without a padding copy.
-			shards[i] = padShard(shard, shardSize)
+			// These are encoder-owned copies. Reuse their capacity for padding,
+			// explicitly clearing bytes left over from an earlier, longer frame.
+			if cap(shard) < shardSize {
+				shards[i] = padShard(shard, shardSize)
+			} else {
+				shards[i] = shard[:shardSize]
+				clear(shards[i][len(shard):])
+			}
+			group.data[i] = shards[i]
 		}
-		for i := k; i < k+r; i++ {
-			shards[i] = make([]byte, shardSize)
+		for i := 0; i < r; i++ {
+			if cap(e.parity[i]) < shardSize {
+				e.parity[i] = make([]byte, shardSize)
+			}
+			shards[k+i] = e.parity[i][:shardSize]
 		}
 		codec, err := cachedCodec(e.codecs, k, r, shardSize)
 		if err != nil {

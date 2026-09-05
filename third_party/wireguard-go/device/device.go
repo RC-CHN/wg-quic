@@ -335,7 +335,10 @@ func NewDeviceWithOptions(tunDevice tun.Device, bind conn.Bind, logger *Logger, 
 
 	// start workers
 
-	cpus := runtime.NumCPU()
+	// A container's CPU quota or an explicit GOMAXPROCS can be much smaller
+	// than the host's visible CPU count. Extra crypto and handshake workers
+	// add stacks and queue contention without adding execution capacity.
+	cpus := min(runtime.NumCPU(), runtime.GOMAXPROCS(0))
 	device.state.stopping.Wait()
 	device.queue.encryption.wg.Add(cpus) // One for each RoutineHandshake
 	for i := 0; i < cpus; i++ {

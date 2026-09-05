@@ -26,3 +26,26 @@ func TestReleaseDatagramSendBufferIgnoresForeignBuffers(t *testing.T) {
 	small := make([]byte, 10)
 	releaseDatagramSendBuffer(small)
 }
+
+func TestDatagramSendPoolKeepsOutstandingBuffersDistinct(t *testing.T) {
+	first := AcquireDatagramSendBuffer()
+	second := AcquireDatagramSendBuffer()
+	defer releaseDatagramSendBuffer(first)
+	defer releaseDatagramSendBuffer(second)
+	first[0], second[0] = 1, 2
+	if first[0] != 1 || len(first) != DatagramSendBufferSize || len(second) != DatagramSendBufferSize {
+		t.Fatal("outstanding buffers alias or have the wrong length")
+	}
+	// A zero-length view still owns the complete pooled backing array.
+	third := AcquireDatagramSendBuffer()
+	releaseDatagramSendBuffer(third[:0])
+}
+
+func BenchmarkDatagramSendBufferPool(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		buf := AcquireDatagramSendBuffer()
+		buf[0] = 1
+		releaseDatagramSendBuffer(buf[:1200])
+	}
+}

@@ -54,6 +54,9 @@ type Decoder struct {
 	completed   map[uint64]*completedGroup
 	codecs      map[codecDimensions]reedsolomon.Encoder
 	lastGroupID uint64
+	// Earliest possible expiry. Deletions may leave this conservatively
+	// early, but insertions must always move it earlier when necessary.
+	nextExpiry time.Time
 }
 
 func NewDecoder() *Decoder {
@@ -95,6 +98,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 			data: make(map[int][]byte), parity: make(map[int][]byte),
 		}
 		d.groups[p.groupID] = group
+		d.scheduleExpiry(now.Add(groupTTL))
 	}
 	if group.epoch != p.epoch {
 		return result, errors.New("FEC epoch changed within group")
@@ -152,6 +156,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 			missing:       feedback.Missing,
 			recovered:     feedback.Recovered,
 		}
+		d.scheduleExpiry(now.Add(completionGrace))
 	}
 	return result, nil
 }
@@ -353,6 +358,14 @@ func decodeDataShard(shard []byte) ([]byte, error) {
 }
 
 func (d *Decoder) expire(now time.Time) []Feedback {
+	// A completed group stays around for reordering grace. Scanning every
+	// retained group on every packet costs O(packets * retained groups).
+	// Skip the scan until a deadline can actually have passed, preserving
+	// the existing strict-greater-than expiry boundary.
+	if d.nextExpiry.IsZero() || !now.After(d.nextExpiry) {
+		return nil
+	}
+	d.nextExpiry = time.Time{}
 	var feedback []Feedback
 	for id, group := range d.groups {
 		if now.Sub(group.created) > groupTTL {
@@ -369,6 +382,8 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 				})
 			}
 			delete(d.groups, id)
+		} else {
+			d.scheduleExpiry(group.created.Add(groupTTL))
 		}
 	}
 	for id, done := range d.completed {
@@ -382,9 +397,17 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 				Missing: done.missing, Recovered: done.recovered, Total: uint16(done.k),
 			})
 			delete(d.completed, id)
+		} else {
+			d.scheduleExpiry(done.finalized.Add(completionGrace))
 		}
 	}
 	return feedback
+}
+
+func (d *Decoder) scheduleExpiry(at time.Time) {
+	if d.nextExpiry.IsZero() || at.Before(d.nextExpiry) {
+		d.nextExpiry = at
+	}
 }
 
 func (d *Decoder) limitCompleted() {

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Reduced Salamander per-packet CPU work and eliminated digest-result heap
+  allocations by reusing scratch storage and unrolling the repeating XOR.
+- Removed the per-release slice-header allocation from the QUIC DATAGRAM send
+  buffer pool.
+- Reused bounded FEC encoder data/parity workspace, cleared recycled padding,
+  and used one parity snapshot per frame. Deferred receiver expiry scans until
+  a group deadline can pass, preserving reordering grace and TTL behavior.
+- Capped WireGuard worker counts by available Go execution parallelism for
+  CPU-quota-limited deployments.
+- Added optional CPU, memory, swap, and Go runtime budgets to the controlled
+  benchmark, with per-trial resource metadata for small VPS measurements.
+
 ## v0.3.5 - 2026-09-02
 
 Post-ACK receive-loss observability and receive-hot-path efficiency release.
