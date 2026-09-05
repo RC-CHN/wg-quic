@@ -71,6 +71,20 @@ func TestSendConnDetectGSOFailure(t *testing.T) {
 	require.False(t, c.capabilities().GSO)
 }
 
+func TestSendConnDoesNotSegmentAnOrdinaryWriteError(t *testing.T) {
+	if !platformSupportsGSO {
+		t.Skip("GSO is not supported on this platform")
+	}
+	remote := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 443}
+	rawConn := NewMockRawConn(gomock.NewController(t))
+	rawConn.EXPECT().LocalAddr()
+	rawConn.EXPECT().capabilities().Return(connCapabilities{GSO: true}).AnyTimes()
+	rawConn.EXPECT().WritePacket([]byte("packet"), remote, gomock.Any(), uint16(0), protocol.ECT1).Return(0, errGSO)
+	c := newSendConn(rawConn, remote, packetInfo{}, utils.DefaultLogger)
+	require.ErrorIs(t, c.Write([]byte("packet"), 0, protocol.ECT1), errGSO)
+	require.True(t, c.capabilities().GSO)
+}
+
 func TestSendConnSendmsgFailures(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("only Linux exhibits this bug, we don't need to work around it on other platforms")

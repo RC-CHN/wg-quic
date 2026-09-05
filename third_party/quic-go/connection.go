@@ -219,6 +219,9 @@ type Conn struct {
 	keepAliveInterval time.Duration
 
 	datagramQueue *datagramQueue
+	// Applications using FEC can suppress GSO while protection is active, so
+	// one lost network batch cannot erase a whole group of related shards.
+	gsoBatchingDisabled atomic.Bool
 	// currentDatagramRemoteAddr is set only while the serialized receive loop
 	// handles one packet's frames.
 	currentDatagramRemoteAddr net.Addr
@@ -926,6 +929,13 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 // recorded before the connection became visible to the application.
 func (c *Conn) SetEventObserver(observer func(ConnectionEvent)) {
 	c.connStats.SetEventObserver(observer)
+}
+
+// SetGSOBatchingEnabled controls batching of subsequently packed packets.
+// It cannot enable GSO on an unsupported socket or undo a device failure.
+// Already queued packets retain their original batching decision.
+func (c *Conn) SetGSOBatchingEnabled(enabled bool) {
+	c.gsoBatchingDisabled.Store(!enabled)
 }
 
 // ObserveFECFeedback supplies application-level loss outcomes to the model
@@ -2680,7 +2690,7 @@ func (c *Conn) sendPackets(now monotime.Time) error {
 		return nil
 	}
 
-	if c.conn.capabilities().GSO {
+	if c.conn.capabilities().GSO && !c.gsoBatchingDisabled.Load() {
 		return c.sendPacketsWithGSO(now)
 	}
 	return c.sendPacketsWithoutGSO(now)

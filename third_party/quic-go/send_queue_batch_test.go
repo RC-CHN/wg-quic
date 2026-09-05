@@ -66,6 +66,9 @@ func TestSendQueueCoalescesWithoutChangingDatagrams(t *testing.T) {
 				}
 				conn.EXPECT().Write(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 					func(data []byte, gso uint16, ecn protocol.ECN) error {
+						if gso != 0 {
+							require.Greater(t, len(data), int(gso), "single packets must use ordinary writes")
+						}
 						got = append(got, split(data, gso, ecn)...)
 						return nil
 					},

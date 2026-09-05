@@ -32,6 +32,19 @@ bounded GSO writes without padding or waiting. Tests cover datagram order and
 contents, ECN boundaries, disabled GSO, existing batches, buffer capacity,
 shutdown, write errors, and segment-sized MTU feedback.
 
+Linux now uses the upstream kernel/socket GSO probe again, honoring
+`QUIC_GO_DISABLE_GSO=true`. An older local override had disabled GSO
+unconditionally, so the coalescer was inactive in earlier Linux measurements.
+The queue omits UDP_SEGMENT when the final write contains only one packet.
+Interface-specific GSO errors publish the fallback state atomically; ordinary
+writes cannot enter a zero-segment-size retry loop. Tests cover capability
+detection, explicit disable, probe failures, single-packet writes, and fallback.
+The local `SetGSOBatchingEnabled` connection method can suppress subsequent
+batching without changing socket capabilities. The carrier disables batching
+during automatic FEC protection and enables it only when the controller requests
+zero parity with zero estimated loss after model startup. Tests cover suppression,
+re-enabling, and unsupported sockets.
+
 The local model controller requires fresh delivery measurements before
 counting startup plateau rounds. Its congestion-window RTT budget includes
 pacing timer granularity on sub-millisecond paths; minimum-rate calculations

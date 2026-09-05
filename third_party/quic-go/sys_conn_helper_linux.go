@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/netip"
 	"os"
+	"strconv"
 	"syscall"
 	"unsafe"
 
@@ -60,12 +61,24 @@ func parseIPv4PktInfo(body []byte) (ip netip.Addr, ifIndex uint32, ok bool) {
 	return netip.AddrFrom4(*(*[4]byte)(body[8:12])), binary.NativeEndian.Uint32(body), true
 }
 
-// isGSOEnabled reports whether the kernel supports GSO. wg-quic is
-// DATAGRAM-only: its short-header packets are rarely full-size, so GSO
-// cannot batch them and the UDP_SEGMENT path only adds overhead. GSO is
-// therefore disabled unconditionally.
-func isGSOEnabled(syscall.RawConn) bool {
-	return false
+// isGSOEnabled tests kernel support. Equal-size DATAGRAM packets can now be
+// batched by the send queue even when smaller than the path MTU. A later
+// interface-specific failure still uses the send connection's GSO fallback.
+func isGSOEnabled(conn syscall.RawConn) bool {
+	if kernelVersionMajor < 5 {
+		return false
+	}
+	disabled, err := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_GSO"))
+	if err == nil && disabled {
+		return false
+	}
+	var serr error
+	if err := conn.Control(func(fd uintptr) {
+		_, serr = unix.GetsockoptInt(int(fd), unix.IPPROTO_UDP, unix.UDP_SEGMENT)
+	}); err != nil {
+		return false
+	}
+	return serr == nil
 }
 
 func appendUDPSegmentSizeMsg(b []byte, size uint16) []byte {

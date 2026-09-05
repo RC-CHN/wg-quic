@@ -2088,6 +2088,12 @@ func (s *session) sendLoop() {
 	s.mu.Lock()
 	qconn := s.conn
 	s.mu.Unlock()
+	if s.fecEncoder != nil {
+		// Start with ordinary writes while the FEC controller assesses the
+		// path. Grouped data shards can otherwise be lost together by a queue
+		// or shaper operating before segmentation, defeating their parity.
+		qconn.SetGSOBatchingEnabled(false)
+	}
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		<-timer.C
@@ -2183,6 +2189,12 @@ func (s *session) sendLoop() {
 			stats := qconn.Stats()
 			s.fecEncoder.ObservePathRTT(stats.PropagationRTT)
 			s.fecEncoder.ObserveTransport(stats.PacketsSent, stats.PacketsLost)
+			parity, lossPPM := s.fecEncoder.Stats()
+			// Keep the initial delivery samples on ordinary writes. Enabling
+			// batches during model startup can slow the bandwidth ramp even
+			// on a clean path. Residual loss also keeps batching suppressed.
+			pastStartup := s.state.cfg.CongestionMode != "model" || stats.CongestionModelState != 0
+			qconn.SetGSOBatchingEnabled(parity == 0 && lossPPM == 0 && pastStartup)
 		}
 		packets, err := s.fecEncoder.Add(frame)
 		if err != nil || !sendPackets(packets) {

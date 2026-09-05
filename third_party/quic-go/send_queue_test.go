@@ -28,7 +28,7 @@ func TestSendQueueSendOnePacket(t *testing.T) {
 		q := newSendQueue(c)
 
 		written := make(chan struct{})
-		c.EXPECT().Write([]byte("foobar"), uint16(10), protocol.ECT1).Do(
+		c.EXPECT().Write([]byte("foobar"), uint16(0), protocol.ECT1).Do(
 			func([]byte, uint16, protocol.ECN) error { close(written); return nil },
 		)
 

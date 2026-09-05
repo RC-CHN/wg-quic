@@ -55,7 +55,7 @@ func TestSendQueueBatchReportsSegmentMTUAndContinues(t *testing.T) {
 		}
 		gomock.InOrder(
 			conn.EXPECT().Write(gomock.Len(2600), uint16(1300), protocol.ECT1).Return(unix.EMSGSIZE),
-			conn.EXPECT().Write(gomock.Len(1000), uint16(1452), protocol.ECT1).Return(nil),
+			conn.EXPECT().Write(gomock.Len(1000), uint16(0), protocol.ECT1).Return(nil),
 		)
 		done := make(chan error, 1)
 		go func() { done <- q.Run() }()

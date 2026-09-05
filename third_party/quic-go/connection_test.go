@@ -2202,6 +2202,9 @@ func TestConnectionGSOBatch(t *testing.T) {
 			connectionOptSentPacketHandler(sph),
 		)
 
+		tc.conn.SetGSOBatchingEnabled(false)
+		tc.conn.SetGSOBatchingEnabled(true)
+
 		// allow packets to be sent
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().TimeUntilSend().AnyTimes()
@@ -2255,6 +2258,86 @@ func TestConnectionGSOBatch(t *testing.T) {
 	})
 }
 
+func TestConnectionGSOBatchDisabled(t *testing.T) {
+	for _, policy := range []struct {
+		name               string
+		socketGSO, enabled bool
+	}{
+		{"application disables supported GSO", true, false},
+		{"application cannot enable unsupported GSO", false, true},
+	} {
+		t.Run(policy.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mockCtrl := gomock.NewController(t)
+				sph := mockackhandler.NewMockSentPacketHandler(mockCtrl)
+				tc := newServerTestConnection(t,
+					mockCtrl,
+					nil,
+					policy.socketGSO,
+					connectionOptHandshakeConfirmed(),
+					connectionOptSentPacketHandler(sph),
+				)
+
+				tc.conn.SetGSOBatchingEnabled(policy.enabled)
+
+				// allow packets to be sent
+				sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
+				sph.EXPECT().TimeUntilSend().AnyTimes()
+				sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+				sph.EXPECT().GetLossDetectionTimeout().AnyTimes()
+				sph.EXPECT().ECNMode(gomock.Any()).Return(protocol.ECT1).AnyTimes()
+
+				maxPacketSize := tc.conn.maxPacketSize()
+				var expectedPackets [][]byte
+				for i := range 4 {
+					data := bytes.Repeat([]byte{byte(i)}, int(maxPacketSize))
+					expectedPackets = append(expectedPackets, data)
+
+					tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+						func(buffer *packetBuffer, count protocol.ByteCount, t monotime.Time, version protocol.Version) (shortHeaderPacket, error) {
+							buffer.Data = append(buffer.Data, data...)
+							return shortHeaderPacket{PacketNumber: protocol.PacketNumber(i)}, nil
+						},
+					)
+				}
+				done := make(chan struct{})
+				tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(shortHeaderPacket{}, errNothingToPack)
+				for i, data := range expectedPackets {
+					call := tc.sendConn.EXPECT().Write(data, uint16(0), protocol.ECT1)
+					if i == len(expectedPackets)-1 {
+						call.DoAndReturn(func([]byte, uint16, protocol.ECN) error { close(done); return nil })
+					}
+				}
+
+				errChan := make(chan error, 1)
+				go func() { errChan <- tc.conn.run() }()
+				tc.conn.scheduleSending()
+
+				synctest.Wait()
+
+				select {
+				case <-done:
+				default:
+					t.Fatal("should have sent a packet")
+				}
+
+				// test teardown
+				tc.connRunner.EXPECT().Remove(gomock.Any()).AnyTimes()
+				tc.conn.destroy(nil)
+
+				synctest.Wait()
+
+				select {
+				case err := <-errChan:
+					require.NoError(t, err)
+				default:
+					t.Fatal("connection did not stop")
+				}
+			})
+		})
+	}
+}
+
 // Send a GSO batch, until a packet smaller than the maximum size is packed
 func TestConnectionGSOBatchPacketSize(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -2295,7 +2378,7 @@ func TestConnectionGSOBatchPacketSize(t *testing.T) {
 			))
 		}
 		// The smaller (fourth) packet concluded this GSO batch, but the send loop will immediately start composing the next batch.
-		// We therefore send a "foobar", so we can check that we're actually generating two GSO batches.
+		// The following single packet is written separately without UDP_SEGMENT.
 		calls = append(calls,
 			tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 				func(buffer *packetBuffer, count protocol.ByteCount, t monotime.Time, version protocol.Version) (shortHeaderPacket, error) {
@@ -2312,7 +2395,7 @@ func TestConnectionGSOBatchPacketSize(t *testing.T) {
 		done := make(chan struct{})
 		gomock.InOrder(
 			tc.sendConn.EXPECT().Write(expectedData, uint16(maxPacketSize), protocol.ECT1),
-			tc.sendConn.EXPECT().Write([]byte("foobar"), uint16(maxPacketSize), protocol.ECT1).DoAndReturn(
+			tc.sendConn.EXPECT().Write([]byte("foobar"), uint16(0), protocol.ECT1).DoAndReturn(
 				func([]byte, uint16, protocol.ECN) error { close(done); return nil },
 			),
 		)
@@ -2398,7 +2481,7 @@ func TestConnectionGSOBatchECN(t *testing.T) {
 
 		done3 := make(chan struct{})
 		tc.sendConn.EXPECT().Write(expectedData, uint16(maxPacketSize), protocol.ECT1)
-		tc.sendConn.EXPECT().Write([]byte("foobar"), uint16(maxPacketSize), protocol.ECNCE).DoAndReturn(
+		tc.sendConn.EXPECT().Write([]byte("foobar"), uint16(0), protocol.ECNCE).DoAndReturn(
 			func([]byte, uint16, protocol.ECN) error { close(done3); return nil },
 		)
 

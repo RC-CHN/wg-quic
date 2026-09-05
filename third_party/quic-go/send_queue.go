@@ -132,6 +132,11 @@ func (h *sendQueue) Run() error {
 			}
 		}
 		e, pending = h.coalesce(e)
+		// UDP_SEGMENT adds kernel work even when it contains only one packet.
+		// Keep ordinary writes for single packets and use GSO only for batches.
+		if len(e.buf.Data) <= int(e.gsoSize) {
+			e.gsoSize = 0
+		}
 		err := h.conn.Write(e.buf.Data, e.gsoSize, e.ecn)
 		if isSendMsgSizeErr(err) && h.onPathMTUTooLarge != nil {
 			size := protocol.ByteCount(len(e.buf.Data))

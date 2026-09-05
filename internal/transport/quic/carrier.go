@@ -197,6 +197,10 @@ func (c *Connection) SetEventObserver(observer func(ConnectionEvent)) {
 	c.conn.SetEventObserver(observer)
 }
 
+func (c *Connection) SetGSOBatchingEnabled(enabled bool) {
+	c.conn.SetGSOBatchingEnabled(enabled)
+}
+
 func (c *Connection) MaxDatagramPayloadSize() int {
 	return int(c.conn.MaxDatagramPayloadSize())
 }

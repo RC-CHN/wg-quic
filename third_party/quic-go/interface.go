@@ -220,6 +220,7 @@ type ConnectionState struct {
 	Used0RTT bool
 	// Version is the QUIC version of the QUIC connection.
 	Version Version
-	// GSO says if generic segmentation offload is used.
+	// GSO reports initial socket support for generic segmentation offload.
+	// Application policy and a later device failure can still disable batching.
 	GSO bool
 }
