@@ -143,3 +143,76 @@ Further batching, buffer ownership changes in the receive path, and decoder
 storage changes should follow those profiles. More parity or larger queues
 can consume scarce CPU/memory and increase delay, so they are not automatic
 performance improvements.
+
+## Clean-link follow-up
+
+The next measurements focus on clean-link throughput. Each endpoint again
+used a one-CPU quota, 512 MiB without swap, `GOMAXPROCS=1`, and
+`GOMEMLIMIT=192MiB`. Tests used MTU 1280, one TCP stream, no bandwidth shaping
+or injected delay/loss, and retained network offloads. These are CPU-quota
+tests on the same modern Xeon host, not measurements of a cheap VPS.
+
+A 20-second diagnostic transfer profiled each actual core process separately,
+using a temporary build with signal-controlled CPU profiling. The sender's
+profile contained 17.00 seconds of CPU samples and the receiver's 16.60 seconds.
+System calls accounted for 41.94% / 37.65% of samples; UDP `sendmsg` accounted
+for 32.59% / 20.18%. Salamander XOR accounted for only 0.65% of sender samples.
+The remaining opportunity is concentrated in packet I/O, scheduling, and
+per-packet bookkeeping rather than this XOR loop.
+
+One 15-second trial per configuration produced:
+
+| Configuration | TCP goodput |
+|---|---:|
+| FEC auto + Salamander | 136.04 Mbit/s |
+| FEC off + Salamander | 144.04 Mbit/s |
+| FEC off, obfuscation off | 156.57 Mbit/s |
+| FEC auto, obfuscation off | 172.39 Mbit/s |
+
+FEC reached zero parity on the healthy path. These short trials do not
+establish a precise feature cost: later unchanged-baseline trials ranged
+from 123.76 to 153.34 Mbit/s, and the earlier userspace WireGuard comparison
+measured 212.65 Mbit/s. Host/run variability is substantial. Disabling FEC
+does not have evidence here for a large clean-link speedup.
+
+Two additional allocation fixes were retained:
+
+- Controller observations previously heap-allocated both event snapshots
+  even when no transition occurred. The common path now passes values into
+  a separate transition recorder only when an event is needed. Ordinary
+  observations still advance the baseline, and retained events stay
+  immutable. The no-event benchmark changed from 192 B / 2 allocations to
+  0 B / 0 allocations per observation.
+- The bind receive reassembly pool now stores fixed-size array pointers,
+  eliminating its per-return slice-header allocation: 24 B / 1 allocation
+  became 0 B / 0 allocations. Foreign capacities still bypass the pool.
+
+A final 15-second comparison ran the retained changes first, then the
+unchanged baseline, with FEC auto and Salamander enabled:
+
+| Metric | Baseline | Retained changes |
+|---|---:|---:|
+| TCP goodput | 153.44 Mbit/s | 153.22 Mbit/s |
+| Sender cumulative allocation | 358334600 B | 220766992 B |
+| Receiver cumulative allocation | 141691256 B | 94986768 B |
+| Sender / receiver GC cycles | 21 / 10 | 12 / 7 |
+
+At nearly equal goodput, cumulative allocated bytes fell by about 38% / 33%.
+Both transfers completed successfully with zero receiver QUIC application
+queue drops. This pair shows an allocation reduction, not a demonstrated
+throughput increase. Cumulative allocation is not resident memory.
+
+An exploratory send-queue patch merged already-queued, equal-size QUIC
+packets into GSO batches without waiting for new traffic or adding padding.
+It measured 159.19 and 166.89 Mbit/s, interleaved with unchanged-baseline
+measurements of 153.34 and 123.76 Mbit/s. This is promising but insufficient
+to claim a stable speedup given baseline variability and the small sample.
+The patch remains an experiment; production send batching is unchanged.
+
+Validation for the retained fixes includes project tests, the complete
+quic-go suite, and race checks for bind and quic-go utilities. New regressions
+cover snapshot history immutability, the latest ordinary observation as the
+next transition's baseline, allocation-free ordinary observations, and
+outstanding receive buffers across pool reuse. Diagnostic builds, experimental
+overlays, profiles, and raw trials are retained locally in
+`/tmp/wg-quic-clean/` and are not production build inputs.

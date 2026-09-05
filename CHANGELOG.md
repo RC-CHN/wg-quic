@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Avoided allocating QUIC controller snapshots when no event occurs and
+  removed the receive reassembly pool's per-release slice-header allocation.
 - Reduced Salamander per-packet CPU work and eliminated digest-result heap
   allocations by reusing scratch storage and unrolling the repeating XOR.
 - Removed the per-release slice-header allocation from the QUIC DATAGRAM send

@@ -145,8 +145,7 @@ const reassemblyBufferSize = maxFragmentData + frameHeaderSize
 
 var reassemblyBufferPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, reassemblyBufferSize)
-		return &b
+		return new([reassemblyBufferSize]byte)
 	},
 }
 
@@ -156,8 +155,8 @@ func acquireReassemblyBuffer(n int) []byte {
 	if n > reassemblyBufferSize {
 		return make([]byte, n)
 	}
-	p := reassemblyBufferPool.Get().(*[]byte)
-	return (*p)[:n]
+	p := reassemblyBufferPool.Get().(*[reassemblyBufferSize]byte)
+	return p[:n]
 }
 
 // releaseReassemblyBuffer returns a buffer from acquireReassemblyBuffer to
@@ -166,8 +165,7 @@ func releaseReassemblyBuffer(data []byte) {
 	if cap(data) != reassemblyBufferSize {
 		return
 	}
-	full := data[:reassemblyBufferSize]
-	reassemblyBufferPool.Put(&full)
+	reassemblyBufferPool.Put((*[reassemblyBufferSize]byte)(data[:reassemblyBufferSize]))
 }
 
 // add feeds one fragment into reassembly. owned reports whether the caller

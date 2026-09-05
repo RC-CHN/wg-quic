@@ -22,3 +22,7 @@ the root wg-quic integration tests.
 The owned DATAGRAM send pool stores fixed-size array pointers so returning a
 buffer does not allocate a slice header. The ownership and capacity checks are
 unchanged; pool lifecycle tests and benchmarks cover the local change.
+
+Controller event snapshots stay on the stack until a transition is recorded.
+Event history still retains immutable before/after values; regression tests
+cover ordinary observations and subsequent transitions.

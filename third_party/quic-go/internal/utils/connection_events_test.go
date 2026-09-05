@@ -51,3 +51,54 @@ func TestConnectionEventHistoryIsBounded(t *testing.T) {
 		t.Fatalf("bounded connection event history = %#v", stats.events.events)
 	}
 }
+
+func TestControllerSnapshotsPreserveTransitionHistory(t *testing.T) {
+	var stats ConnectionStats
+	stats.CongestionWindow.Store(12000)
+	stats.RecordControllerSnapshot("initial")
+	// Ordinary samples must still update the baseline for the next event.
+	stats.BytesInFlight.Store(5000)
+	stats.RecordControllerSnapshot("packet_sent")
+	stats.PacketsLost.Store(1)
+	stats.RecordControllerSnapshot("loss_detection")
+	var events []ConnectionEvent
+	stats.SetEventObserver(func(event ConnectionEvent) { events = append(events, event) })
+	if len(events) != 1 || events[0].Before.BytesInFlight != 5000 {
+		t.Fatalf("transition did not use the latest sample: %#v", events)
+	}
+	before, after := *events[0].Before, *events[0].After
+	stats.BytesInFlight.Store(2000)
+	stats.RecordControllerSnapshot("packet_acked")
+	stats.PacketsLost.Store(2)
+	stats.RecordControllerSnapshot("loss_detection")
+	if len(events) != 2 || *events[0].Before != before || *events[0].After != after {
+		t.Fatal("later samples changed retained transition metrics")
+	}
+	if events[1].Before.BytesInFlight != 2000 || events[1].Before.PacketsLost != 1 {
+		t.Fatal("later transition used an outdated baseline")
+	}
+}
+
+func TestControllerSnapshotsWithoutEventsDoNotAllocate(t *testing.T) {
+	var stats ConnectionStats
+	stats.CongestionWindow.Store(12000)
+	stats.RecordControllerSnapshot("initial")
+	allocs := testing.AllocsPerRun(100, func() {
+		stats.BytesInFlight.Add(1)
+		stats.RecordControllerSnapshot("packet_sent")
+	})
+	if allocs != 0 {
+		t.Fatalf("ordinary controller sample allocated %g objects", allocs)
+	}
+}
+
+func BenchmarkControllerSnapshotNoEvent(b *testing.B) {
+	var stats ConnectionStats
+	stats.CongestionWindow.Store(12000)
+	stats.RecordControllerSnapshot("initial")
+	b.ReportAllocs()
+	for b.Loop() {
+		stats.BytesInFlight.Add(1)
+		stats.RecordControllerSnapshot("packet_sent")
+	}
+}

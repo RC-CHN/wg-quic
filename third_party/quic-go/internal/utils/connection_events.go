@@ -80,6 +80,19 @@ func (s *ConnectionStats) RecordControllerSnapshot(reason string) {
 	}
 	before := j.lastMetrics
 	j.lastMetrics = after
+	if after.PacketsLost > before.PacketsLost ||
+		after.CongestionWindowBytes < before.CongestionWindowBytes ||
+		after.CongestionModelState != before.CongestionModelState ||
+		after.PathRTTUs != before.PathRTTUs {
+		j.recordControllerTransitionsLocked(reason, before, after)
+	}
+	j.mu.Unlock()
+}
+
+// Keep snapshot addresses out of the common no-event path. Only retained
+// transitions need heap-backed metrics; passing values here keeps ordinary
+// per-packet observations on the stack while preserving immutable history.
+func (j *connectionEventJournal) recordControllerTransitionsLocked(reason string, before, after ConnectionEventMetrics) {
 	if after.PacketsLost > before.PacketsLost {
 		j.recordLocked("loss", reason, &before, &after)
 	}
@@ -92,7 +105,6 @@ func (s *ConnectionStats) RecordControllerSnapshot(reason string) {
 	if after.PathRTTUs != before.PathRTTUs {
 		j.recordLocked("path_rtt", reason, &before, &after)
 	}
-	j.mu.Unlock()
 }
 
 func (s *ConnectionStats) RecordEvent(eventType, reason string) {

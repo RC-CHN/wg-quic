@@ -135,6 +135,38 @@ func TestPreparedPacketRejectsInvalidPayloadSize(t *testing.T) {
 var benchmarkFrame []byte
 var benchmarkReassembled []byte
 
+func TestReassemblyPoolPreservesOutstandingPackets(t *testing.T) {
+	first := acquireReassemblyBuffer(1312)
+	for i := range first {
+		first[i] = 0x5a
+	}
+	for _, size := range []int{64, reassemblyBufferSize, reassemblyBufferSize + 1} {
+		other := acquireReassemblyBuffer(size)
+		clear(other)
+		releaseReassemblyBuffer(other)
+	}
+	if !bytes.Equal(first, bytes.Repeat([]byte{0x5a}, len(first))) {
+		t.Fatal("pool reuse overwrote an outstanding packet")
+	}
+	releaseReassemblyBuffer(first[:32])
+	releaseReassemblyBuffer(nil)
+	releaseReassemblyBuffer(make([]byte, 17))
+	full := acquireReassemblyBuffer(reassemblyBufferSize)
+	if len(full) != reassemblyBufferSize || cap(full) != reassemblyBufferSize {
+		t.Fatalf("unexpected recycled buffer size: len=%d cap=%d", len(full), cap(full))
+	}
+	releaseReassemblyBuffer(full)
+}
+
+func BenchmarkReassemblyBufferRoundTrip(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		packet := acquireReassemblyBuffer(1312)
+		packet[0] = 1
+		releaseReassemblyBuffer(packet)
+	}
+}
+
 func BenchmarkReassemblerSingleFragment(b *testing.B) {
 	payload := bytes.Repeat([]byte{0x5a}, 1312)
 	frame := make([]byte, frameHeaderSize+len(payload))
