@@ -79,40 +79,74 @@ func (h *sendQueue) Available() <-chan struct{} {
 	return h.available
 }
 
+// coalesce combines already queued single-segment packets of equal size and
+// ECN marking. DATAGRAM packets often leave unused space below the path MTU,
+// ending the packer's GSO batch early. They can still share one socket write.
+// The first packet's buffer bounds the batch; no allocation, padding or wait
+// for more traffic is needed. Every packet has already passed the pacer.
+// A dequeued packet that cannot join the batch is returned for the next write.
+func (h *sendQueue) coalesce(e queueEntry) (queueEntry, queueEntry) {
+	segmentSize := len(e.buf.Data)
+	if e.gsoSize == 0 || segmentSize == 0 || segmentSize > int(e.gsoSize) {
+		return e, queueEntry{}
+	}
+	// Freeze the burst size so a concurrent producer cannot extend the batch
+	// indefinitely. At most sendQueueCapacity+1 segments are combined.
+	for remaining := len(h.queue); remaining > 0 && len(e.buf.Data)+segmentSize <= cap(e.buf.Data); remaining-- {
+		next := <-h.queue // Run is the sole reader; the sampled entries remain queued.
+		if next.gsoSize == 0 || next.ecn != e.ecn ||
+			len(next.buf.Data) != segmentSize || len(next.buf.Data) > int(next.gsoSize) {
+			return e, next
+		}
+		e.buf.Data = append(e.buf.Data, next.buf.Data...)
+		e.gsoSize = uint16(segmentSize)
+		next.buf.Release()
+	}
+	return e, queueEntry{}
+}
+
 func (h *sendQueue) Run() error {
-	defer close(h.runStopped)
+	var pending queueEntry
+	defer func() {
+		if pending.buf != nil {
+			pending.buf.Release()
+		}
+		close(h.runStopped)
+	}()
 	var shouldClose bool
 	for {
-		if shouldClose && len(h.queue) == 0 {
+		if shouldClose && len(h.queue) == 0 && pending.buf == nil {
 			return nil
 		}
-		select {
-		case <-h.closeCalled:
-			h.closeCalled = nil // prevent this case from being selected again
-			// make sure that all queued packets are actually sent out
-			shouldClose = true
-		case e := <-h.queue:
-			if err := h.conn.Write(e.buf.Data, e.gsoSize, e.ecn); err != nil {
-				// This additional check enables:
-				// 1. Checking for "datagram too large" message from the kernel, as such,
-				// 2. Path MTU discovery,and
-				// 3. Eventual detection of loss PingFrame.
-				if !isSendMsgSizeErr(err) {
-					return err
-				}
-				if h.onPathMTUTooLarge != nil {
-					size := protocol.ByteCount(len(e.buf.Data))
-					if e.gsoSize > 0 {
-						size = protocol.ByteCount(e.gsoSize)
-					}
-					h.onPathMTUTooLarge(size)
-				}
-			}
-			e.buf.Release()
+		var e queueEntry
+		if pending.buf != nil {
+			e, pending = pending, queueEntry{}
+		} else {
 			select {
-			case h.available <- struct{}{}:
-			default:
+			case <-h.closeCalled:
+				h.closeCalled = nil // prevent this case from being selected again
+				// Flush queued packets, including a pending packet from coalesce.
+				shouldClose = true
+				continue
+			case e = <-h.queue:
 			}
+		}
+		e, pending = h.coalesce(e)
+		err := h.conn.Write(e.buf.Data, e.gsoSize, e.ecn)
+		if isSendMsgSizeErr(err) && h.onPathMTUTooLarge != nil {
+			size := protocol.ByteCount(len(e.buf.Data))
+			if e.gsoSize > 0 {
+				size = protocol.ByteCount(e.gsoSize)
+			}
+			h.onPathMTUTooLarge(size)
+		}
+		e.buf.Release()
+		if err != nil && !isSendMsgSizeErr(err) {
+			return err
+		}
+		select {
+		case h.available <- struct{}{}:
+		default:
 		}
 	}
 }

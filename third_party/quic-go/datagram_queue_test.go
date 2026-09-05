@@ -3,6 +3,7 @@ package quic
 import (
 	"context"
 	"net"
+	"runtime"
 	"testing"
 	"testing/synctest"
 
@@ -119,6 +120,45 @@ func TestDatagramQueueReceiveDropsCounted(t *testing.T) {
 	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte{0}})
 	require.Equal(t, uint64(3), queue.RcvQueueDrops())
 	require.Equal(t, defaultMaxDatagramRcvQueueLen, queue.RcvQueueLen())
+}
+
+func TestDatagramQueueFullAllowsRunnableConsumerToDrain(t *testing.T) {
+	previous := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previous)
+	synctest.Test(t, func(t *testing.T) {
+		queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+		queue.rcvCap = 1
+		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("first")})
+		ready := make(chan struct{})
+		received := make(chan ReceivedDatagram, 1)
+		go func() {
+			<-ready
+			datagram, err := queue.ReceiveOwned(context.Background())
+			assert.NoError(t, err)
+			received <- datagram
+		}()
+		synctest.Wait()
+		close(ready)
+		queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("second")})
+		first := <-received
+		require.Equal(t, "first", string(first.Data))
+		first.Release()
+		require.Zero(t, queue.RcvQueueDrops())
+		require.Equal(t, 1, queue.RcvQueueLen())
+		second, err := queue.ReceiveOwned(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "second", string(second.Data))
+		second.Release()
+	})
+}
+
+func TestDatagramQueueRejectsEnqueueAfterClose(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	queue.CloseWithError(assert.AnError)
+	queue.HandleDatagramFrame(&wire.DatagramFrame{Data: []byte("closed")})
+	require.Zero(t, queue.RcvQueueLen())
+	_, err := queue.ReceiveOwned(context.Background())
+	require.ErrorIs(t, err, assert.AnError)
 }
 
 func TestDatagramRcvQueueCapacityConfigurable(t *testing.T) {

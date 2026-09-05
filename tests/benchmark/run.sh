@@ -908,6 +908,8 @@ run_trial() {
 		--arg link_schedule "${LINK_SCHEDULE:-}" \
 		--arg workload "$workload" \
 		--arg cpu_limit "${WGQ_BENCH_CPUS:-0}" \
+		--arg cpu_set_a "${WGQ_BENCH_CPUSET_A:-}" \
+		--arg cpu_set_b "${WGQ_BENCH_CPUSET_B:-}" \
 		--arg memory_limit "${WGQ_BENCH_MEMORY:-0}" \
 		--arg gomaxprocs "${WGQ_BENCH_GOMAXPROCS:-}" \
 		--arg gomemlimit "${WGQ_BENCH_GOMEMLIMIT:-}" \
@@ -943,6 +945,8 @@ run_trial() {
 			workload: $workload,
 			resources: {
 				cpus: $cpu_limit,
+				cpu_set_a: $cpu_set_a,
+				cpu_set_b: $cpu_set_b,
 				memory: $memory_limit,
 				memory_swap: $memory_limit,
 				gomaxprocs: $gomaxprocs,
@@ -1375,6 +1379,7 @@ The trial command is configured with environment variables. Common values:
   OFFERED_RATES='10 25 50 100 200 500'
   DURATION=10 PARALLEL=1 OFFERED_MBIT=50 MTU=1280
   WGQ_BENCH_CPUS=1 WGQ_BENCH_MEMORY=512m
+  WGQ_BENCH_CPUSET_A=2 WGQ_BENCH_CPUSET_B=3
   WGQ_BENCH_GOMAXPROCS=1 WGQ_BENCH_GOMEMLIMIT=192MiB
 EOF
 }

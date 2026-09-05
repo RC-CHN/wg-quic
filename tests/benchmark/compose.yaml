@@ -3,6 +3,7 @@ services:
     image: wg-quic-bench:local
     privileged: true
     cpus: ${WGQ_BENCH_CPUS:-0}
+    cpuset: ${WGQ_BENCH_CPUSET_A:-}
     mem_limit: ${WGQ_BENCH_MEMORY:-0}
     memswap_limit: ${WGQ_BENCH_MEMORY:-0}
     volumes:
@@ -24,6 +25,7 @@ services:
     image: wg-quic-bench:local
     privileged: true
     cpus: ${WGQ_BENCH_CPUS:-0}
+    cpuset: ${WGQ_BENCH_CPUSET_B:-}
     mem_limit: ${WGQ_BENCH_MEMORY:-0}
     memswap_limit: ${WGQ_BENCH_MEMORY:-0}
     volumes:

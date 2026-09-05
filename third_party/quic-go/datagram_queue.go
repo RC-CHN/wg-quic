@@ -3,6 +3,7 @@ package quic
 import (
 	"context"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -251,8 +252,33 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 		RemoteAddr: cloneDatagramRemoteAddr(remoteAddr),
 		buffer:     buffer,
 	}
-	var queued bool
+	queued := h.enqueueReceivedDatagram(datagram)
+	if !queued {
+		// A QUIC receive burst can fill this queue before a runnable consumer
+		// gets CPU time, especially with one Go execution thread. Give it one
+		// opportunity to drain before dropping an authenticated DATAGRAM that
+		// QUIC may acknowledge. Never wait for a stalled consumer indefinitely.
+		runtime.Gosched()
+		queued = h.enqueueReceivedDatagram(datagram)
+	}
+	if !queued {
+		h.rcvDrops.Add(1)
+		datagram.Release()
+		if h.logger.Debug() {
+			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
+		}
+	}
+}
+
+func (h *datagramQueue) enqueueReceivedDatagram(datagram ReceivedDatagram) bool {
 	h.rcvMx.Lock()
+	select {
+	case <-h.closed:
+		h.rcvMx.Unlock()
+		return false
+	default:
+	}
+	var queued bool
 	if h.rcvQueue.Len() < h.rcvCap {
 		h.rcvQueue.PushBack(datagram)
 		queued = true
@@ -265,13 +291,7 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 		}
 	}
 	h.rcvMx.Unlock()
-	if !queued {
-		h.rcvDrops.Add(1)
-		datagram.Release()
-		if h.logger.Debug() {
-			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
-		}
-	}
+	return queued
 }
 
 func cloneDatagramRemoteAddr(remoteAddr net.Addr) net.Addr {
@@ -321,7 +341,7 @@ func (h *datagramQueue) CloseWithError(e error) {
 		datagram := h.rcvQueue.PopFront()
 		datagram.Release()
 	}
-	h.rcvMx.Unlock()
 	h.closeErr = e
 	close(h.closed)
+	h.rcvMx.Unlock()
 }

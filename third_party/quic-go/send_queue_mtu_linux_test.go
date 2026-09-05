@@ -42,3 +42,25 @@ func TestSendQueueReportsPathMTUReduction(t *testing.T) {
 		require.NoError(t, <-done)
 	})
 }
+
+func TestSendQueueBatchReportsSegmentMTUAndContinues(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := NewMockSendConn(gomock.NewController(t))
+		var reported []protocol.ByteCount
+		q := newSendQueue(conn, func(size protocol.ByteCount) { reported = append(reported, size) })
+		for _, size := range []int{1300, 1300, 1000} {
+			buf := getLargePacketBuffer()
+			buf.Data = append(buf.Data, make([]byte, size)...)
+			q.Send(buf, 1452, protocol.ECT1)
+		}
+		gomock.InOrder(
+			conn.EXPECT().Write(gomock.Len(2600), uint16(1300), protocol.ECT1).Return(unix.EMSGSIZE),
+			conn.EXPECT().Write(gomock.Len(1000), uint16(1452), protocol.ECT1).Return(nil),
+		)
+		done := make(chan error, 1)
+		go func() { done <- q.Run() }()
+		q.Close()
+		require.NoError(t, <-done)
+		require.Equal(t, []protocol.ByteCount{1300}, reported)
+	})
+}

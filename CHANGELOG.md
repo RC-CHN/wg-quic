@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Batched already-queued equal-size QUIC packets into GSO writes while
+  preserving datagram boundaries, ECN, pacing admission, and MTU feedback.
+- Gave runnable DATAGRAM consumers one scheduling opportunity before dropping
+  from a full receive queue, without increasing queue capacities.
+- Required fresh delivery samples before declaring a model-controller
+  startup plateau, and accounted for pacing timer granularity in short-RTT
+  congestion windows and minimum rates.
+- Added optional per-endpoint CPU affinity to benchmark resource metadata.
 - Avoided allocating QUIC controller snapshots when no event occurs and
   removed the receive reassembly pool's per-release slice-header allocation.
 - Reduced Salamander per-packet CPU work and eliminated digest-result heap

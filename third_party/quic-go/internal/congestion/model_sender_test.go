@@ -87,12 +87,91 @@ func TestModelSenderExitsStartupOnCapacityLimitedPlateau(t *testing.T) {
 
 	for packetNumber := protocol.PacketNumber(2); packetNumber <= 5; packetNumber++ {
 		sender.largestSent = packetNumber
+		sender.recordBandwidthSample(sender.bandwidthEstimate)
 		sender.updateRound(packetNumber, true)
 	}
 
 	require.False(t, sender.InSlowStart())
 	require.Equal(t, 3, sender.fullBandwidthRounds)
 	require.NotZero(t, sender.fullBandwidth)
+}
+
+func TestModelSenderWaitsForFreshDeliverySamplesDuringStartup(t *testing.T) {
+	sender, clock, rttStats, _ := newTestModelSender()
+	rttStats.UpdateRTT(100*time.Microsecond, 0)
+	sender.roundEnd = 1
+	// Many short packet rounds fit inside one delivery sampling period.
+	for pn := protocol.PacketNumber(2); pn < 40; pn++ {
+		clock.Advance(100 * time.Microsecond)
+		sender.largestSent = pn
+		sender.observeDelivery(sender.maxDatagramSize, sender.congestionWindow, clock.Now())
+		sender.updateRound(pn, true)
+	}
+	require.True(t, sender.InSlowStart())
+	require.Zero(t, sender.fullBandwidthRounds)
+	require.Zero(t, sender.fullBandwidth)
+
+	clock.Advance(sender.deliverySamplePeriod())
+	sender.observeDelivery(sender.maxDatagramSize, sender.congestionWindow, clock.Now())
+	sender.largestSent = 40
+	sender.updateRound(40, true)
+	require.NotZero(t, sender.fullBandwidth)
+	// Re-reading this same estimate on further rounds must not count it again.
+	for pn := protocol.PacketNumber(41); pn < 60; pn++ {
+		sender.largestSent = pn
+		sender.updateRound(pn, true)
+	}
+	require.True(t, sender.InSlowStart())
+	require.Zero(t, sender.fullBandwidthRounds)
+}
+
+func TestModelSenderDiscardsStartupSampleOnTimeout(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	sender.recordBandwidthSample(sender.bandwidthEstimate)
+	require.True(t, sender.startupSampleReady)
+	sender.OnRetransmissionTimeout(true)
+	require.False(t, sender.startupSampleReady)
+	require.True(t, sender.InSlowStart())
+}
+
+func TestModelSenderWindowAccountsForPacingGranularity(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	sender.bandwidthEstimate = Bandwidth(200_000_000)
+	for _, tc := range []struct {
+		rtt    time.Duration
+		window protocol.ByteCount
+	}{
+		{100 * time.Microsecond, 100_000},
+		{time.Millisecond, 100_000},
+		{40 * time.Millisecond, 2_000_000},
+	} {
+		sender.propagationRTT = tc.rtt
+		require.Equal(t, tc.window, sender.targetCongestionWindow())
+		require.Equal(t, tc.rtt, sender.Stats().PropagationRTT)
+	}
+	// The existing maximum window remains authoritative for large BDPs.
+	sender.bandwidthEstimate = Bandwidth(1_000_000_000_000)
+	require.Equal(t, sender.maxCongestionWindow(), sender.targetCongestionWindow())
+}
+
+func TestModelSenderShortPathStillRespondsToCongestion(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	sender.propagationRTT = 100 * time.Microsecond
+	sender.bandwidthEstimate = Bandwidth(200_000_000)
+	sender.congestionWindow = sender.targetCongestionWindow()
+	before := sender.congestionWindow
+	// ECN must reduce the rate even when the propagation RTT is very small.
+	sender.OnCongestionEvent(1, 0, sender.congestionWindow)
+	require.Equal(t, Bandwidth(150_000_000), sender.bandwidthEstimate)
+	require.Less(t, sender.congestionWindow, before)
+	for range 100 {
+		sender.reduceModel(0.75)
+	}
+	// Draining must still reach the range where path RTT can be relearned.
+	require.LessOrEqual(t, sender.congestionWindow, 2*sender.minCongestionWindow())
+	sender.OnRetransmissionTimeout(true)
+	require.Equal(t, sender.minCongestionWindow(), sender.congestionWindow)
+	require.Equal(t, BandwidthFromDelta(sender.minCongestionWindow(), sender.windowRTT()), sender.bandwidthEstimate)
 }
 
 func TestModelSenderIgnoresIsolatedRandomLossWithoutQueue(t *testing.T) {

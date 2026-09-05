@@ -26,3 +26,19 @@ unchanged; pool lifecycle tests and benchmarks cover the local change.
 Controller event snapshots stay on the stack until a transition is recorded.
 Event history still retains immutable before/after values; regression tests
 cover ordinary observations and subsequent transitions.
+
+The send queue coalesces already-queued equal-size single-segment packets into
+bounded GSO writes without padding or waiting. Tests cover datagram order and
+contents, ECN boundaries, disabled GSO, existing batches, buffer capacity,
+shutdown, write errors, and segment-sized MTU feedback.
+
+The local model controller requires fresh delivery measurements before
+counting startup plateau rounds. Its congestion-window RTT budget includes
+pacing timer granularity on sub-millisecond paths; minimum-rate calculations
+use the same budget so ECN and queued loss still reduce the window. Propagation
+RTT telemetry and the existing maximum congestion window remain unchanged.
+
+A full DATAGRAM receive queue yields once to runnable consumers before one
+enqueue retry. Persistent overload still drops packets; queue capacity does
+not grow. Closing the queue synchronizes rejection of subsequent enqueues.
+Tests cover consumer progress, stalled-consumer drops, and closed queues.

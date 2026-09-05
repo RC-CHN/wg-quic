@@ -207,7 +207,9 @@ packets into GSO batches without waiting for new traffic or adding padding.
 It measured 159.19 and 166.89 Mbit/s, interleaved with unchanged-baseline
 measurements of 153.34 and 123.76 Mbit/s. This is promising but insufficient
 to claim a stable speedup given baseline variability and the small sample.
-The patch remains an experiment; production send batching is unchanged.
+At that stage the patch remained an experiment and production send batching
+was unchanged. The subsequent implementation and controller investigation are
+recorded in [Clean-link performance](CLEAN-LINK-PERFORMANCE.md).
 
 Validation for the retained fixes includes project tests, the complete
 quic-go suite, and race checks for bind and quic-go utilities. New regressions

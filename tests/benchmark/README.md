@@ -166,6 +166,15 @@ unrestricted. Repeat with `WGQ_BENCH_CPUS=0.5` to impose CPU quota throttling;
 this tests reduced CPU availability but does not reproduce hypervisor steal
 time. Real VPS measurements must also record guest CPU steal.
 
+CPU quota does not restrict a container to one particular CPU. On a large
+host, migration and cross-CPU network processing can substantially affect
+results. For controlled comparisons, optionally set `WGQ_BENCH_CPUSET_A=2`
+and `WGQ_BENCH_CPUSET_B=3` to place the endpoints on separate available cores.
+Choose CPU IDs valid on your host, preferably separate physical cores. Empty
+values keep the default unrestricted CPU placement. CPU sets are recorded in
+`parameters.json`; compare versions with identical placement, and keep these
+results separate from measurements without affinity.
+
 Use the existing CPU, RSS, allocation, GC, stall, and receive-queue metrics to
 judge results alongside goodput. A higher throughput with sustained queue loss
 or much longer stalls is not an improvement for this target.

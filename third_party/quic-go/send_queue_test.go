@@ -133,9 +133,8 @@ func TestSendQueueBlocking(t *testing.T) {
 		default:
 		}
 
-		for range sendQueueCapacity {
-			blockWrite <- struct{}{}
-		}
+		// A GSO write may now drain several queued packets at once.
+		close(blockWrite)
 		synctest.Wait()
 
 		select {

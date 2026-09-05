@@ -47,6 +47,7 @@ type modelSender struct {
 	roundEnd            protocol.PacketNumber
 	fullBandwidth       Bandwidth
 	fullBandwidthRounds int
+	startupSampleReady  bool
 
 	ackWindowActive      bool
 	ackWindowStart       monotime.Time
@@ -182,7 +183,7 @@ func (m *modelSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 		return
 	}
 	m.congestionWindow = m.minCongestionWindow()
-	rtt := m.modelRTT()
+	rtt := m.windowRTT()
 	m.bandwidthEstimate = BandwidthFromDelta(m.congestionWindow, rtt)
 	m.clearBandwidthWindow()
 	m.state = modelStateStartup
@@ -416,6 +417,7 @@ func (m *modelSender) recordBandwidthSample(sample Bandwidth) {
 		estimate = max(estimate, m.bandwidthSamples[i])
 	}
 	m.bandwidthEstimate = estimate
+	m.startupSampleReady = true
 }
 
 func (m *modelSender) updateRound(acked protocol.PacketNumber, capacityLimited bool) {
@@ -423,9 +425,13 @@ func (m *modelSender) updateRound(acked protocol.PacketNumber, capacityLimited b
 		return
 	}
 	m.roundEnd = m.largestSent
-	if m.state != modelStateStartup || !capacityLimited {
+	if m.state != modelStateStartup || !capacityLimited || !m.startupSampleReady {
 		return
 	}
+	// Several packet rounds can finish before observeDelivery's sampling
+	// interval elapses on a short-RTT path. An unchanged, stale estimate is
+	// not evidence of a bandwidth plateau. Consume each fresh sample once.
+	m.startupSampleReady = false
 	if m.fullBandwidth == 0 || m.bandwidthEstimate >= m.fullBandwidth*5/4 {
 		m.fullBandwidth = m.bandwidthEstimate
 		m.fullBandwidthRounds = 0
@@ -483,14 +489,22 @@ func (m *modelSender) updateCongestionWindow(
 
 func (m *modelSender) targetCongestionWindow() protocol.ByteCount {
 	bytesPerSecond := uint64(m.bandwidthEstimate / BytesPerSecond)
-	bdp := protocol.ByteCount(bytesPerSecond * uint64(m.modelRTT()) / uint64(time.Second))
+	bdp := protocol.ByteCount(bytesPerSecond * uint64(m.windowRTT()) / uint64(time.Second))
 	target := protocol.ByteCount(float64(bdp) * modelCwndGain)
 	return min(m.maxCongestionWindow(), max(m.minCongestionWindow(), target))
 }
 
+func (m *modelSender) windowRTT() time.Duration {
+	// The pacer sends on millisecond timer ticks. A sub-millisecond path
+	// must still keep enough data in flight across a scheduling interval;
+	// otherwise a tiny propagation RTT caps delivery at a few packets per
+	// wakeup even when neither endpoint nor the network is saturated.
+	return max(m.modelRTT(), protocol.MinPacingDelay+protocol.TimerGranularity)
+}
+
 func (m *modelSender) reduceModel(factor float64) {
 	reduced := Bandwidth(float64(m.bandwidthEstimate) * factor)
-	minimum := BandwidthFromDelta(m.minCongestionWindow(), m.modelRTT())
+	minimum := BandwidthFromDelta(m.minCongestionWindow(), m.windowRTT())
 	m.bandwidthEstimate = max(minimum, reduced)
 	m.clearBandwidthWindow()
 	m.congestionWindow = min(m.congestionWindow, m.targetCongestionWindow())
@@ -502,6 +516,7 @@ func (m *modelSender) clearBandwidthWindow() {
 	clear(m.bandwidthSamples[:])
 	m.bandwidthSampleIndex = 0
 	m.bandwidthSampleCount = 0
+	m.startupSampleReady = false
 }
 
 func (m *modelSender) updateFECSignal() {
