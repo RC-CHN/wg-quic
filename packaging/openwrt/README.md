@@ -45,6 +45,21 @@ uci commit wg-quic
 /etc/init.d/wg-quic reload
 ```
 
+Some vendor OpenWrt kernels have incompatible TUN GSO metadata on forwarded
+TCP traffic. Affected systems can select the non-offloaded compatibility path
+per instance:
+
+```sh
+uci set wg-quic.aws.disable_tun_offload='1'
+uci commit wg-quic
+/etc/init.d/wg-quic restart
+```
+
+This sets `WG_QUIC_DISABLE_TUN_OFFLOAD=true` for the supervised process. Direct
+supervisors can set the same environment variable themselves. Disabling TUN
+offload reduces peak throughput, so leave it unset unless logs report malformed
+virtio/GSO metadata such as `tcp header len is invalid`.
+
 The UCI instance list, procd instance names, and the existing redacted JSON
 from `wg-quic-quick show --json` form the backend boundary intended for a
 future LuCI application. LuCI is deliberately not part of this package yet.

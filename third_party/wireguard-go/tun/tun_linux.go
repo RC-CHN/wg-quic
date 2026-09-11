@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -38,6 +39,7 @@ type NativeTun struct {
 	statusListenersShutdown chan struct{}
 	batchSize               int
 	vnetHdr                 bool
+	gsoOffload              bool
 	udpGSO                  bool
 
 	closeOnce sync.Once
@@ -345,11 +347,22 @@ func (tun *NativeTun) Write(bufs [][]byte, offset int) (int, error) {
 	)
 	tun.toWrite = tun.toWrite[:0]
 	if tun.vnetHdr {
-		err := handleGRO(bufs, offset, tun.tcpGROTable, tun.udpGROTable, tun.udpGSO, &tun.toWrite)
-		if err != nil {
-			return 0, err
+		if tun.gsoOffload {
+			err := handleGRO(bufs, offset, tun.tcpGROTable, tun.udpGROTable, tun.udpGSO, &tun.toWrite)
+			if err != nil {
+				return 0, err
+			}
 		}
 		offset -= virtioNetHdrLen
+		if !tun.gsoOffload {
+			// IFF_VNET_HDR still requires a virtio header on every write even
+			// when all TUN offloads are disabled. A zero header describes one
+			// complete packet with no deferred checksum or segmentation work.
+			for i := range bufs {
+				clear(bufs[i][offset : offset+virtioNetHdrLen])
+				tun.toWrite = append(tun.toWrite, i)
+			}
+		}
 	} else {
 		for i := range bufs {
 			tun.toWrite = append(tun.toWrite, i)
@@ -508,7 +521,29 @@ const (
 	tunUDPOffloads = unix.TUN_F_USO4 | unix.TUN_F_USO6
 )
 
+const disableTUNOffloadEnvironment = "WG_QUIC_DISABLE_TUN_OFFLOAD"
+
+func tunOffloadDisabled() (bool, error) {
+	value := os.Getenv(disableTUNOffloadEnvironment)
+	if value == "" {
+		return false, nil
+	}
+	disabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf(
+			"parse %s: %w",
+			disableTUNOffloadEnvironment,
+			err,
+		)
+	}
+	return disabled, nil
+}
+
 func (tun *NativeTun) initFromFlags(name string) error {
+	offloadDisabled, err := tunOffloadDisabled()
+	if err != nil {
+		return err
+	}
 	sc, err := tun.tunFile.SyscallConn()
 	if err != nil {
 		return err
@@ -529,15 +564,22 @@ func (tun *NativeTun) initFromFlags(name string) error {
 		if got&unix.IFF_VNET_HDR != 0 {
 			// tunTCPOffloads were added in Linux v2.6. We require their support
 			// if IFF_VNET_HDR is set.
-			err = unix.IoctlSetInt(int(fd), unix.TUNSETOFFLOAD, tunTCPOffloads)
+			offloads := tunTCPOffloads
+			if offloadDisabled {
+				offloads = 0
+			}
+			err = unix.IoctlSetInt(int(fd), unix.TUNSETOFFLOAD, offloads)
 			if err != nil {
 				return
 			}
 			tun.vnetHdr = true
+			tun.gsoOffload = !offloadDisabled
 			tun.batchSize = conn.IdealBatchSize
 			// tunUDPOffloads were added in Linux v6.2. We do not return an
 			// error if they are unsupported at runtime.
-			tun.udpGSO = unix.IoctlSetInt(int(fd), unix.TUNSETOFFLOAD, tunTCPOffloads|tunUDPOffloads) == nil
+			if !offloadDisabled {
+				tun.udpGSO = unix.IoctlSetInt(int(fd), unix.TUNSETOFFLOAD, tunTCPOffloads|tunUDPOffloads) == nil
+			}
 		} else {
 			tun.batchSize = 1
 		}
