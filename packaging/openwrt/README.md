@@ -16,9 +16,9 @@ Install the package produced for the exact OpenWrt release and target. The
 package manager installs the TUN kernel module and full iproute2 command:
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.3.5-r1.apk
+apk add --allow-untrusted ./wg-quic-0.3.6-r1.apk
 # OpenWrt 24.10 and older:
-# opkg install ./wg-quic_0.3.5-r1_aarch64_generic.ipk
+# opkg install ./wg-quic_0.3.6-r1_aarch64_generic.ipk
 ```
 
 Profiles remain ordinary wg-quick-style files under `/etc/wg-quic/` and must
@@ -100,7 +100,7 @@ cd /path/to/wg-quic
 
 ./packaging/openwrt/build-package.sh \
   /path/to/openwrt-sdk \
-  0.3.5 arm64
+  0.3.6 arm64
 ```
 
 The helper uses the SDK's `NO_DEPS` single-package mode: `kmod-tun` and

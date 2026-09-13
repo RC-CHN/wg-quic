@@ -15,7 +15,12 @@ Salamander-style packet obfuscation.
 > and `wg-quick`-style configuration files.
 
 The current public release is
-[`v0.3.5`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.5).
+[`v0.3.6`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.3.6).
+
+`v0.3.6` reduces CPU and allocation overhead on small VPS hosts, enables QUIC
+UDP GSO once automatic FEC and model startup permit it, and adds an opt-in
+TUN offload fallback for vendor Linux/OpenWrt kernels. See the
+[performance measurements and limitations](docs/RECEIVE-PATH-PERFORMANCE.md).
 
 ## Platform status
 
@@ -24,8 +29,8 @@ The current public release is
 | Linux | CLI archives for amd64 and arm64; desktop Deb for amd64 | systemd; optional Tauri desktop | Native tests, race tests, and privileged two-node TUN interoperability on amd64; arm64 is cross-built |
 | Windows | CLI bundles for amd64 and arm64; desktop MSI for x64 | Wintun, one SCM service per tunnel, and a Tauri desktop | Installed x64 MSI, LocalSystem service, Wintun, address/MTU/DNS/routes, upgrade, status, and cleanup; arm64 is cross-built |
 | FreeBSD | CLI archives for amd64 and arm64 | rc.d | Native FreeBSD 14 amd64 tests; arm64 is cross-built |
-| OPNsense | Private packages for 26.1/FreeBSD 14 and 26.7/FreeBSD 15, amd64 | `VPN > wg-quic`, Dashboard widget, configd, and `quicN` interfaces | Both versions are package-validated and QEMU runtime-tested; Linux-to-OPNsense traffic is also exercised |
-| OpenWrt | OpenWrt 25.12.5 APK workflow artifacts for `armsr/armv8` and `x86/64` | procd and UCI multi-instance service | Both exact CI APKs have full QEMU install, traffic, live reload, reboot, hooks, and uninstall coverage |
+| OPNsense | Private packages for 26.1/FreeBSD 14 and 26.7/FreeBSD 15, amd64 | `VPN > wg-quic`, Dashboard widget, configd, and `quicN` interfaces | Release CI validates package manifests and payloads; QEMU runtime evidence is version-specific and is not implied by package validation |
+| OpenWrt | OpenWrt 25.12.5 APK workflow artifacts for `armsr/armv8` and `x86/64` | procd and UCI multi-instance service | Release CI builds both SDK packages; separate exact-APK QEMU fixtures cover install, traffic, reload, reboot, hooks, and uninstall |
 | macOS, Android, iOS | None | None | Not currently supported |
 
 Starting with `v0.3.1`, the release workflow publishes both OpenWrt APKs in
@@ -59,7 +64,7 @@ sudo wg-quic-quick down wg0
 
 ### Runtime peer and DDNS management
 
-Release `v0.3.5` supports live peer reconciliation and automatic DDNS across
+Release `v0.3.6` supports live peer reconciliation and automatic DDNS across
 the platform service adapters listed above.
 
 Start by inspecting the running supervisor. On Unix, use root for the detailed
@@ -262,7 +267,7 @@ undifferentiated claim that every CPU has already completed native acceptance:
 | FreeBSD/OPNsense | Unix socket plus incremental `route` operations | root-owned/checksummed outer endpoint-route ledger; TUN peer routes disappear with the interface | rc.d/configd and each carried FreeBSD release train are tested separately |
 | Windows amd64/arm64 | ACL-protected named pipe, typed core transaction, and IP Helper peer routes | protected endpoint ledger plus a per-tunnel before/after/phase journal keyed by compartment and interface LUID | x64 installed SCM/MSI lifecycle; arm64 remains build/unit-only until a native service fixture passes |
 
-`v0.3.5` contains all four adapters. Release notes must use
+`v0.3.6` contains all four adapters. Release notes must use
 `build-supported`, `unit-verified`, `runtime-verified`, or
 `integration-verified` per exact OS/architecture; cross-compilation alone never
 raises that label.
@@ -344,11 +349,11 @@ Download the archive matching the host architecture from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). For example, on amd64:
 
 ```sh
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.5/wg-quic-v0.3.5-linux-amd64.tar.gz
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.5/SHA256SUMS
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.6/wg-quic-v0.3.6-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.3.6/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf wg-quic-v0.3.5-linux-amd64.tar.gz
-cd wg-quic-v0.3.5-linux-amd64
+tar -xzf wg-quic-v0.3.6-linux-amd64.tar.gz
+cd wg-quic-v0.3.6-linux-amd64
 
 sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 sudo install -m 0644 wg-quic@.service /etc/systemd/system/
@@ -369,7 +374,7 @@ sudo wg-quic-quick down wg0
 The amd64 desktop Deb is an alternative for Linux desktop users:
 
 ```sh
-sudo apt install ./wg-quic-desktop-v0.3.5-linux-amd64.deb
+sudo apt install ./wg-quic-desktop-v0.3.6-linux-amd64.deb
 ```
 
 The desktop imports profiles into `/etc/wg-quic/` with mode `0600` and uses
@@ -404,7 +409,7 @@ process failure—not when reload returns `restart_required`.
 ## Windows
 
 For x64 Windows, the recommended installation is
-`wg-quic-desktop-v0.3.5-windows-x64.msi` from
+`wg-quic-desktop-v0.3.6-windows-x64.msi` from
 [Releases](https://github.com/RC-CHN/wg-quic/releases). The per-machine MSI
 asks for elevation once, installs the UI under Program Files, and registers the
 restricted `wg-quic-manager` LocalSystem service. Use **Import** in the desktop
@@ -446,8 +451,8 @@ Download the amd64 or arm64 FreeBSD archive and install its two programs and
 rc.d script:
 
 ```sh
-tar -xzf wg-quic-v0.3.5-freebsd-amd64.tar.gz
-cd wg-quic-v0.3.5-freebsd-amd64
+tar -xzf wg-quic-v0.3.6-freebsd-amd64.tar.gz
+cd wg-quic-v0.3.6-freebsd-amd64
 install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
 install -d -m 0700 /usr/local/etc/wg-quic
@@ -471,14 +476,14 @@ After the rc.d script is installed, `wg-quic-quick up wg0` and
 
 Use the package whose OPNsense version exactly matches the firewall:
 
-- `os-wg-quic-0.3.5-opnsense-26.1-amd64.pkg`
-- `os-wg-quic-0.3.5-opnsense-26.7-amd64.pkg`
+- `os-wg-quic-0.3.6-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.3.6-opnsense-26.7-amd64.pkg`
 
 Copy it to the firewall and install it from a console or SSH session. For
 OPNsense 26.7:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.3.5-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.3.6-opnsense-26.7-amd64.pkg
 ```
 
 Then open `VPN > wg-quic`:
@@ -523,7 +528,7 @@ packages such as `kmod-tun` must match the running firmware. Install the APK
 on the router:
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.3.5-r1-openwrt-25.12.5-armsr-armv8.apk
+apk add --allow-untrusted ./wg-quic-0.3.6-r1-openwrt-25.12.5-armsr-armv8.apk
 ```
 
 The package pulls in `kmod-tun` and `ip-full`, installs both executables, and
@@ -548,6 +553,19 @@ uci commit wg-quic
 /etc/init.d/wg-quic enable
 /etc/init.d/wg-quic reload
 ```
+
+For a configured UCI instance on a vendor kernel reporting malformed TUN GSO
+metadata (for example, `tcp header len is invalid`), opt into compatibility mode:
+
+```sh
+uci set wg-quic.aws.disable_tun_offload='1'
+uci commit wg-quic
+/etc/init.d/wg-quic restart
+```
+
+This sets `WG_QUIC_DISABLE_TUN_OFFLOAD=true` for that instance. It disables
+TUN offloads and can reduce throughput; leave it unset on unaffected kernels.
+It is separate from the QUIC UDP GSO switch `QUIC_GO_DISABLE_GSO`.
 
 If `/dev/net/tun` does not exist, first confirm that the package was built for
 the exact firmware target and that its dependency installed successfully:
@@ -646,9 +664,9 @@ native tooling, and `npm run version:check --prefix desktop` detects drift.
 Build and validate the six portable CLI archives locally with:
 
 ```sh
-make release-artifacts VERSION=0.3.5
+make release-artifacts VERSION=0.3.6
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.3.5-linux-amd64.tar.gz linux amd64 0.3.5
+  dist/wg-quic-v0.3.6-linux-amd64.tar.gz linux amd64 0.3.6
 ```
 
 OpenWrt and OPNsense packages must additionally match their exact target

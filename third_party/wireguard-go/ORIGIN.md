@@ -41,6 +41,12 @@ Initial local changes:
    at the smaller of the visible CPU count and GOMAXPROCS. CPU-quota-limited
    deployments no longer create workers for every host CPU.
 
+8. Linux TUN creation honors `WG_QUIC_DISABLE_TUN_OFFLOAD=true` for vendor
+   kernel compatibility. It clears TUN offload flags and bypasses GRO while
+   preserving the required zeroed virtio header on complete-packet writes.
+   The default offload path remains enabled; this is independent of QUIC's
+   UDP socket GSO policy.
+
 From this point, wg-quic production code and tests use this directory rather
 than downloading `golang.zx2c4.com/wireguard`. Future upstream synchronization
 is an explicit code-review operation; behavior changes are made and tested in

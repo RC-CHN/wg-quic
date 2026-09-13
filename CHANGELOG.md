@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.3.6 - 2026-09-13
+
+Small-VPS throughput and vendor-kernel TUN compatibility release.
+
+- Added an opt-in Linux TUN offload compatibility mode for vendor kernels:
+  `WG_QUIC_DISABLE_TUN_OFFLOAD=true`, or per-instance OpenWrt UCI
+  `disable_tun_offload='1'`. The fallback disables TUN checksum/segmentation
+  offloads and writes complete packets with zeroed virtio headers. Default
+  offload behavior is unchanged; this switch is separate from QUIC UDP GSO.
 - Reduced immutable receive-endpoint snapshots from 176 to 64 bytes on
   amd64, preserving ingress sequence, roaming, and configured reply fallback.
 - Removed Salamander socket-address conversion allocations by using the
