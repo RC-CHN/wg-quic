@@ -131,6 +131,24 @@ clipboard after copying a generated public key. Go core/control, Rust and
 frontend checks also pass. Native clipboard behavior remains platform-specific
 and includes a selectable public key/manual-copy fallback.
 
+## Diagnostic collection/export
+
+The desktop selects a peer and reuses `observe.Run`, the CLI collector, for a
+ten-second, 250 ms interval capture with a 1 MiB data budget. Known artifacts
+are packaged into a ZIP capped at 256 KiB. Linux uses the existing pkexec
+boundary and Windows uses the fixed authenticated broker/helper action. The
+privileged process uses its own private temporary directory and returns bytes;
+only the ordinary desktop writes the user-selected new file. It cannot replace
+an existing file or follow a destination symlink. Partial captures retain their
+INCOMPLETE marker and are explicitly labeled in the UI. Canceling the save
+dialog performs no capture. No configuration files or packet payloads are added.
+
+Validation: archive allowlist, linked-artifact and size-limit tests; existing
+collector generation/boundary tests; Windows request cross-compilation; Rust
+checks; Chromium cancel, duplicate prevention during refresh, partial result
+and failed-export recovery scenarios. Actual UAC/pkexec dialogs and installed
+service captures require their native deployment environment.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

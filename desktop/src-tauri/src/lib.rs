@@ -833,6 +833,74 @@ fn derive_public_key(app: AppHandle, private_key: String) -> Result<String, Stri
     )
 }
 
+#[derive(Deserialize)]
+struct DiagnosticArchive {
+    complete: bool,
+    #[serde(default)]
+    detail: String,
+    archive: Vec<u8>,
+}
+
+#[tauri::command(async)]
+fn collect_diagnostics(
+    app: AppHandle,
+    name: String,
+    peer: String,
+    destination: String,
+) -> Result<Value, String> {
+    validate_interface_name(&name)?;
+    require_profile(&name)?;
+    if peer.len() != 44 {
+        return Err("A complete peer public key is required".into());
+    }
+    let paths = native_paths(&app)?;
+    let (program, arguments) = if cfg!(target_os = "windows") {
+        (
+            paths.quick.clone(),
+            vec![
+                argument("desktop-client"),
+                argument("collect"),
+                argument(&name),
+                argument(peer),
+            ],
+        )
+    } else {
+        (
+            PathBuf::from("pkexec"),
+            vec![
+                argument(&paths.quick),
+                argument("desktop-collect"),
+                argument(&name),
+                argument(peer),
+            ],
+        )
+    };
+    let output = run_output_with_timeout(&program, &arguments, Duration::from_secs(100))?;
+    let archive: DiagnosticArchive = serde_json::from_str(&output)
+        .map_err(|error| format!("invalid diagnostic archive: {error}"))?;
+    if archive.archive.len() > 256 * 1024 || !archive.archive.starts_with(b"PK\x03\x04") {
+        return Err("invalid diagnostic ZIP data".into());
+    }
+    // Only the unprivileged desktop writes the chosen destination; never
+    // overwrite a pre-existing file or follow a replacement symlink.
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&destination)
+        .map_err(|error| format!("save diagnostics (choose a new filename): {error}"))?;
+    file.write_all(&archive.archive)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("save diagnostics: {error}"))?;
+    Ok(
+        serde_json::json!({"canceled": false, "path": destination, "complete": archive.complete, "detail": archive.detail}),
+    )
+}
+
 #[tauri::command(async)]
 fn write_tunnel(
     app: AppHandle,
@@ -1055,6 +1123,7 @@ pub fn run() {
             read_tunnel,
             generate_keys,
             derive_public_key,
+            collect_diagnostics,
             write_tunnel,
             import_config,
             open_config_directory,

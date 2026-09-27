@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { ask, open } from '@tauri-apps/plugin-dialog';
+import { ask, open, save } from '@tauri-apps/plugin-dialog';
 import type {
   ApplyResult,
   DeleteResult,
@@ -34,6 +34,11 @@ async function importConfigPath(
 }
 
 const api: DesktopAPI = {
+  collectDiagnostics: async (name, peer) => {
+    const destination = await save({ title: 'Save diagnostics to a new ZIP file', defaultPath: `wg-quic-${name}-${Date.now()}.zip`, filters: [{name: 'ZIP archive', extensions: ['zip']}] });
+    if (!destination) return { canceled: true };
+    return invoke('collect_diagnostics', { name, peer, destination });
+  },
   confirmRestart: (name) => ask(`Restart "${name}" to apply the saved configuration? Traffic will be interrupted while the tunnel reconnects.`, {
     title: 'Restart tunnel?', kind: 'warning', okLabel: 'Restart', cancelLabel: 'Keep running',
   }),

@@ -54,6 +54,8 @@ const toast = byId<HTMLDivElement>('toast');
 const pending = new Map<string, TunnelAction>();
 const pendingSince = new Map<string, number>();
 const applying = new Set<string>();
+const collecting = new Set<string>();
+const diagnosticResults = new Map<string, string>();
 const applications = new ConfigurationApplications(localStorage);
 const observations = new ObservationClock();
 let forceRefresh = false;
@@ -287,6 +289,41 @@ function renderDetail(tunnel?: TunnelView): void {
   setText('detail-public-key', status?.public_key || '—');
   byId<HTMLButtonElement>('copy-public-key').disabled = !status?.public_key;
   renderPeers(tunnel, showToast);
+  const peerSelect = byId<HTMLSelectElement>('diagnostic-peer');
+  const previousPeer = peerSelect.value;
+  const peers = status?.peers || [];
+  const signature = JSON.stringify(peers.map((peer) => [peer.public_key, peer.endpoint]));
+  if (peerSelect.dataset.peers !== signature) {
+    peerSelect.dataset.peers = signature;
+    peerSelect.replaceChildren(...peers.map((peer) => {
+      const option = document.createElement('option');
+      option.value = peer.public_key;
+      option.textContent = `${peer.endpoint || 'Peer'} · ${peer.public_key.slice(0, 12)}…`;
+      return option;
+    }));
+    if (peers.some((peer) => peer.public_key === previousPeer)) peerSelect.value = previousPeer;
+  }
+  peerSelect.disabled = collecting.has(tunnel.name);
+  const collect = byId<HTMLButtonElement>('collect-diagnostics');
+  collect.disabled = collecting.has(tunnel.name) || !tunnel.running || tunnel.statusState === 'unknown' || !peers.length;
+  collect.textContent = collecting.has(tunnel.name) ? 'Collecting (about 10 s)…' : 'Collect and export…';
+  setText('diagnostic-result', diagnosticResults.get(tunnel.name) || '');
+}
+
+async function collectDiagnostics(): Promise<void> {
+  const name = selectedName;
+  const peer = byId<HTMLSelectElement>('diagnostic-peer').value;
+  if (!name || !peer || collecting.has(name)) return;
+  collecting.add(name);
+  diagnosticResults.delete(name);
+  if (current) render(current);
+  try {
+    const result = await window.wgQuic.collectDiagnostics(name, peer);
+    if (!result.canceled) diagnosticResults.set(name, result.complete
+      ? `Diagnostics saved: ${result.path}`
+      : `Partial diagnostics saved: ${result.path}. ${result.detail || ''}`);
+  } catch (error) { diagnosticResults.set(name, errorMessage(error)); }
+  finally { collecting.delete(name); if (current) render(current); }
 }
 
 function renderConfigurationState(tunnel: TunnelView, busy: boolean): void {
@@ -878,6 +915,7 @@ byId('theme-toggle').addEventListener('click', () => {
 });
 
 byId('refresh').addEventListener('click', () => void refresh());
+byId('collect-diagnostics').addEventListener('click', () => void collectDiagnostics());
 byId('copy-public-key').addEventListener('click', () => {
   const key = current?.tunnels.find((tunnel) => tunnel.name === selectedName)?.status?.public_key;
   if (key) void copyPublicKey(key);
@@ -1021,6 +1059,8 @@ async function start(): Promise<void> {
     await runStatusInteractionSmoke(refreshSnapshot);
     const { runApplicationInteractionSmoke } = await import('./application-smoke');
     await runApplicationInteractionSmoke({ refresh: refreshSnapshot, edit: startEditTunnel, save: saveForm, apply: applyConfiguration, restart: restartTunnel });
+    const { runDiagnosticInteractionSmoke } = await import('./diagnostic-smoke');
+    await runDiagnosticInteractionSmoke({ refresh: refreshSnapshot, collect: collectDiagnostics });
     await completeDesktopSmoke('wg-quic desktop renderer smoke test passed');
     return;
   }

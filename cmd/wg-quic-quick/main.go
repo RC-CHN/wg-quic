@@ -32,6 +32,18 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "desktop-collect":
+		if len(args) != 3 {
+			return usage()
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		result, err := quick.CollectDesktopDiagnostics(ctx, args[1], args[2])
+		if err != nil {
+			return err
+		}
+		fmt.Println(result)
+		return nil
 	case "desktop-apply":
 		if len(args) < 2 || len(args) > 3 {
 			return usage()
@@ -645,6 +657,11 @@ func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
 	}
 	request := desktopClientRequest{action: args[0], name: args[1]}
 	switch request.action {
+	case "collect":
+		if len(args) != 3 {
+			return desktopClientRequest{}, errors.New("collect requires an interface and peer public key")
+		}
+		request.source = args[2]
 	case "apply":
 		if len(args) < 2 || len(args) > 3 {
 			return desktopClientRequest{}, errors.New("apply accepts an interface and optional request ID")

@@ -40,6 +40,7 @@ type windowsDesktopRequest struct {
 	Action             string `json:"action"`
 	Name               string `json:"name"`
 	RequestID          string `json:"request_id,omitempty"`
+	PeerPublicKey      string `json:"peer_public_key,omitempty"`
 	Config             []byte `json:"config,omitempty"`
 	Overwrite          bool   `json:"overwrite,omitempty"`
 	DeadlineUnixMillis int64  `json:"deadline_unix_millis"`
@@ -124,6 +125,9 @@ func runWindowsElevatedDesktopClient(
 	}
 	if action == "apply" {
 		request.RequestID = source
+	}
+	if action == "collect" {
+		request.PeerPublicKey = source
 	}
 	resultChannel := make(chan windowsDesktopResult, 1)
 	resultError := make(chan error, 1)
@@ -213,6 +217,8 @@ func validateWindowsDesktopRequest(
 		return err
 	}
 	switch action {
+	case "collect":
+		return validateDesktopCollectPeer(source)
 	case "apply":
 		return validateDesktopApplyRequestID(source)
 	case "up", "down", "check", "delete", "read", "status", "reload", "refresh-endpoints":
@@ -231,7 +237,7 @@ func validateWindowsDesktopRequest(
 
 func windowsDesktopActionReturnsContents(action string) bool {
 	switch action {
-	case "read", "status", "reload", "refresh-endpoints", "reconcile", "apply":
+	case "read", "status", "reload", "refresh-endpoints", "reconcile", "apply", "collect":
 		return true
 	default:
 		return false

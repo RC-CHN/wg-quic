@@ -137,6 +137,9 @@ func runWindowsManagementClient(
 	if action == "apply" {
 		request.RequestID = source
 	}
+	if action == "collect" {
+		request.PeerPublicKey = source
+	}
 	if action == "import" || action == "reconcile" {
 		contents, err := readWindowsDesktopConfig(source)
 		if err != nil {
@@ -260,6 +263,7 @@ func shouldUseWindowsDesktopElevationFallback(err error) bool {
 
 type windowsManagementRequest struct {
 	RequestID          string `json:"request_id,omitempty"`
+	PeerPublicKey      string `json:"peer_public_key,omitempty"`
 	ProtocolVersion    int    `json:"protocol_version"`
 	Action             string `json:"action"`
 	Name               string `json:"name"`
@@ -675,6 +679,9 @@ func windowsManagementRequestDeadline(
 func validateWindowsManagementRequest(
 	request windowsManagementRequest,
 ) error {
+	if request.PeerPublicKey != "" && request.Action != "collect" {
+		return errors.New("peer public key is only supported for collect")
+	}
 	if request.RequestID != "" && request.Action != "apply" {
 		return errors.New("request ID is only supported for apply")
 	}
@@ -687,6 +694,9 @@ func validateWindowsManagementRequest(
 		return nil
 	}
 	source := ""
+	if request.Action == "collect" {
+		source = request.PeerPublicKey
+	}
 	if request.Action == "apply" {
 		source = request.RequestID
 	}
@@ -739,6 +749,8 @@ func runWindowsManagementOperation(
 		return "", err
 	}
 	switch request.Action {
+	case "collect":
+		return CollectDesktopDiagnostics(ctx, request.Name, request.PeerPublicKey)
 	case "apply":
 		if request.RequestID == "" {
 			if err := validateWindowsManagementStoredConfig(request.Name); err != nil {

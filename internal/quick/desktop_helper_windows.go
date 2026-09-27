@@ -167,6 +167,12 @@ func runWindowsDesktopHelper(
 	request windowsDesktopRequest,
 ) (string, error) {
 	source := ""
+	if request.PeerPublicKey != "" && request.Action != "collect" {
+		return "", errors.New("peer public key is only supported for collect")
+	}
+	if request.Action == "collect" {
+		source = request.PeerPublicKey
+	}
 	if request.RequestID != "" && request.Action != "apply" {
 		return "", errors.New("request ID is only supported for apply")
 	}
@@ -202,6 +208,8 @@ func runWindowsDesktopHelper(
 	}
 
 	switch request.Action {
+	case "collect":
+		return CollectDesktopDiagnostics(ctx, request.Name, request.PeerPublicKey)
 	case "apply":
 		return ApplyDesktopConfig(ctx, request.Name, request.RequestID)
 	case "up", "down":
