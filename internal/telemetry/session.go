@@ -14,14 +14,15 @@ const RecentSessionTelemetryVersion = 1
 // Session close reasons are stable protocol values. Callers must treat values
 // they don't recognize as unknown instead of deriving behavior from error text.
 const (
-	SessionCloseLocalShutdown        = "local_shutdown"
-	SessionCloseRemote               = "remote_close"
-	SessionCloseIdleTimeout          = "idle_timeout"
-	SessionCloseHandshakeTimeout     = "handshake_timeout"
-	SessionCloseTransportError       = "transport_error"
-	SessionCloseEndpointReplaced     = "endpoint_replaced"
-	SessionCloseConfigurationRemoved = "configuration_removed"
-	SessionCloseUnknown              = "unknown"
+	SessionCloseLocalShutdown         = "local_shutdown"
+	SessionCloseRemote                = "remote_close"
+	SessionCloseIdleTimeout           = "idle_timeout"
+	SessionCloseHandshakeTimeout      = "handshake_timeout"
+	SessionCloseAuthenticationTimeout = "authentication_timeout"
+	SessionCloseTransportError        = "transport_error"
+	SessionCloseEndpointReplaced      = "endpoint_replaced"
+	SessionCloseConfigurationRemoved  = "configuration_removed"
+	SessionCloseUnknown               = "unknown"
 )
 
 // SessionPeerObservation describes why a QUIC session is associated with a

@@ -83,6 +83,25 @@ refreshes; observation errors cannot leave a permanently green connection.
 Validation: eleven Rust tests, including blocked readers and mutation races;
 frontend tests and Chromium smoke including actual list focus retention.
 
+## Session resource budgets
+
+Admission now precedes session queues/FEC allocation: defaults are 1,024 total,
+256 inbound and 32 unauthenticated inbound sessions per bind. The separate
+inbound budget leaves capacity for configured outbound peers. An inbound QUIC
+connection must authenticate a WireGuard packet within ten seconds. Atomic
+authentication transitions return the pending reservation exactly once;
+authenticated sessions are exempt from the deadline. Pending inbound traffic
+can reserve at most 32 entries (or one quarter of a smaller shared queue).
+Status exposes admission rejections and authentication timeouts, and closed
+session history records the authentication-timeout reason.
+
+These limits are tunable through `armorbind.Config`; the quick configuration
+syntax is unchanged. They bound application sessions after QUIC acceptance,
+not every kernel or TLS-handshake allocation. Authenticated peers retain the
+existing shared queue behavior. Validation: bind/core race tests, concurrent
+authentication/close accounting, queue reservation release on errors, and a
+real QUIC authentication deadline test.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

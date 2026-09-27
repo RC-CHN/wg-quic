@@ -35,6 +35,11 @@ const (
 
 type Config struct {
 	QueueSize int
+	// Admission limits apply before allocating session queues or FEC state.
+	MaxSessions                  int
+	MaxInboundSessions           int
+	MaxPendingInboundSessions    int
+	InboundAuthenticationTimeout time.Duration
 	// DatagramReceiveQueueCapacity tunes the quic-go DATAGRAM receive
 	// queue depth; zero keeps the fork default (128). Tune it against the
 	// quic_datagram_rcv_queue_drops and high-water counters, not by
@@ -66,14 +71,18 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		QueueSize:              1024,
-		QueueDropEventInterval: time.Second,
-		HandshakeTimeout:       4 * time.Second,
-		MaxIdleTimeout:         15 * time.Second,
-		KeepAlivePeriod:        5 * time.Second,
-		ReconnectMin:           250 * time.Millisecond,
-		ReconnectMax:           30 * time.Second,
-		ReconnectStable:        10 * time.Second,
+		QueueSize:                    1024,
+		MaxSessions:                  1024,
+		MaxInboundSessions:           256,
+		MaxPendingInboundSessions:    32,
+		InboundAuthenticationTimeout: 10 * time.Second,
+		QueueDropEventInterval:       time.Second,
+		HandshakeTimeout:             4 * time.Second,
+		MaxIdleTimeout:               15 * time.Second,
+		KeepAlivePeriod:              5 * time.Second,
+		ReconnectMin:                 250 * time.Millisecond,
+		ReconnectMax:                 30 * time.Second,
+		ReconnectStable:              10 * time.Second,
 		ReconnectJitter: func(value time.Duration) time.Duration {
 			return value * time.Duration(900+rand.IntN(201)) / 1000
 		},
@@ -91,7 +100,8 @@ type receivedPacket struct {
 	ep   *receiveEndpoint
 	// release returns data to its pool after the receive worker copies it
 	// out. Nil for frames owned by the FEC decoder.
-	release func([]byte)
+	release     func([]byte)
+	reservation *session
 }
 
 type outboundPacket struct {
@@ -100,15 +110,17 @@ type outboundPacket struct {
 }
 
 type runState struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	carrier   *quiccarrier.Carrier
-	recv      chan receivedPacket
-	cfg       Config
-	mu        sync.Mutex
-	sessions  map[uint64]*session
-	endpoints map[netip.AddrPort]*Endpoint
-	closing   bool
+	ctx             context.Context
+	cancel          context.CancelFunc
+	carrier         *quiccarrier.Carrier
+	recv            chan receivedPacket
+	cfg             Config
+	mu              sync.Mutex
+	sessions        map[uint64]*session
+	endpoints       map[netip.AddrPort]*Endpoint
+	closing         bool
+	inboundSessions int
+	pendingInbound  int
 
 	reassembly *reassembler
 	wg         sync.WaitGroup
@@ -186,21 +198,23 @@ type endpointFECPolicyLease struct {
 var _ conn.Bind = (*Bind)(nil)
 
 type bindStats struct {
-	wgTxPackets    atomic.Uint64
-	wgTxBytes      atomic.Uint64
-	wgRxPackets    atomic.Uint64
-	wgRxBytes      atomic.Uint64
-	wireTxPackets  atomic.Uint64
-	wireTxBytes    atomic.Uint64
-	wireRxPackets  atomic.Uint64
-	wireRxBytes    atomic.Uint64
-	queueDrops     atomic.Uint64
-	fecDataTx      atomic.Uint64
-	fecParityTx    atomic.Uint64
-	fecRawLost     atomic.Uint64
-	fecRecovered   atomic.Uint64
-	fecUnrecovered atomic.Uint64
-	activeSessions atomic.Uint64
+	sessionAdmissionRejected atomic.Uint64
+	authenticationTimeouts   atomic.Uint64
+	wgTxPackets              atomic.Uint64
+	wgTxBytes                atomic.Uint64
+	wgRxPackets              atomic.Uint64
+	wgRxBytes                atomic.Uint64
+	wireTxPackets            atomic.Uint64
+	wireTxBytes              atomic.Uint64
+	wireRxPackets            atomic.Uint64
+	wireRxBytes              atomic.Uint64
+	queueDrops               atomic.Uint64
+	fecDataTx                atomic.Uint64
+	fecParityTx              atomic.Uint64
+	fecRawLost               atomic.Uint64
+	fecRecovered             atomic.Uint64
+	fecUnrecovered           atomic.Uint64
+	activeSessions           atomic.Uint64
 }
 
 type sessionCounters struct {
@@ -238,6 +252,18 @@ const (
 
 func New(cfg Config) *Bind {
 	defaults := DefaultConfig()
+	if cfg.MaxSessions <= 0 {
+		cfg.MaxSessions = defaults.MaxSessions
+	}
+	if cfg.MaxInboundSessions <= 0 {
+		cfg.MaxInboundSessions = defaults.MaxInboundSessions
+	}
+	if cfg.MaxPendingInboundSessions <= 0 {
+		cfg.MaxPendingInboundSessions = defaults.MaxPendingInboundSessions
+	}
+	if cfg.InboundAuthenticationTimeout <= 0 {
+		cfg.InboundAuthenticationTimeout = defaults.InboundAuthenticationTimeout
+	}
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = defaults.QueueSize
 	}
@@ -451,7 +477,9 @@ func (b *Bind) Stats() telemetry.Stats {
 		QueueDrops: b.stats.queueDrops.Load(), FECDataTx: b.stats.fecDataTx.Load(),
 		FECParityTx: b.stats.fecParityTx.Load(), FECRawLost: b.stats.fecRawLost.Load(),
 		FECRecovered: b.stats.fecRecovered.Load(), FECUnrecovered: b.stats.fecUnrecovered.Load(),
-		ActiveSessions: b.stats.activeSessions.Load(),
+		ActiveSessions:           b.stats.activeSessions.Load(),
+		SessionAdmissionRejected: b.stats.sessionAdmissionRejected.Load(),
+		AuthenticationTimeouts:   b.stats.authenticationTimeouts.Load(),
 	}
 	b.mu.Lock()
 	state := b.state
@@ -739,6 +767,14 @@ func (b *Bind) AssociateSessionPeer(
 	}
 	state.mu.Lock()
 	sess := state.sessions[sessionID]
+	if sess != nil && !sess.closed.Load() {
+		if sess.authentication.CompareAndSwap(0, 1) && sess.role == "inbound" {
+			state.pendingInbound--
+		}
+		if sess.authentication.Load() == 2 {
+			sess = nil
+		}
+	}
 	state.mu.Unlock()
 	if sess == nil || sess.closed.Load() {
 		return false
@@ -1474,13 +1510,11 @@ func (b *Bind) receiveFunc(state *runState) conn.ReceiveFunc {
 		}
 		n := 0
 		put := func(packet receivedPacket) error {
+			defer packet.dispose()
 			if len(packets[n]) < len(packet.data) {
 				return fmt.Errorf("receive buffer is %d bytes, need %d", len(packets[n]), len(packet.data))
 			}
 			sizes[n] = copy(packets[n], packet.data)
-			if packet.release != nil {
-				packet.release(packet.data)
-			}
 			eps[n] = packet.ep
 			n++
 			return nil
@@ -1526,6 +1560,12 @@ func (b *Bind) acceptLoop(state *runState) {
 			return
 		}
 		ep.route.Store(&endpointRoute{fallback: state.endpoints[remote]})
+		if !state.admitSessionLocked(true) {
+			state.mu.Unlock()
+			b.stats.sessionAdmissionRejected.Add(1)
+			qconn.CloseWithError("session admission limit")
+			continue
+		}
 		ep.mu.Lock()
 		sess := b.newSessionLocked(state, ep, false)
 		ep.session = sess
@@ -1570,6 +1610,12 @@ func (b *Bind) sessionForEndpoint(
 		state.mu.Unlock()
 		return nil, errors.New("cannot dial a retired peer endpoint")
 	}
+	if !state.admitSessionLocked(false) {
+		ep.mu.Unlock()
+		state.mu.Unlock()
+		b.stats.sessionAdmissionRejected.Add(1)
+		return nil, errors.New("session admission limit")
+	}
 	if state.endpoints[ep.addr] == nil {
 		state.endpoints[ep.addr] = ep
 	}
@@ -1603,6 +1649,10 @@ func (b *Bind) newSessionLocked(
 	if ep.isConfigured() {
 		role = "outbound"
 		configuredEndpoint = ep.addr.String()
+	}
+	if role == "inbound" {
+		state.inboundSessions++
+		state.pendingInbound++
 	}
 	sess := &session{
 		id: b.nextSession.Add(1), generation: ep.sessionGeneration,
@@ -1701,6 +1751,10 @@ func reportReconnectAttempt(attempt uint64) bool {
 
 func (b *Bind) runSession(sess *session) {
 	defer sess.close()
+	if sess.role == "inbound" {
+		timer := time.AfterFunc(sess.state.cfg.InboundAuthenticationTimeout, sess.expireAuthentication)
+		defer timer.Stop()
+	}
 	sendDone := make(chan struct{})
 	go func() { defer close(sendDone); sess.sendLoop() }()
 	sess.receiveLoop()
@@ -1728,12 +1782,15 @@ type session struct {
 	// Endpoint snapshot. It is computed once at construction because the
 	// session's endpoint identity never changes afterwards; the pointer is
 	// shared with the endpoint's own immutable snapshot when possible.
-	receiveRoute        *endpointRoute
-	establishedAt       time.Time
-	authenticatedPeers  map[string]uint64
-	readyOnce           sync.Once
-	closeOnce           sync.Once
-	closed              atomic.Bool
+	receiveRoute       *endpointRoute
+	establishedAt      time.Time
+	authenticatedPeers map[string]uint64
+	readyOnce          sync.Once
+	closeOnce          sync.Once
+	closed             atomic.Bool
+	// 0 pending, 1 authenticated, 2 expired/closed; transitions serialize admission accounting.
+	authentication      atomic.Uint32
+	pendingReceive      atomic.Int32
 	reconnectAttempt    bool
 	replacesSessionID   uint64
 	closeReason         string
@@ -2035,6 +2092,12 @@ func (s *session) close() {
 		s.mu.Unlock()
 		s.state.mu.Lock()
 		delete(s.state.sessions, s.id)
+		if s.role == "inbound" {
+			s.state.inboundSessions--
+			if s.authentication.Swap(2) == 0 {
+				s.state.pendingInbound--
+			}
+		}
 		s.state.mu.Unlock()
 		s.endpoint.owner.stats.activeSessions.Add(^uint64(0))
 		s.endpoint.mu.Lock()
@@ -2451,12 +2514,19 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *receiveEndpoi
 		// worker has copied it out. Foreign capacities no-op inside release.
 		rp.release = releaseReassemblyBuffer
 	}
+	if s.role == "inbound" && s.authentication.Load() == 0 {
+		if !s.reserveUnauthenticatedReceive() {
+			s.endpoint.owner.stats.queueDrops.Add(1)
+			s.stats.queueDrops.Add(1)
+			rp.dispose()
+			return
+		}
+		rp.reservation = s
+	}
 	select {
 	case s.state.recv <- rp:
 	case <-s.ctx.Done():
-		if rp.release != nil {
-			rp.release(rp.data)
-		}
+		rp.dispose()
 	default:
 		s.endpoint.owner.stats.queueDrops.Add(1)
 		s.stats.queueDrops.Add(1)
@@ -2470,8 +2540,6 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *receiveEndpoi
 				),
 			)
 		}
-		if rp.release != nil {
-			rp.release(rp.data)
-		}
+		rp.dispose()
 	}
 }
