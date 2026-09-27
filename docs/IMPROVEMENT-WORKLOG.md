@@ -102,6 +102,17 @@ existing shared queue behavior. Validation: bind/core race tests, concurrent
 authentication/close accounting, queue reservation release on errors, and a
 real QUIC authentication deadline test.
 
+## Measured observations and receive metadata
+
+Endpoint status construction indexes live sessions once instead of rescanning
+them for every peer. The implementation is isolated in `endpoint_status.go`.
+QUIC queue metadata captures UDP addresses by value; an additive owned receive
+API avoids per-packet address allocations while preserving the existing API.
+See [retained raw measurements](benchmarks/2026-09-review/README.md) for the
+allocation result, the status-query time/memory tradeoff, reproducible commands,
+and the limited loopback throughput evidence. No receive batching or buffer
+ownership experiment from the earlier negative study was reintroduced.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

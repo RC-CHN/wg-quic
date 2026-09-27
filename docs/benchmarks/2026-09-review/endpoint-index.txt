@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: github.com/RC-CHN/wg-quic/internal/bind
+cpu: Intel(R) Xeon(R) CPU Max 9470C
+BenchmarkEndpointStatus/peers-100/repeated-104         	    8666	    126505 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-100/repeated-104         	    9494	    122037 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-100/repeated-104         	    9604	    119794 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-100/indexed-104          	   52232	     22221 ns/op	   12760 B/op	       6 allocs/op
+BenchmarkEndpointStatus/peers-100/indexed-104          	   56073	     22215 ns/op	   12760 B/op	       6 allocs/op
+BenchmarkEndpointStatus/peers-100/indexed-104          	   55249	     22335 ns/op	   12760 B/op	       6 allocs/op
+BenchmarkEndpointStatus/peers-1000/repeated-104        	      79	  14063511 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-1000/repeated-104        	      75	  13819335 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-1000/repeated-104        	      80	  13628075 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEndpointStatus/peers-1000/indexed-104         	    4378	    267338 ns/op	  196736 B/op	       8 allocs/op
+BenchmarkEndpointStatus/peers-1000/indexed-104         	    4113	    269660 ns/op	  196736 B/op	       8 allocs/op
+BenchmarkEndpointStatus/peers-1000/indexed-104         	    5023	    268295 ns/op	  196736 B/op	       8 allocs/op
+PASS
+ok  	github.com/RC-CHN/wg-quic/internal/bind	15.557s

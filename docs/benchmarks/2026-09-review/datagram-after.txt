@@ -1,0 +1,11 @@
+Kernel Version: 7.0
+
+goos: linux
+goarch: amd64
+pkg: github.com/quic-go/quic-go
+cpu: Intel(R) Xeon(R) CPU Max 9470C
+BenchmarkDatagramReceiveRemoteAddress-104     	11584306	        97.18 ns/op	12347.65 MB/s	       0 B/op	       0 allocs/op
+BenchmarkDatagramReceiveRemoteAddress-104     	12409772	        98.49 ns/op	12183.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkDatagramReceiveRemoteAddress-104     	12150364	        95.74 ns/op	12534.22 MB/s	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/quic-go/quic-go	3.852s

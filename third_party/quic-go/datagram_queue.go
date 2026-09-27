@@ -3,6 +3,7 @@ package quic
 import (
 	"context"
 	"net"
+	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -102,7 +103,10 @@ func ReleaseDatagramSendBuffer(data []byte) {
 type ReceivedDatagram struct {
 	Data       []byte
 	RemoteAddr net.Addr
-	buffer     *datagramReceiveBuffer
+	// RemoteAddrPort is a value snapshot of a UDP source. The AddrPort receive
+	// API leaves RemoteAddr nil for UDP, avoiding two allocations per packet.
+	RemoteAddrPort netip.AddrPort
+	buffer         *datagramReceiveBuffer
 }
 
 func (d *ReceivedDatagram) Release() {
@@ -248,9 +252,14 @@ func (h *datagramQueue) HandleDatagramFrameFrom(f *wire.DatagramFrame, remoteAdd
 	data := buffer[:len(f.Data)]
 	copy(data, f.Data)
 	datagram := ReceivedDatagram{
-		Data:       data,
-		RemoteAddr: cloneDatagramRemoteAddr(remoteAddr),
-		buffer:     buffer,
+		Data:   data,
+		buffer: buffer,
+	}
+	if udp, ok := remoteAddr.(*net.UDPAddr); ok && udp != nil && udp.AddrPort().IsValid() {
+		addr := udp.AddrPort()
+		datagram.RemoteAddrPort = netip.AddrPortFrom(addr.Addr().Unmap(), addr.Port())
+	} else {
+		datagram.RemoteAddr = cloneDatagramRemoteAddr(remoteAddr)
 	}
 	queued := h.enqueueReceivedDatagram(datagram)
 	if !queued {
@@ -306,7 +315,7 @@ func cloneDatagramRemoteAddr(remoteAddr net.Addr) net.Addr {
 
 // Receive gets a received DATAGRAM frame.
 func (h *datagramQueue) Receive(ctx context.Context) ([]byte, error) {
-	datagram, err := h.ReceiveOwned(ctx)
+	datagram, err := h.ReceiveOwnedAddrPort(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +325,14 @@ func (h *datagramQueue) Receive(ctx context.Context) ([]byte, error) {
 }
 
 func (h *datagramQueue) ReceiveOwned(ctx context.Context) (ReceivedDatagram, error) {
+	datagram, err := h.ReceiveOwnedAddrPort(ctx)
+	if err == nil && datagram.RemoteAddrPort.IsValid() {
+		datagram.RemoteAddr = net.UDPAddrFromAddrPort(datagram.RemoteAddrPort)
+	}
+	return datagram, err
+}
+
+func (h *datagramQueue) ReceiveOwnedAddrPort(ctx context.Context) (ReceivedDatagram, error) {
 	for {
 		h.rcvMx.Lock()
 		if !h.rcvQueue.Empty() {

@@ -3230,6 +3230,16 @@ func (c *Conn) ReceiveDatagramOwned(ctx context.Context) (ReceivedDatagram, erro
 	return c.datagramQueue.ReceiveOwned(ctx)
 }
 
+// ReceiveDatagramOwnedAddrPort is ReceiveDatagramOwned with a value-type UDP
+// source in RemoteAddrPort. RemoteAddr is populated only for non-UDP sources.
+// The caller must call Release when finished with the payload.
+func (c *Conn) ReceiveDatagramOwnedAddrPort(ctx context.Context) (ReceivedDatagram, error) {
+	if !c.config.EnableDatagrams {
+		return ReceivedDatagram{}, errors.New("datagram support disabled")
+	}
+	return c.datagramQueue.ReceiveOwnedAddrPort(ctx)
+}
+
 // LocalAddr returns the local address of the QUIC connection.
 func (c *Conn) LocalAddr() net.Addr { return c.conn.LocalAddr() }
 

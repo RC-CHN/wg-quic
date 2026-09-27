@@ -370,3 +370,40 @@ func BenchmarkDatagramReceiveQueue(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkDatagramReceiveRemoteAddress(b *testing.B) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	remote := &net.UDPAddr{IP: net.ParseIP("198.51.100.20"), Port: 52821}
+	payload := &wire.DatagramFrame{Data: make([]byte, 1200)}
+	b.ReportAllocs()
+	b.SetBytes(1200)
+	b.ResetTimer()
+	for range b.N {
+		queue.HandleDatagramFrameFrom(payload, remote)
+		datagram, err := queue.ReceiveOwnedAddrPort(context.Background())
+		if err != nil {
+			b.Fatal(err)
+		}
+		datagram.Release()
+	}
+}
+
+func TestDatagramRemoteAddrPortOwnsAddressSnapshot(t *testing.T) {
+	for _, source := range []string{"198.51.100.20:52821", "[2001:db8::1]:443", "[fe80::1%eth0]:443"} {
+		t.Run(source, func(t *testing.T) {
+			remote, err := net.ResolveUDPAddr("udp", source)
+			require.NoError(t, err)
+			queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+			queue.HandleDatagramFrameFrom(&wire.DatagramFrame{Data: []byte("payload")}, remote)
+			remote.IP[0] = 0
+			remote.Port = 1
+			remote.Zone = "changed"
+			datagram, err := queue.ReceiveOwnedAddrPort(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, source, datagram.RemoteAddrPort.String())
+			require.Nil(t, datagram.RemoteAddr)
+			datagram.Release()
+			datagram.Release()
+		})
+	}
+}

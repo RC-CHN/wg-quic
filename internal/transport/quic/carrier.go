@@ -165,14 +165,17 @@ func (c *Connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 }
 
 func (c *Connection) ReceiveDatagramOwned(ctx context.Context) (ReceivedDatagram, error) {
-	datagram, err := c.conn.ReceiveDatagramOwned(ctx)
+	datagram, err := c.conn.ReceiveDatagramOwnedAddrPort(ctx)
 	if err != nil {
 		return ReceivedDatagram{}, err
 	}
-	remote, err := addrPort(datagram.RemoteAddr)
-	if err != nil {
-		datagram.Release()
-		return ReceivedDatagram{}, err
+	remote := datagram.RemoteAddrPort
+	if !remote.IsValid() {
+		remote, err = addrPort(datagram.RemoteAddr)
+		if err != nil {
+			datagram.Release()
+			return ReceivedDatagram{}, err
+		}
 	}
 	return ReceivedDatagram{
 		Data:       datagram.Data,
@@ -367,7 +370,7 @@ func serverTLSConfig() (*tls.Config, error) {
 
 func addrPort(addr net.Addr) (netip.AddrPort, error) {
 	udp, ok := addr.(*net.UDPAddr)
-	if !ok {
+	if !ok || udp == nil {
 		return netip.AddrPort{}, fmt.Errorf("unexpected remote address %T", addr)
 	}
 	ip, ok := netip.AddrFromSlice(udp.IP)

@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/RC-CHN/wg-quic/internal/bind
+cpu: Intel(R) Xeon(R) CPU Max 9470C
+BenchmarkTransportThroughput/salamander-2         	       1	3008582759 ns/op	       409.5 Mbps
+--- BENCH: BenchmarkTransportThroughput/salamander-2
+    throughput_test.go:159: mode=salamander sent=759671 packets delivered=153570560 bytes in 3s
+BenchmarkTransportThroughput/salamander-2         	       1	3004723316 ns/op	       421.0 Mbps
+--- BENCH: BenchmarkTransportThroughput/salamander-2
+    throughput_test.go:159: mode=salamander sent=776974 packets delivered=157875200 bytes in 3s
+BenchmarkTransportThroughput/salamander-2         	       1	3004804128 ns/op	       420.2 Mbps
+--- BENCH: BenchmarkTransportThroughput/salamander-2
+    throughput_test.go:159: mode=salamander sent=774743 packets delivered=157565440 bytes in 3s
+PASS
+ok  	github.com/RC-CHN/wg-quic/internal/bind	9.051s

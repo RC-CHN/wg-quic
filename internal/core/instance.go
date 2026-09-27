@@ -341,6 +341,7 @@ func (i *Instance) status() control.Status {
 	}
 	i.mu.Unlock()
 	runtimePeers, _ := wgdevice.PeerStatuses(i.device)
+	endpointObservations := i.bind.EndpointStatusSnapshot()
 	i.endpointMu.RLock()
 	peers := make([]control.PeerStatus, 0, len(i.peerOrder))
 	for _, publicKey := range i.peerOrder {
@@ -365,10 +366,10 @@ func (i *Instance) status() control.Status {
 		}
 		peer.Session = string(armorbind.EndpointSessionIdle)
 		if endpoint, ok := peerSessionEndpoint(peer); ok {
-			peer.Session = string(i.bind.EndpointSessionState(endpoint))
+			peer.Session = string(endpointObservations.For(endpoint).Session)
 		}
 		if endpoint, err := peerendpoint.ParseNumeric(peer.SelectedEndpoint); err == nil {
-			reconnect := i.bind.EndpointReconnectStatus(endpoint)
+			reconnect := endpointObservations.For(endpoint).Reconnect
 			peer.ReconnectAttempts = reconnect.Attempts
 			peer.ReconnectFailures = reconnect.Failures
 			peer.ConsecutiveReconnectFailures = reconnect.ConsecutiveFailures
