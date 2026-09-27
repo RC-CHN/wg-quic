@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## v0.3.7 - 2026-09-27
+
+Desktop usability, bounded resource use, and observability release.
+
+- Preserve comments, advanced directives, repeated fields, and all peers when
+  editing configurations. Background refreshes preserve unsaved drafts, focus,
+  and caret position; closing or quitting asks before discarding changes.
+- Distinguish unavailable status, QUIC connection establishment, and authenticated
+  WireGuard connectivity. Saving is separate from applying; apply transactions
+  report success, failure, unknown outcomes, or a required restart explicitly.
+- Add Chinese desktop workflows, public-key derivation/copying, per-peer traffic
+  rates and disconnect explanations, plus bounded diagnostic ZIP export.
+- Bound native status workers and cache lifetimes, reject stale observations,
+  and preserve responsive navigation when other tunnel queries stall.
+- Bound total, inbound, and unauthenticated sessions; expire inbound sessions
+  that do not authenticate within ten seconds and reserve receive capacity for
+  authenticated traffic. Expose admission and authentication-timeout counters.
+- Fix duplicate late FEC shards changing recovery accounting more than once;
+  validate feedback and add fuzz/invariant regression coverage.
+- Index endpoint status observations once per snapshot and remove receive-source
+  address allocations. Synthetic 1,000-peer status work fell from about 14 ms
+  to 0.27 ms; loopback throughput measurements overlap and do not establish a
+  throughput gain. See `docs/benchmarks/2026-09-review/` for raw measurements.
+- Share Go/Rust/TypeScript contract fixtures and exercise actual browser typing,
+  focus, keyboard navigation, errors, clipboard, language switching, and quit
+  behavior. Handle Windows checkout newlines and Chrome profile cleanup races.
+
+
 ## v0.3.6 - 2026-09-13
 
 Small-VPS throughput and vendor-kernel TUN compatibility release.
