@@ -22,6 +22,8 @@ export async function runEditorInteractionSmoke(actions: {
     await actions.startNewTunnel();
     const generated = input('form-private-key').value;
     assert(generated.length > 0, 'new tunnel needs a generated key');
+    assert(input('form-public-key').value === (await window.wgQuic.derivePublicKey(generated)).trim(), 'own public key does not match the generated private key');
+    assert(!(document.getElementById('form-copy-public-key') as HTMLButtonElement).disabled, 'generated public key cannot be copied');
     input('form-name').value = 'editor-smoke';
     const address = input('form-addresses');
     address.value = '10.22.0.2/32';

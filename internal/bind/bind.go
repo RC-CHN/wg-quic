@@ -180,6 +180,9 @@ func (b *Bind) ReceiveSequence() uint64 {
 	return b.receiveSequence.Load()
 }
 
+// ObservationID identifies this counter lifetime without exposing configuration.
+func (b *Bind) ObservationID() string { return b.eventStreamID }
+
 type endpointKeyLease struct {
 	key  obfs.Key
 	refs int

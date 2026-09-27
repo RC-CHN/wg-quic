@@ -15,6 +15,8 @@ import (
 const requestTimeout = 5 * time.Second
 
 type Status struct {
+	PublicKey               string                               `json:"public_key,omitempty"`
+	ObservationID           string                               `json:"observation_id,omitempty"`
 	Interface               string                               `json:"interface"`
 	State                   string                               `json:"state"`
 	ListenPort              uint16                               `json:"listen_port"`

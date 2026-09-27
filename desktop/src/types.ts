@@ -40,6 +40,8 @@ export interface RuntimeStats {
 }
 
 export interface CoreStatus {
+	public_key?: string;
+	observation_id?: string;
   interface: string;
   state: string;
   listen_port: number;
@@ -49,6 +51,7 @@ export interface CoreStatus {
   addresses?: string[];
   peers?: PeerStatus[];
   sessions?: Array<{session_id: number; session_generation: number; state: string; peers?: Array<{public_key: string; authenticated: boolean}>}>;
+  recent_sessions?: Array<{session_id: number; closed_at: string; close_reason: string; last_error?: string; current_endpoint?: string}>;
   stats: RuntimeStats;
 }
 
@@ -121,6 +124,7 @@ export interface DesktopAPI {
   deleteTunnel(name: string): Promise<DeleteResult>;
   readTunnel(name: string): Promise<string>;
   generateKeys(): Promise<TunnelKeys>;
+  derivePublicKey(privateKey: string): Promise<string>;
   writeTunnel(
     name: string,
     contents: string,

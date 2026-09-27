@@ -70,6 +70,7 @@ try {
         tunnels: [], refreshedAt: String(Date.now())
       };
       if (command === 'generate_keys') return JSON.stringify({private_key: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', public_key: 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='});
+      if (command === 'derive_public_key') return 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
       if (command === 'complete_desktop_smoke') { window.__smokeResult = args; return; }
       throw new Error('Unexpected native operation: ' + command);
     }};
@@ -84,9 +85,16 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!result || result.failed) throw new Error(result?.message || `Renderer did not finish\n${stderr}`);
+  await send('Browser.grantPermissions', { origin: `http://127.0.0.1:${server.address().port}`, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await call('Runtime.evaluate', { expression: `document.getElementById('new-tunnel').click()`, userGesture: true });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const saveVisible = await call('Runtime.evaluate', { expression: `(() => { const rect = document.getElementById('form-save').getBoundingClientRect(); return rect.top > 0 && rect.bottom < innerHeight; })()`, returnByValue: true });
+  if (!saveVisible.result?.value) throw new Error('Save action is outside the visible editor viewport');
+  await call('Runtime.evaluate', { expression: `document.getElementById('form-copy-public-key').click()`, userGesture: true });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const clipboard = await call('Runtime.evaluate', { expression: 'navigator.clipboard.readText()', awaitPromise: true, returnByValue: true, userGesture: true });
+  if (clipboard.result?.value !== 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=') throw new Error('Copy own public key did not write the expected public key to the clipboard');
   if (process.env.WG_QUIC_SMOKE_SCREENSHOT) {
-    await call('Runtime.evaluate', { expression: `document.getElementById('new-tunnel').click()` });
-    await new Promise((resolve) => setTimeout(resolve, 200));
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
     writeFileSync(process.env.WG_QUIC_SMOKE_SCREENSHOT, Buffer.from(data, 'base64'));
   }

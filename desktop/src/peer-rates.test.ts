@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { PeerRates } from './peer-rates';
+import type { TunnelView } from './types';
+
+const rates = new PeerRates();
+const tunnel = { configPath: 'wg0', running: true, sampledAt: 1000, status: { observation_id: 'epoch-a', peers: [{ public_key: 'peer', generation: 1, transfer_rx: 100, transfer_tx: 200 }] } } as TunnelView;
+assert.equal(rates.observe(tunnel).size, 0);
+tunnel.sampledAt = 2000;
+tunnel.status!.peers![0]!.transfer_rx = 1100;
+assert.equal(rates.observe(tunnel).get('peer')!.rx, 8000);
+assert.equal(rates.observe(tunnel).get('peer')!.rx, 8000, 'cached sample must not erase rate');
+tunnel.sampledAt = 3000;
+tunnel.status!.observation_id = 'epoch-b';
+assert.equal(rates.observe(tunnel).size, 0, 'core restart must reset deltas');
+tunnel.sampledAt = 4000;
+tunnel.status!.peers![0]!.transfer_rx = 1;
+assert.equal(rates.observe(tunnel).get('peer')!.rx, undefined, 'counter reset cannot report negative throughput');
+tunnel.sampledAt = 5000;
+tunnel.status!.peers![0]!.generation++;
+assert.equal(rates.observe(tunnel).size, 0, 'peer replacement must reset deltas');
+tunnel.statusState = 'unknown';
+assert.equal(rates.observe(tunnel).size, 0, 'unknown status must not show old rates');

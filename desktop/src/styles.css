@@ -939,6 +939,14 @@ dd {
   color: var(--green);
 }
 
+.public-key-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px 0; }
+.public-key-line code { overflow-wrap: anywhere; user-select: text; flex: 1; min-width: 160px; }
+.peer-copy { flex: 1; min-width: 0; }
+.peer-copy code { display: block; overflow-wrap: anywhere; user-select: text; }
+#session-history { margin-top: 20px; font-size: 13px; line-height: 1.7; }
+#session-history summary { cursor: pointer; }
+#form-public-key { min-width: 0; font-family: monospace; }
+
 .peer-empty {
   padding: 20px 15px;
   color: var(--faint);
@@ -981,7 +989,6 @@ footer {
 
 /* === Tunnel form === */
 .tunnel-form {
-  overflow-y: auto;
   padding: 22px 24px 24px;
 }
 

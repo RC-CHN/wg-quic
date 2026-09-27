@@ -17,6 +17,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/RC-CHN/wg-quic/internal/app"
 	armorbind "github.com/RC-CHN/wg-quic/internal/bind"
 	"github.com/RC-CHN/wg-quic/internal/config"
 	"github.com/RC-CHN/wg-quic/internal/control"
@@ -33,6 +34,7 @@ import (
 // socket after an optional quick layer has configured the host interface.
 type Instance struct {
 	name        string
+	publicKey   string
 	cfg         *config.Config
 	bind        *armorbind.Bind
 	device      *device.Device
@@ -88,6 +90,10 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 	}
 	if err := host.ValidateInterfaceName(name); err != nil {
 		return nil, err
+	}
+	publicKey, err := app.PublicKey(cfg.Interface.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("derive interface public key: %w", err)
 	}
 	configuredEndpoints := make(map[string]netip.AddrPort, len(cfg.Peers))
 	for index, peer := range cfg.Peers {
@@ -154,6 +160,7 @@ func newInstance(cfg *config.Config, name string, host devicehost.Host, debug bo
 	}
 	instance = &Instance{
 		name: name, cfg: cfg, bind: bind, device: dev,
+		publicKey:          publicKey,
 		controlPath:        host.ControlPath(name),
 		peers:              make(map[string]*peerRuntime, len(cfg.Peers)),
 		peerOrder:          make([]string, 0, len(cfg.Peers)),
@@ -386,6 +393,7 @@ func (i *Instance) status() control.Status {
 		addresses = append(addresses, addr.String())
 	}
 	return control.Status{
+		PublicKey: i.publicKey, ObservationID: i.bind.ObservationID(),
 		Interface: i.name, State: state, ListenPort: i.bind.Port(),
 		Carrier: cfg.Transport.Carrier, FECMode: cfg.Transport.FEC,
 		ObfsMode: cfg.Transport.Obfs, Addresses: addresses,

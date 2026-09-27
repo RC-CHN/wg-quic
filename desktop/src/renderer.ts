@@ -2,6 +2,8 @@ import './styles.css';
 import './tauri-api';
 import { ConfigurationApplications } from './config-application';
 import { ObservationClock } from './observation-clock';
+import { renderPeers } from './peer-view';
+import { copyText } from './clipboard';
 import {
   completeDesktopSmoke,
   desktopSmokeSettings,
@@ -65,6 +67,7 @@ let formOriginal = '';
 let formOriginalName = '';
 let formRevision = 0;
 let formBusy = false;
+let publicKeyRevision = 0;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
@@ -157,38 +160,6 @@ function setText(id: string, value: string): void {
 
 function refreshedAtDate(value: string): Date {
   return /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
-}
-
-function renderPeers(status?: CoreStatus): void {
-  const peerList = byId<HTMLDivElement>('peer-list');
-  const peers = status?.peers || [];
-  if (peers.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'peer-empty';
-    empty.textContent = status
-      ? 'No peers reported by the running interface.'
-      : 'Peer status appears when the tunnel is active.';
-    peerList.replaceChildren(empty);
-    return;
-  }
-
-  peerList.replaceChildren(
-    ...peers.map((peer) => {
-      const row = document.createElement('div');
-      row.className = 'peer-row';
-      const state = document.createElement('span');
-      state.className = `peer-state ${peer.session === 'established' ? 'ready' : ''}`;
-      state.textContent = peer.session;
-      const copy = document.createElement('div');
-      const endpoint = document.createElement('strong');
-      endpoint.textContent = peer.endpoint || 'Endpoint pending';
-      const key = document.createElement('span');
-      key.textContent = `${peer.public_key.slice(0, 16)}…`;
-      copy.append(endpoint, key);
-      row.append(state, copy);
-      return row;
-    }),
-  );
 }
 
 function tunnelSummary(tunnel: TunnelView): string {
@@ -313,7 +284,9 @@ function renderDetail(tunnel?: TunnelView): void {
     'detail-fec-parity',
     `${(stats?.fec_current_parity_shards || 0).toLocaleString()} current parity · ${(stats?.fec_unrecovered || 0).toLocaleString()} residual`,
   );
-  renderPeers(status);
+  setText('detail-public-key', status?.public_key || '—');
+  byId<HTMLButtonElement>('copy-public-key').disabled = !status?.public_key;
+  renderPeers(tunnel, showToast);
 }
 
 function renderConfigurationState(tunnel: TunnelView, busy: boolean): void {
@@ -452,6 +425,29 @@ function renderForm(): void {
   byId('form-peer-selection').classList.toggle('hidden', peers.disabled);
   byId<HTMLInputElement>('form-name').disabled = formMode === 'edit';
   byId('form-errors').classList.add('hidden');
+  void updatePublicKey();
+}
+
+function setPublicKey(key: string): void {
+  publicKeyRevision++;
+  byId<HTMLInputElement>('form-public-key').value = key;
+  byId<HTMLButtonElement>('form-copy-public-key').disabled = !key;
+}
+
+async function updatePublicKey(): Promise<void> {
+  const privateKey = byId<HTMLInputElement>('form-private-key').value.trim();
+  setPublicKey('');
+  const revision = publicKeyRevision;
+  if (!privateKey || !formDraft) return;
+  try {
+    const publicKey = await window.wgQuic.derivePublicKey(privateKey);
+    if (formDraft && revision === publicKeyRevision && byId<HTMLInputElement>('form-private-key').value.trim() === privateKey) setPublicKey(publicKey.trim());
+  } catch { /* Invalid input keeps copying disabled while the user edits. */ }
+}
+
+async function copyPublicKey(key: string): Promise<void> {
+  try { await copyText(key); showToast('Public key copied'); }
+  catch (error) { showToast(errorMessage(error), 'error'); }
 }
 
 function formContents(): string {
@@ -517,6 +513,7 @@ async function startNewTunnel(): Promise<void> {
     const field = byId<HTMLInputElement>('form-private-key');
     if (formDraft && formRevision === revision && !formSourceMode && !field.value) {
       field.value = keys.private_key;
+      setPublicKey(keys.public_key);
     }
   } catch (error) {
     showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
@@ -558,6 +555,7 @@ function dismissForm(): void {
 
 function clearFormSecrets(): void {
   formOriginal = '';
+  setPublicKey('');
   for (const id of ['form-private-key', 'form-preshared-key', 'form-source']) {
     byId<HTMLInputElement | HTMLTextAreaElement>(id).value = '';
   }
@@ -571,6 +569,7 @@ async function generateKeyIntoForm(): Promise<void> {
     const field = byId<HTMLInputElement>('form-private-key');
     if (formDraft && revision === formRevision && !formBusy && !formSourceMode && field.value === previous) {
       field.value = keys.private_key;
+      setPublicKey(keys.public_key);
     }
   } catch (error) {
     showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
@@ -879,6 +878,17 @@ byId('theme-toggle').addEventListener('click', () => {
 });
 
 byId('refresh').addEventListener('click', () => void refresh());
+byId('copy-public-key').addEventListener('click', () => {
+  const key = current?.tunnels.find((tunnel) => tunnel.name === selectedName)?.status?.public_key;
+  if (key) void copyPublicKey(key);
+});
+byId('form-copy-public-key').addEventListener('click', () => void copyPublicKey(byId<HTMLInputElement>('form-public-key').value));
+let keyInputTimer: ReturnType<typeof setTimeout> | undefined;
+byId('form-private-key').addEventListener('input', () => {
+  setPublicKey('');
+  clearTimeout(keyInputTimer);
+  keyInputTimer = setTimeout(() => void updatePublicKey(), 250);
+});
 byId('retry-status').addEventListener('click', () => void refresh());
 byId('apply-config').addEventListener('click', () => {
   const name = byId('apply-config').dataset.name;

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
@@ -214,15 +214,41 @@ fn run_output_with_timeout(
     arguments: &[OsString],
     timeout: Duration,
 ) -> Result<String, String> {
+    run_output_with_input(program, arguments, timeout, None)
+}
+
+fn run_output_with_input(
+    program: &Path,
+    arguments: &[OsString],
+    timeout: Duration,
+    input: Option<&[u8]>,
+) -> Result<String, String> {
     let mut command = Command::new(program);
     command
         .args(arguments)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_child_window(&mut command);
     let mut child = command
         .spawn()
         .map_err(|error| format!("start {}: {error}", program.display()))?;
+    if let Some(input) = input {
+        if let Err(error) = child
+            .stdin
+            .take()
+            .ok_or("capture native command stdin")?
+            .write_all(input)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("write native command input: {error}"));
+        }
+    }
     let stdout = child
         .stdout
         .take()
@@ -793,6 +819,21 @@ fn generate_keys(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
+fn derive_public_key(app: AppHandle, private_key: String) -> Result<String, String> {
+    if private_key.trim().len() != 44 {
+        return Err("Private key must contain 44 base64 characters".into());
+    }
+    let paths = native_paths(&app)?;
+    // Secrets go through a pipe, never command-line arguments or temporary files.
+    run_output_with_input(
+        &paths.core,
+        &[argument("pubkey")],
+        Duration::from_secs(5),
+        Some(private_key.trim().as_bytes()),
+    )
+}
+
+#[tauri::command(async)]
 fn write_tunnel(
     app: AppHandle,
     state: State<'_, BackendState>,
@@ -1013,6 +1054,7 @@ pub fn run() {
             delete_tunnel,
             read_tunnel,
             generate_keys,
+            derive_public_key,
             write_tunnel,
             import_config,
             open_config_directory,

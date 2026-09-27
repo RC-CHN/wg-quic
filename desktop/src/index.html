@@ -219,6 +219,7 @@
             </div>
 
             <section class="peer-panel">
+              <div class="public-key-line"><span>My public key</span><code id="detail-public-key">—</code><button class="button secondary" id="copy-public-key" type="button">Copy public key</button></div>
               <div class="panel-heading">
                 <div>
                   <div class="eyebrow">RUNTIME</div>
@@ -227,6 +228,7 @@
                 <span>Public keys are shortened in this view</span>
               </div>
               <div class="peer-list" id="peer-list"></div>
+              <details id="session-history"><summary>Recent disconnections</summary><div id="session-history-list"></div></details>
             </section>
           </article>
 
@@ -256,6 +258,7 @@
                 </div>
               </section>
               <div id="form-structured">
+                <div class="form-field"><label for="form-public-key">My public key</label><div class="field-with-button"><input id="form-public-key" readonly spellcheck="false" placeholder="Enter a valid private key" /><button class="button secondary" id="form-copy-public-key" type="button" disabled>Copy public key</button></div><span class="field-hint">Share this public key with the other peer.</span></div>
               <section class="form-section">
                 <div class="form-field">
                   <label for="form-addresses">Tunnel address</label>
@@ -296,13 +299,13 @@
                 <div class="form-field">
                   <label for="form-private-key">Private key</label>
                   <div class="field-with-button">
-                    <input id="form-private-key" type="text" autocomplete="off" spellcheck="false" />
+                    <input id="form-private-key" type="password" autocomplete="off" spellcheck="false" />
                     <button class="button secondary" id="form-generate-key" type="button">Generate</button>
                   </div>
                 </div>
                 <div class="form-field">
                   <label for="form-preshared-key">Preshared key <span class="field-hint">optional</span></label>
-                  <input id="form-preshared-key" type="text" autocomplete="off" spellcheck="false" />
+                  <input id="form-preshared-key" type="password" autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="form-field">
                   <label for="form-dns">DNS <span class="field-hint">optional, comma-separated</span></label>

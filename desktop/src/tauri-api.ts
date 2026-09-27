@@ -68,6 +68,7 @@ const api: DesktopAPI = {
     const raw = await invoke<string>('generate_keys');
     return JSON.parse(raw) as TunnelKeys;
   },
+  derivePublicKey: (privateKey) => invoke<string>('derive_public_key', { privateKey }),
   writeTunnel: (name: string, contents: string, overwrite: boolean) =>
     invoke<DesktopSnapshot>('write_tunnel', { name, contents, overwrite }),
   importConfig: async () => {

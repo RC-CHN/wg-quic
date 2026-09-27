@@ -113,6 +113,24 @@ allocation result, the status-query time/memory tradeoff, reproducible commands,
 and the limited loopback throughput evidence. No receive batching or buffer
 ownership experiment from the earlier negative study was reintroduced.
 
+## Public keys and peer diagnostics
+
+New/edit forms show the derived local public key and a copy action; private
+and preshared keys are masked. Derivation uses the existing core `pubkey` command
+through stdin, without secret command arguments or additional temporary files.
+Active status exposes only the public key and an observation-lifetime ID.
+Per-peer rates use actual WireGuard byte deltas and reset on runtime/peer
+generation changes, counter rollback or unavailable status. Peer rows retain
+their DOM identity and include copy, handshake and retry details. Recent closed
+sessions explain authentication, timeout, replacement and shutdown causes.
+
+Browser inspection found that an unnecessary editor scroll container prevented
+sticky save actions from staying visible. Removing it restores visible actions;
+the browser smoke checks their viewport position and reads back the actual
+clipboard after copying a generated public key. Go core/control, Rust and
+frontend checks also pass. Native clipboard behavior remains platform-specific
+and includes a selectable public key/manual-copy fallback.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as
