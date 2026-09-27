@@ -167,6 +167,12 @@ func runWindowsDesktopHelper(
 	request windowsDesktopRequest,
 ) (string, error) {
 	source := ""
+	if request.RequestID != "" && request.Action != "apply" {
+		return "", errors.New("request ID is only supported for apply")
+	}
+	if request.Action == "apply" {
+		source = request.RequestID
+	}
 	if (request.Action == "import" || request.Action == "reconcile") && len(request.Config) != 0 {
 		source = "config-bytes"
 	}
@@ -196,6 +202,8 @@ func runWindowsDesktopHelper(
 	}
 
 	switch request.Action {
+	case "apply":
+		return ApplyDesktopConfig(ctx, request.Name, request.RequestID)
 	case "up", "down":
 		return "", Manage(ctx, request.Action, request.Name)
 	case "delete":

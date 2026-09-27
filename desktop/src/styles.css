@@ -996,6 +996,9 @@ footer {
 }
 
 .form-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.configuration-state { padding: 16px; margin: 16px 0; border: 1px solid var(--amber); border-radius: 8px; }
+.configuration-state p { margin: 0 0 10px; }
+.configuration-state pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .form-field textarea { font-family: var(--mono); resize: vertical; }
 .form-toolbar { align-items: flex-start; }
 .tunnel-form .form-actions {

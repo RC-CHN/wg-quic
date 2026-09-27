@@ -39,6 +39,7 @@ const (
 type windowsDesktopRequest struct {
 	Action             string `json:"action"`
 	Name               string `json:"name"`
+	RequestID          string `json:"request_id,omitempty"`
 	Config             []byte `json:"config,omitempty"`
 	Overwrite          bool   `json:"overwrite,omitempty"`
 	DeadlineUnixMillis int64  `json:"deadline_unix_millis"`
@@ -120,6 +121,9 @@ func runWindowsElevatedDesktopClient(
 	request := windowsDesktopRequest{
 		Action: action, Name: name, Config: contents, Overwrite: overwrite,
 		DeadlineUnixMillis: deadline.UnixMilli(),
+	}
+	if action == "apply" {
+		request.RequestID = source
 	}
 	resultChannel := make(chan windowsDesktopResult, 1)
 	resultError := make(chan error, 1)
@@ -209,6 +213,8 @@ func validateWindowsDesktopRequest(
 		return err
 	}
 	switch action {
+	case "apply":
+		return validateDesktopApplyRequestID(source)
 	case "up", "down", "check", "delete", "read", "status", "reload", "refresh-endpoints":
 		if source != "" {
 			return fmt.Errorf("desktop %s does not accept a source path", action)
@@ -225,7 +231,7 @@ func validateWindowsDesktopRequest(
 
 func windowsDesktopActionReturnsContents(action string) bool {
 	switch action {
-	case "read", "status", "reload", "refresh-endpoints", "reconcile":
+	case "read", "status", "reload", "refresh-endpoints", "reconcile", "apply":
 		return true
 	default:
 		return false

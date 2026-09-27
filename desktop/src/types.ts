@@ -102,8 +102,19 @@ export interface TunnelKeys {
   public_key: string;
 }
 
+export interface ApplyResult {
+  state: 'applied' | 'restart_required' | 'failed' | 'unknown';
+  code?: string;
+  message?: string;
+  request_id?: string;
+  restart_reasons?: string[];
+  cleanup_pending?: boolean;
+}
+
 export interface DesktopAPI {
   confirmDiscard(): Promise<boolean>;
+  confirmRestart(name: string): Promise<boolean>;
+  apply(name: string, requestId?: string): Promise<ApplyResult>;
   snapshot(): Promise<DesktopSnapshot>;
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;

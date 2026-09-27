@@ -10,6 +10,8 @@
     "types": ["node"]
   },
   "include": [
+    "src/config-application.ts",
+    "src/config-application.test.ts",
     "src/types.ts",
     "src/view-model.ts",
     "src/view-model.test.ts",

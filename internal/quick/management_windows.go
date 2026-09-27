@@ -134,6 +134,9 @@ func runWindowsManagementClient(
 		Overwrite:          overwrite,
 		DeadlineUnixMillis: deadline.UnixMilli(),
 	}
+	if action == "apply" {
+		request.RequestID = source
+	}
 	if action == "import" || action == "reconcile" {
 		contents, err := readWindowsDesktopConfig(source)
 		if err != nil {
@@ -256,6 +259,7 @@ func shouldUseWindowsDesktopElevationFallback(err error) bool {
 }
 
 type windowsManagementRequest struct {
+	RequestID          string `json:"request_id,omitempty"`
 	ProtocolVersion    int    `json:"protocol_version"`
 	Action             string `json:"action"`
 	Name               string `json:"name"`
@@ -671,6 +675,9 @@ func windowsManagementRequestDeadline(
 func validateWindowsManagementRequest(
 	request windowsManagementRequest,
 ) error {
+	if request.RequestID != "" && request.Action != "apply" {
+		return errors.New("request ID is only supported for apply")
+	}
 	if request.Action == "probe" {
 		if request.Name != "" || request.Overwrite || len(request.Config) != 0 {
 			return errors.New(
@@ -680,6 +687,9 @@ func validateWindowsManagementRequest(
 		return nil
 	}
 	source := ""
+	if request.Action == "apply" {
+		source = request.RequestID
+	}
 	if request.Action == "import" || request.Action == "reconcile" {
 		source = "config-bytes"
 	}
@@ -716,6 +726,7 @@ func runWindowsManagementOperation(
 		return "", err
 	}
 	if request.Action == "up" ||
+		(request.Action == "apply" && request.RequestID == "") ||
 		request.Action == "down" ||
 		request.Action == "reload" ||
 		request.Action == "reconcile" ||
@@ -728,6 +739,13 @@ func runWindowsManagementOperation(
 		return "", err
 	}
 	switch request.Action {
+	case "apply":
+		if request.RequestID == "" {
+			if err := validateWindowsManagementStoredConfig(request.Name); err != nil {
+				return "", err
+			}
+		}
+		return ApplyDesktopConfig(ctx, request.Name, request.RequestID)
 	case "up":
 		if err := validateWindowsManagementStoredConfig(
 			request.Name,

@@ -33,6 +33,7 @@ try {
     run([tsc, '--project', 'tsconfig.test.json']) &&
     run([
       '--test',
+      path.join(outputDir, 'src', 'config-application.test.js'),
       path.join(outputDir, 'src', 'view-model.test.js'),
       path.join(outputDir, 'src', 'tunnel-draft.test.js'),
       path.join(scriptDir, 'check-version.test.mjs'),

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ask, open } from '@tauri-apps/plugin-dialog';
 import type {
+  ApplyResult,
   DeleteResult,
   DesktopAPI,
   DesktopSnapshot,
@@ -33,6 +34,10 @@ async function importConfigPath(
 }
 
 const api: DesktopAPI = {
+  confirmRestart: (name) => ask(`Restart "${name}" to apply the saved configuration? Traffic will be interrupted while the tunnel reconnects.`, {
+    title: 'Restart tunnel?', kind: 'warning', okLabel: 'Restart', cancelLabel: 'Keep running',
+  }),
+  apply: (name, requestId) => invoke<ApplyResult>('apply_tunnel', { name, requestId }),
   confirmDiscard: () => ask('Discard unsaved changes to this configuration?', {
     title: 'Unsaved changes', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Keep editing',
   }),

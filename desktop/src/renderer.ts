@@ -1,5 +1,6 @@
 import './styles.css';
 import './tauri-api';
+import { ConfigurationApplications } from './config-application';
 import {
   completeDesktopSmoke,
   desktopSmokeSettings,
@@ -49,6 +50,8 @@ const notice = byId<HTMLElement>('notice');
 const toast = byId<HTMLDivElement>('toast');
 const pending = new Map<string, TunnelAction>();
 const pendingSince = new Map<string, number>();
+const applying = new Set<string>();
+const applications = new ConfigurationApplications(localStorage);
 
 let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
@@ -224,6 +227,7 @@ function renderDetail(tunnel?: TunnelView): void {
   const status = tunnel.status;
   const stats = status?.stats;
   const action = pending.get(tunnel.name);
+  const busy = Boolean(action) || applying.has(tunnel.name);
   const state = tunnelDisplayState(tunnel, action);
   const backendSupported = Boolean(current?.backend.supported);
 
@@ -245,7 +249,7 @@ function renderDetail(tunnel?: TunnelView): void {
   byId('detail-state-dot').className = `state-dot large ${state}`;
 
   const toggle = byId<HTMLButtonElement>('toggle-tunnel');
-  toggle.disabled = Boolean(action) || !backendSupported || state === 'unknown' || tunnel.statusState === 'prepared';
+  toggle.disabled = busy || !backendSupported || state === 'unknown' || tunnel.statusState === 'prepared';
   toggle.setAttribute('aria-busy', String(Boolean(action)));
   toggle.textContent = action
     ? tunnelStateLabel(state)
@@ -266,16 +270,17 @@ function renderDetail(tunnel?: TunnelView): void {
   byId('retry-status').classList.toggle('hidden', state !== 'unknown');
 
   const check = byId<HTMLButtonElement>('check-tunnel');
-  check.disabled = Boolean(action);
+  check.disabled = busy;
   check.dataset.name = tunnel.name;
 
   const deleteButton = byId<HTMLButtonElement>('delete-tunnel');
-  deleteButton.disabled = Boolean(action) || !backendSupported;
+  deleteButton.disabled = busy || !backendSupported;
   deleteButton.dataset.name = tunnel.name;
 
   const editButton = byId<HTMLButtonElement>('edit-tunnel');
-  editButton.disabled = Boolean(action) || !backendSupported;
+  editButton.disabled = busy || !backendSupported;
   editButton.dataset.name = tunnel.name;
+  renderConfigurationState(tunnel, busy);
 
   setText('detail-carrier', status?.carrier.toUpperCase() || 'QUIC');
   setText(
@@ -305,6 +310,75 @@ function renderDetail(tunnel?: TunnelView): void {
     `${(stats?.fec_current_parity_shards || 0).toLocaleString()} current parity · ${(stats?.fec_unrecovered || 0).toLocaleString()} residual`,
   );
   renderPeers(status);
+}
+
+function renderConfigurationState(tunnel: TunnelView, busy: boolean): void {
+  const saved = applications.get(tunnel.configPath);
+  byId('configuration-state').classList.toggle('hidden', !saved);
+  if (!saved) return;
+  let message = 'Configuration saved. Apply it to the running tunnel when ready.';
+  if (tunnel.statusState === 'unknown') message = 'Configuration saved. Current runtime state could not be checked.';
+  else if (!tunnel.running) message = 'Configuration saved. It will be used on the next activation.';
+  else if (saved.state === 'restart_required') message = 'Saved changes require a restart. The current connection is still using the previous settings.';
+  else if (saved.state === 'failed') message = 'The saved configuration was not fully applied. Review the result before retrying.';
+  else if (saved.state === 'unknown') message = 'The application result is not yet known. Check the original transaction before retrying.';
+  if (applying.has(tunnel.name)) message = saved.state === 'unknown' ? 'Checking the application result…' : 'Applying saved configuration…';
+  setText('configuration-state-copy', message);
+  setText('configuration-result', [saved.message, ...(saved.restart_reasons || []), saved.request_id ? `Request: ${saved.request_id}` : ''].filter(Boolean).join('\n'));
+  const apply = byId<HTMLButtonElement>('apply-config');
+  apply.dataset.name = tunnel.name;
+  apply.textContent = saved.state === 'unknown' ? 'Check application result' : 'Apply saved changes';
+  apply.disabled = busy || !tunnel.running || tunnel.statusState === 'unknown' || saved.state === 'restart_required' || (saved.state === 'unknown' && !saved.request_id);
+  apply.classList.toggle('hidden', !tunnel.running || saved.state === 'restart_required');
+  const restart = byId<HTMLButtonElement>('restart-tunnel');
+  restart.dataset.name = tunnel.name;
+  restart.classList.toggle('hidden', saved.state !== 'restart_required' && saved.state !== 'unknown');
+  restart.disabled = busy || !tunnel.running || tunnel.statusState === 'unknown';
+}
+
+async function applyConfiguration(name: string): Promise<void> {
+  const tunnel = current?.tunnels.find((item) => item.name === name);
+  if (!tunnel || applying.has(name) || pending.has(name)) return;
+  const saved = applications.get(tunnel.configPath);
+  if (saved?.state === 'unknown' && !saved.request_id) return;
+  applying.add(name);
+  render(current!);
+  try {
+    const result = await window.wgQuic.apply(name, saved?.state === 'unknown' ? saved.request_id : undefined);
+    applications.set(tunnel.configPath, result);
+    if (result.state === 'applied') showToast(result.cleanup_pending ? 'Configuration applied; host cleanup is still pending.' : 'Saved configuration applied');
+  } catch (error) {
+    // A failed IPC/elevation command does not prove the supervisor rejected
+    // the mutation. Keep a known transaction ID, and never retry blindly.
+    applications.set(tunnel.configPath, { state: 'unknown', request_id: saved?.request_id, message: errorMessage(error) });
+  } finally {
+    applying.delete(name);
+    await refresh(false);
+    if (current) render(current);
+  }
+}
+
+async function restartTunnel(name: string): Promise<void> {
+  const tunnel = current?.tunnels.find((item) => item.name === name);
+  if (!tunnel || pending.has(name) || applying.has(name) || !await window.wgQuic.confirmRestart(name)) return;
+  pending.set(name, 'down');
+  pendingSince.set(name, Date.now());
+  render(current!);
+  try {
+    render(await window.wgQuic.manage(name, 'down'));
+    pending.set(name, 'up');
+    render(current!);
+    render(await window.wgQuic.manage(name, 'up'));
+    applications.clear(tunnel.configPath);
+    showToast(`${name} restarted with the saved configuration`);
+  } catch (error) {
+    showToast(`${name}: ${managementErrorMessage(errorMessage(error))}`, 'error');
+    await refresh(false);
+  } finally {
+    pending.delete(name);
+    pendingSince.delete(name);
+    if (current) render(current);
+  }
 }
 
 // === Tunnel form (new/edit) ===
@@ -527,6 +601,8 @@ async function saveForm(): Promise<void> {
     );
     const savedName = draft.name;
     const wasNew = formMode === 'new';
+    const savedTunnel = snapshot.tunnels.find((item) => item.name === savedName);
+    if (savedTunnel) applications.set(savedTunnel.configPath, { state: 'saved' });
     formDraft = null;
     formRevision++;
     clearFormSecrets();
@@ -534,7 +610,7 @@ async function saveForm(): Promise<void> {
     selectedName = savedName;
     render(current);
     showToast(
-      wasNew ? `Tunnel ${savedName} created` : `Tunnel ${savedName} updated`,
+      wasNew ? `Tunnel ${savedName} created` : `Configuration saved for ${savedName}`,
     );
   } catch (error) {
     showFormErrors([errorMessage(error)]);
@@ -662,7 +738,7 @@ async function manageTunnel(
   name: string,
   action: TunnelAction,
 ): Promise<void> {
-  if (pending.has(name)) {
+  if (pending.has(name) || applying.has(name)) {
     return;
   }
   pending.set(name, action);
@@ -678,6 +754,10 @@ async function manageTunnel(
   }, 500);
   try {
     render(await window.wgQuic.manage(name, action));
+    if (action === 'up') {
+      const tunnel = current?.tunnels.find((item) => item.name === name);
+      if (tunnel?.running) applications.clear(tunnel.configPath);
+    }
     showToast(`${name} ${action === 'up' ? 'activated' : 'deactivated'}`);
   } catch (error) {
     showToast(
@@ -705,11 +785,14 @@ async function checkTunnel(name: string): Promise<void> {
 }
 
 async function deleteTunnel(name: string): Promise<void> {
+  if (pending.has(name) || applying.has(name)) return;
+  const tunnel = current?.tunnels.find((item) => item.name === name);
   try {
     const result = await window.wgQuic.deleteTunnel(name);
     if (result.canceled) {
       return;
     }
+    if (tunnel) applications.clear(tunnel.configPath);
     if (selectedName === name) {
       selectedName = undefined;
     }
@@ -728,6 +811,8 @@ async function importTunnel(): Promise<void> {
     if (result.importedName) {
       dismissForm();
       selectedName = result.importedName;
+      const tunnel = result.snapshot.tunnels.find((item) => item.name === result.importedName);
+      if (tunnel) applications.set(tunnel.configPath, { state: 'saved' });
     }
     render(result.snapshot);
     if (!result.canceled && result.importedName) {
@@ -772,6 +857,14 @@ byId('theme-toggle').addEventListener('click', () => {
 
 byId('refresh').addEventListener('click', () => void refresh());
 byId('retry-status').addEventListener('click', () => void refresh());
+byId('apply-config').addEventListener('click', () => {
+  const name = byId('apply-config').dataset.name;
+  if (name) void applyConfiguration(name);
+});
+byId('restart-tunnel').addEventListener('click', () => {
+  const name = byId('restart-tunnel').dataset.name;
+  if (name) void restartTunnel(name);
+});
 byId('import-config').addEventListener('click', () => void importTunnel());
 byId('empty-import').addEventListener('click', () => void importTunnel());
 byId('toggle-tunnel').addEventListener('click', (event) => {
@@ -893,6 +986,8 @@ async function start(): Promise<void> {
     });
     const { runStatusInteractionSmoke } = await import('./status-smoke');
     await runStatusInteractionSmoke(refreshSnapshot);
+    const { runApplicationInteractionSmoke } = await import('./application-smoke');
+    await runApplicationInteractionSmoke({ refresh: refreshSnapshot, edit: startEditTunnel, save: saveForm, apply: applyConfiguration, restart: restartTunnel });
     await completeDesktopSmoke('wg-quic desktop renderer smoke test passed');
     return;
   }

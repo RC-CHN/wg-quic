@@ -54,6 +54,21 @@ alone is insufficient to show Connected.
 Validation: Go status classification tests, Rust protocol and view mapping
 tests, TypeScript state tests and a real-browser status recovery scenario.
 
+## Saving and applying
+
+Saving/importing records pending changes without interrupting traffic. The
+desktop invokes a fixed privileged apply command that submits a reload with
+the current epoch/generation and an opaque request ID. Applied, restart-required,
+failed and unknown outcomes are distinct data states. An unknown result is
+queried by its original ID; a lost transaction record is not proof of failure.
+Explicit restart confirmation explains the traffic interruption. Pending flags
+survive app restarts without persisting keys or diagnostic messages.
+
+Validation: common Go CAS/result tests, Windows helper/broker test
+cross-compilation, Rust backend tests, frontend checks and a Chromium scenario
+covering save, declined/accepted restart and unknown-result recovery. Windows
+privileged execution remains a native CI requirement.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

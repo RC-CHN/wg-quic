@@ -61,6 +61,13 @@ peers and edit advanced settings. Switching views and background refreshes keep
 unsaved input; canceling an edited draft asks before discarding it. Saving
 validates the complete configuration through the native helper.
 
+Saving/importing never restarts an active tunnel. A persistent pending-change
+notice offers **Apply saved changes**, which uses the supervisor's CAS-protected
+reload operation. Changes requiring a restart leave the current connection
+running until **Restart to apply** is confirmed. If a response is lost, **Check
+application result** queries the original request ID instead of submitting a
+new mutation. Pending flags contain no configuration or diagnostic content.
+
 `BROWSER_PATH=/path/to/chromium npm run smoke:browser` runs the built renderer
 with a fixed native boundary. The packaged renderer smoke runs the same editor
 interaction checks in the platform webview, including refresh while typing,

@@ -32,6 +32,22 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "desktop-apply":
+		if len(args) < 2 || len(args) > 3 {
+			return usage()
+		}
+		requestID := ""
+		if len(args) == 3 {
+			requestID = args[2]
+		}
+		ctx, stop := commandContext()
+		defer stop()
+		result, err := quick.ApplyDesktopConfig(ctx, args[1], requestID)
+		if err != nil {
+			return err
+		}
+		fmt.Println(result)
+		return nil
 	case "desktop-status":
 		if len(args) != 2 {
 			return usage()
@@ -629,6 +645,13 @@ func parseDesktopClientArgs(args []string) (desktopClientRequest, error) {
 	}
 	request := desktopClientRequest{action: args[0], name: args[1]}
 	switch request.action {
+	case "apply":
+		if len(args) < 2 || len(args) > 3 {
+			return desktopClientRequest{}, errors.New("apply accepts an interface and optional request ID")
+		}
+		if len(args) == 3 {
+			request.source = args[2]
+		}
 	case "up", "down", "check", "delete", "read", "status", "reload", "refresh-endpoints":
 		if len(args) != 2 {
 			return desktopClientRequest{}, errors.New("desktop action received unexpected arguments")

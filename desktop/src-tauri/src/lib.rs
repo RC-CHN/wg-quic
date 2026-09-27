@@ -680,6 +680,47 @@ fn check_tunnel(app: AppHandle, name: String) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
+fn apply_tunnel(app: AppHandle, name: String, request_id: Option<String>) -> Result<Value, String> {
+    validate_interface_name(&name)?;
+    require_profile(&name)?;
+    let paths = native_paths(&app)?;
+    let mut arguments = if cfg!(target_os = "windows") {
+        vec![
+            argument("desktop-client"),
+            argument("apply"),
+            argument(&name),
+        ]
+    } else {
+        vec![
+            argument(&paths.quick),
+            argument("desktop-apply"),
+            argument(&name),
+        ]
+    };
+    if let Some(id) = request_id.filter(|id| !id.is_empty()) {
+        if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("invalid apply request ID".into());
+        }
+        arguments.push(argument(id));
+    }
+    let program = if cfg!(target_os = "windows") {
+        paths.quick.as_path()
+    } else {
+        Path::new("pkexec")
+    };
+    let output = run_output_with_timeout(program, &arguments, Duration::from_secs(100))?;
+    let result: Value =
+        serde_json::from_str(&output).map_err(|error| format!("invalid apply result: {error}"))?;
+    if !matches!(
+        result.get("state").and_then(Value::as_str),
+        Some("applied" | "restart_required" | "failed" | "unknown")
+    ) {
+        return Err("unknown apply result state".into());
+    }
+    Ok(result)
+}
+
+#[tauri::command(async)]
 fn delete_tunnel(
     app: AppHandle,
     state: State<'_, BackendState>,
@@ -923,6 +964,7 @@ pub fn run() {
             snapshot,
             manage_tunnel,
             check_tunnel,
+            apply_tunnel,
             delete_tunnel,
             read_tunnel,
             generate_keys,

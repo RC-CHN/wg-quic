@@ -319,3 +319,21 @@ func TestWindowsDesktopResultGraceIsBounded(t *testing.T) {
 		t.Fatalf("desktop result grace = %s", windowsDesktopResultGrace)
 	}
 }
+
+func TestWindowsDesktopApplyOnlyAcceptsOpaqueTransactionIDs(t *testing.T) {
+	for _, id := range []string{"", "0123456789abcdef0123456789abcdef"} {
+		if err := validateWindowsManagementRequest(windowsManagementRequest{Action: "apply", Name: "wg0", RequestID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, request := range []windowsManagementRequest{
+		{Action: "apply", Name: "wg0", RequestID: `C:\\arbitrary.conf`},
+		{Action: "apply", Name: "wg0", Config: []byte("unexpected")},
+		{Action: "apply", Name: "wg0", Overwrite: true},
+		{Action: "up", Name: "wg0", RequestID: "0123456789abcdef0123456789abcdef"},
+	} {
+		if err := validateWindowsManagementRequest(request); err == nil {
+			t.Fatalf("accepted invalid request: %+v", request)
+		}
+	}
+}
