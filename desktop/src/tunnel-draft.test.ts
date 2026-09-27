@@ -133,3 +133,68 @@ test('validateTunnelDraft rejects an out-of-range port', () => {
   draft.listenPort = '70000';
   assert.ok(validateTunnelDraft(draft, false).some((e) => /listen port/i.test(e)));
 });
+
+const COMPLEX = [
+  '; preserve this comment', '# wg-quic: fec-data-shards=16',
+  '[Interface]', `PrivateKey = ${PRIVATE}`, 'Address = 10.0.0.1/24',
+  'Address = fd00::1/64', 'Table = off', 'FwMark = 42',
+  'PostUp = echo example', 'PostDown = echo cleanup',
+  '[Peer]', `PublicKey = ${PEER}`, 'AllowedIPs = 10.0.0.2/32',
+  '# wg-quic: peer.fec-latency=latency',
+  '[Peer]', `PublicKey = ${PRESHARED}`, `PresharedKey = ${PRESHARED}`,
+  'Endpoint = second.example:443', 'AllowedIPs = 10.0.0.3/32',
+  'AllowedIPs = fd00::3/128', '# wg-quic: congestion=cubic', '',
+].join('\r\n');
+
+test('existing configurations survive an unchanged save byte for byte', () => {
+  for (const source of [COMPLEX, COMPLEX.trimEnd(), COMPLEX.replaceAll('\r\n', '\n')]) {
+    assert.equal(buildConf(parseConf(source)), source);
+  }
+  const first = parseConf(COMPLEX);
+  assert.equal(first.peerCount, 2);
+  assert.equal(first.endpoint, '');
+  assert.equal(first.presharedKey, '');
+  assert.equal(first.allowedIPs, '10.0.0.2/32');
+  // Global transport directives remain global even inside a Peer section.
+  assert.equal(first.congestion, 'cubic');
+});
+
+test('editing a selected peer preserves every unrelated line and peer', () => {
+  const second = parseConf(COMPLEX, 1);
+  second.endpoint = 'replacement.example:8443';
+  assert.equal(buildConf(second), COMPLEX.replace('second.example:443', 'replacement.example:8443'));
+  const first = parseConf(COMPLEX);
+  first.endpoint = 'first.example:443';
+  const patched = buildConf(first);
+  assert.equal(parseConf(patched).endpoint, 'first.example:443');
+  assert.equal(parseConf(patched, 1).endpoint, 'second.example:443');
+  assert.match(patched, /Table = off/);
+  assert.match(patched, /PostDown = echo cleanup/);
+  assert.match(patched, /peer.fec-latency=latency/);
+});
+
+test('repeated lists and scalar fields are patched without leaving stale values', () => {
+  const draft = parseConf(COMPLEX, 1);
+  draft.allowedIPs = '192.0.2.0/24';
+  draft.presharedKey = '';
+  draft.addresses = '10.5.0.1/24';
+  draft.congestion = 'auto';
+  const result = buildConf(draft);
+  const again = parseConf(result, 1);
+  assert.equal(again.allowedIPs, draft.allowedIPs);
+  assert.equal(again.presharedKey, '');
+  assert.equal(again.addresses, draft.addresses);
+  assert.equal(again.congestion, 'auto');
+  assert.equal(parseConf(result).allowedIPs, '10.0.0.2/32');
+  assert.equal(buildConf(again), result);
+});
+
+test('switching peers commits the current projection without losing prior edits', () => {
+  const first = parseConf(COMPLEX);
+  first.keepalive = '20';
+  const second = parseConf(buildConf(first), 1);
+  second.keepalive = '30';
+  const final = buildConf(second);
+  assert.equal(parseConf(final).keepalive, '20');
+  assert.equal(parseConf(final, 1).keepalive, '30');
+});

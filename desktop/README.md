@@ -55,6 +55,17 @@ stay on the right. The current selection survives status refreshes.
 - Refresh immediately with `Ctrl+R`.
 - Move through the tunnel list with the up and down arrow keys.
 
+The editor preserves comments, hooks, transport directives and other peers.
+Use the peer selector to edit an existing peer, or **Edit source** to add/remove
+peers and edit advanced settings. Switching views and background refreshes keep
+unsaved input; canceling an edited draft asks before discarding it. Saving
+validates the complete configuration through the native helper.
+
+`BROWSER_PATH=/path/to/chromium npm run smoke:browser` runs the built renderer
+with a fixed native boundary. The packaged renderer smoke runs the same editor
+interaction checks in the platform webview, including refresh while typing,
+focus/caret preservation, save failure, discard confirmation and peer switching.
+
 The UI polls status every two seconds while visible. It shows WireGuard
 traffic, QUIC RTT/bandwidth/pacing estimates, peer sessions, and FEC recovery
 counters without rendering private configuration values.

@@ -54,6 +54,11 @@ let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
 let formDraft: TunnelDraft | null = null;
 let formMode: 'new' | 'edit' = 'new';
+let formSourceMode = false;
+let formOriginal = '';
+let formOriginalName = '';
+let formRevision = 0;
+let formBusy = false;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
@@ -108,7 +113,9 @@ function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
   label.className = `tunnel-item-state ${state}`;
   label.textContent = tunnelStateLabel(state);
   item.append(stateDot, copy, label);
-  item.addEventListener('click', () => {
+  item.addEventListener('click', async () => {
+    if (!await canLeaveForm()) return;
+    dismissForm();
     selectedName = tunnel.name;
     if (current) {
       render(current);
@@ -187,7 +194,6 @@ function renderDetail(tunnel?: TunnelView): void {
   detail.classList.toggle('hidden', inForm || !tunnel);
   detailEmpty.classList.toggle('hidden', inForm || Boolean(tunnel));
   if (inForm) {
-    renderForm();
     return;
   }
   if (!tunnel) {
@@ -312,6 +318,7 @@ function fillFormFromDraft(draft: TunnelDraft): void {
 
 function readFormIntoDraft(): TunnelDraft {
   return {
+    ...formDraft,
     name: byId<HTMLInputElement>('form-name').value.trim(),
     addresses: byId<HTMLInputElement>('form-addresses').value,
     listenPort: byId<HTMLInputElement>('form-listen-port').value,
@@ -340,8 +347,55 @@ function renderForm(): void {
     formMode === 'new' ? 'Create tunnel' : `Edit ${formDraft.name}`,
   );
   fillFormFromDraft(formDraft);
+  byId<HTMLTextAreaElement>('form-source').value = buildConf(formDraft);
+  byId('form-structured').classList.toggle('hidden', formSourceMode);
+  byId('form-source-field').classList.toggle('hidden', !formSourceMode);
+  byId<HTMLButtonElement>('form-source-toggle').textContent = formSourceMode ? 'Use form' : 'Edit source';
+  const peers = byId<HTMLSelectElement>('form-peer-select');
+  peers.replaceChildren(...Array.from({ length: formDraft.peerCount || 1 }, (_, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `Peer ${index + 1}`;
+    return option;
+  }));
+  peers.value = String(formDraft.peerIndex || 0);
+  peers.disabled = (formDraft.peerCount || 1) < 2;
+  byId('form-peer-selection').classList.toggle('hidden', peers.disabled);
   byId<HTMLInputElement>('form-name').disabled = formMode === 'edit';
   byId('form-errors').classList.add('hidden');
+}
+
+function formContents(): string {
+  return formSourceMode ? byId<HTMLTextAreaElement>('form-source').value : buildConf(readFormIntoDraft());
+}
+
+function formIsDirty(): boolean {
+  return formDraft !== null && (formContents() !== formOriginal ||
+    byId<HTMLInputElement>('form-name').value.trim() !== formOriginalName);
+}
+
+async function canLeaveForm(): Promise<boolean> {
+  return !formBusy && (!formIsDirty() || await window.wgQuic.confirmDiscard());
+}
+
+function toggleFormSource(): void {
+  if (!formDraft || formBusy) return;
+  const name = byId<HTMLInputElement>('form-name').value.trim();
+  formDraft = parseConf(formContents(), formDraft.peerIndex || 0);
+  if ((formDraft.peerIndex || 0) >= (formDraft.peerCount || 1)) {
+    formDraft = parseConf(formDraft.sourceText!);
+  }
+  formDraft.name = name;
+  formSourceMode = !formSourceMode;
+  renderForm();
+}
+
+function selectFormPeer(index: number): void {
+  if (!formDraft || formBusy) return;
+  const name = byId<HTMLInputElement>('form-name').value.trim();
+  formDraft = parseConf(formContents(), index);
+  formDraft.name = name;
+  renderForm();
 }
 
 function showFormErrors(errors: string[]): void {
@@ -358,15 +412,21 @@ function showFormErrors(errors: string[]): void {
 }
 
 async function startNewTunnel(): Promise<void> {
+  if (!await canLeaveForm()) return;
+  const revision = ++formRevision;
   formMode = 'new';
+  formSourceMode = false;
   formDraft = emptyTunnelDraft('');
+  formOriginal = buildConf(formDraft);
+  formOriginalName = '';
+  renderForm();
   if (current) {
     render(current);
   }
   try {
     const keys = await window.wgQuic.generateKeys();
     const field = byId<HTMLInputElement>('form-private-key');
-    if (formDraft && formMode === 'new' && !field.value) {
+    if (formDraft && formRevision === revision && !formSourceMode && !field.value) {
       field.value = keys.private_key;
     }
   } catch (error) {
@@ -375,11 +435,18 @@ async function startNewTunnel(): Promise<void> {
 }
 
 async function startEditTunnel(name: string): Promise<void> {
+  if (!await canLeaveForm()) return;
+  const revision = ++formRevision;
   try {
     const conf = await window.wgQuic.readTunnel(name);
+    if (revision !== formRevision) return;
     formMode = 'edit';
+    formSourceMode = false;
     formDraft = parseConf(conf);
     formDraft.name = name;
+    formOriginal = conf;
+    formOriginalName = name;
+    renderForm();
     if (current) {
       render(current);
     }
@@ -388,38 +455,60 @@ async function startEditTunnel(name: string): Promise<void> {
   }
 }
 
-function cancelForm(): void {
+async function cancelForm(): Promise<void> {
+  if (!await canLeaveForm()) return;
+  dismissForm();
+  if (current) render(current);
+}
+
+function dismissForm(): void {
+  formRevision++;
   formDraft = null;
-  if (current) {
-    render(current);
+  clearFormSecrets();
+}
+
+function clearFormSecrets(): void {
+  formOriginal = '';
+  for (const id of ['form-private-key', 'form-preshared-key', 'form-source']) {
+    byId<HTMLInputElement | HTMLTextAreaElement>(id).value = '';
   }
 }
 
 async function generateKeyIntoForm(): Promise<void> {
+  const revision = formRevision;
+  const previous = byId<HTMLInputElement>('form-private-key').value;
   try {
     const keys = await window.wgQuic.generateKeys();
-    byId<HTMLInputElement>('form-private-key').value = keys.private_key;
+    const field = byId<HTMLInputElement>('form-private-key');
+    if (formDraft && revision === formRevision && !formBusy && !formSourceMode && field.value === previous) {
+      field.value = keys.private_key;
+    }
   } catch (error) {
     showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
   }
 }
 
 async function saveForm(): Promise<void> {
-  if (!formDraft) {
+  if (!formDraft || formBusy) {
     return;
   }
   const draft = readFormIntoDraft();
   if (formMode === 'edit') {
     draft.name = formDraft.name;
   }
-  const errors = validateTunnelDraft(draft, formMode === 'new');
+  const errors = formSourceMode
+    ? (!draft.name ? ['Tunnel name is required.'] : [])
+    : validateTunnelDraft(draft, formMode === 'new');
   if (errors.length > 0) {
     showFormErrors(errors);
     return;
   }
-  const conf = buildConf(draft);
+  const conf = formContents();
   const saveButton = byId<HTMLButtonElement>('form-save');
   saveButton.disabled = true;
+  formBusy = true;
+  byId<HTMLFieldSetElement>('form-controls').disabled = true;
+  byId<HTMLButtonElement>('form-cancel').disabled = true;
   try {
     const snapshot = await window.wgQuic.writeTunnel(
       draft.name,
@@ -429,6 +518,8 @@ async function saveForm(): Promise<void> {
     const savedName = draft.name;
     const wasNew = formMode === 'new';
     formDraft = null;
+    formRevision++;
+    clearFormSecrets();
     current = snapshot;
     selectedName = savedName;
     render(current);
@@ -439,6 +530,9 @@ async function saveForm(): Promise<void> {
     showFormErrors([errorMessage(error)]);
   } finally {
     saveButton.disabled = false;
+    formBusy = false;
+    byId<HTMLFieldSetElement>('form-controls').disabled = false;
+    byId<HTMLButtonElement>('form-cancel').disabled = false;
   }
 }
 
@@ -618,9 +712,11 @@ async function deleteTunnel(name: string): Promise<void> {
 }
 
 async function importTunnel(): Promise<void> {
+  if (!await canLeaveForm()) return;
   try {
     const result = await window.wgQuic.importConfig();
     if (result.importedName) {
+      dismissForm();
       selectedName = result.importedName;
     }
     render(result.snapshot);
@@ -693,7 +789,11 @@ byId('edit-tunnel').addEventListener('click', (event) => {
     void startEditTunnel(name);
   }
 });
-byId('form-cancel').addEventListener('click', () => cancelForm());
+byId('form-cancel').addEventListener('click', () => void cancelForm());
+byId('form-source-toggle').addEventListener('click', toggleFormSource);
+byId('form-peer-select').addEventListener('change', (event) => {
+  selectFormPeer(Number((event.currentTarget as HTMLSelectElement).value));
+});
 byId('form-generate-key').addEventListener('click', () =>
   void generateKeyIntoForm(),
 );
@@ -720,6 +820,8 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (
+    !formDraft &&
+    !(event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) &&
     (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
     current?.tunnels.length
   ) {
@@ -745,6 +847,16 @@ document.addEventListener('visibilitychange', () => {
 async function start(): Promise<void> {
   const smoke = await desktopSmokeSettings();
   smokeMode = smoke.mode;
+  if (smoke.mode === 'none') {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().onCloseRequested(async (event) => {
+      // Windows closes to the tray and retains the draft. Linux closes the
+      // application, so ask before discarding or interrupting a pending save.
+      if (current?.backend.platform === 'win32' || !await canLeaveForm()) {
+        event.preventDefault();
+      }
+    });
+  }
   const initialRefresh = await refresh();
   if (!initialRefresh.ok) {
     throw new Error(
@@ -763,6 +875,11 @@ async function start(): Promise<void> {
     }
   }
   if (smoke.mode === 'renderer') {
+    const { runEditorInteractionSmoke } = await import('./editor-smoke');
+    await runEditorInteractionSmoke({
+      startNewTunnel, startEditTunnel, refresh: () => refreshSnapshot(),
+      saveForm, cancelForm, toggleFormSource, selectFormPeer, formIsDirty,
+    });
     await completeDesktopSmoke('wg-quic desktop renderer smoke test passed');
     return;
   }

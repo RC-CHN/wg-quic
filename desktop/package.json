@@ -23,6 +23,7 @@
     "test": "node scripts/test.mjs",
     "smoke:native": "node scripts/smoke-native.mjs",
     "smoke:app": "node scripts/smoke-app.mjs",
+    "smoke:browser": "npm run build:web && node scripts/smoke-browser.mjs",
     "package": "npm run clean && npm run native && tauri build --no-bundle",
     "make": "npm run clean && npm run native && tauri build",
     "tauri": "tauri",

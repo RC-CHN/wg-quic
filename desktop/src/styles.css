@@ -989,6 +989,17 @@ footer {
   margin-bottom: 24px;
 }
 
+.form-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.form-field textarea { font-family: var(--mono); resize: vertical; }
+.form-toolbar { align-items: flex-start; }
+.tunnel-form .form-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 14px 0;
+  background: var(--panel-deep);
+  z-index: 1;
+}
+
 .form-section-label {
   font-size: 11px;
   font-weight: 600;
@@ -1018,6 +1029,7 @@ footer {
 }
 
 .form-field input,
+.form-field textarea,
 .form-field select {
   background: var(--panel-deep);
   border: 1px solid var(--line);

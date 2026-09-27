@@ -1,7 +1,6 @@
-// TunnelDraft is the editable form state for one tunnel. The desktop UI keeps
-// exactly one peer (the common case) while the parser preserves a single-peer
-// projection of an existing config; multi-peer editing is intentionally left
-// as a future extension point rather than designed out.
+// A form projection of one peer and the interface. Existing documents retain
+// their original text; saving patches only edited fields, including repeated
+// list fields, without losing comments, other peers, hooks or future settings.
 
 export interface TunnelDraft {
   name: string;
@@ -19,6 +18,9 @@ export interface TunnelDraft {
   congestion: string;
   fec: string;
   obfs: string;
+  sourceText?: string;
+  peerIndex?: number;
+  peerCount?: number;
 }
 
 export function emptyTunnelDraft(name: string): TunnelDraft {
@@ -48,117 +50,114 @@ function appendListField(current: string, value: string): string {
   return `${current}, ${value}`;
 }
 
-// parseConf projects an installed configuration onto the editable draft. It
-// mirrors internal/config parsing: `# wg-quic:` directives carry transport
-// settings, Interface/Peer sections carry the rest. Only the first peer is
-// projected (single-peer MVP).
-export function parseConf(text: string): TunnelDraft {
+type DraftField = Exclude<keyof TunnelDraft, 'sourceText' | 'peerIndex' | 'peerCount' | 'name'>;
+
+const interfaceFields: Record<string, DraftField> = {
+  privatekey: 'privateKey', address: 'addresses', listenport: 'listenPort',
+  dns: 'dns', mtu: 'mtu',
+};
+const peerFields: Record<string, DraftField> = {
+  publickey: 'peerPublicKey', presharedkey: 'presharedKey', allowedips: 'allowedIPs',
+  endpoint: 'endpoint', persistentkeepalive: 'keepalive',
+};
+const transportFields: Record<string, DraftField> = {
+  carrier: 'carrier', congestion: 'congestion', fec: 'fec', obfs: 'obfs',
+};
+const fieldNames: Partial<Record<DraftField, string>> = {
+  privateKey: 'PrivateKey', addresses: 'Address', listenPort: 'ListenPort',
+  dns: 'DNS', mtu: 'MTU', peerPublicKey: 'PublicKey', presharedKey: 'PresharedKey',
+  allowedIPs: 'AllowedIPs', endpoint: 'Endpoint', keepalive: 'PersistentKeepalive',
+};
+
+function documentLines(text: string, peerIndex: number) {
+  let section = '';
+  let peer = -1;
+  return (text.match(/[^\n]*\n|[^\n]+$/g) || []).map((raw) => {
+    const line = raw.trim();
+    if (/^\[.*\]$/.test(line)) {
+      section = line.slice(1, -1).trim().toLowerCase();
+      if (section === 'peer') peer++;
+      return { raw, section, peer, header: true, field: undefined, value: '' };
+    }
+    const directive = line.startsWith('# wg-quic:');
+    const setting = directive ? line.slice('# wg-quic:'.length).trim() : line;
+    const eq = setting.indexOf('=');
+    const key = setting.slice(0, eq).trim();
+    const value = setting.slice(eq + 1).trim();
+    const field = eq < 0 || (!directive && /^[#;]/.test(line)) ? undefined
+      : directive ? transportFields[key]
+      : section === 'interface' ? interfaceFields[key.toLowerCase()]
+      : section === 'peer' && peer === peerIndex ? peerFields[key.toLowerCase()]
+      : undefined;
+    return { raw, section, peer, header: false, field, value };
+  });
+}
+
+export function parseConf(text: string, peerIndex = 0): TunnelDraft {
   const draft = emptyTunnelDraft('');
   draft.allowedIPs = '';
   draft.keepalive = '';
-  let section = '';
-  let sawPeer = false;
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) {
+  const lines = documentLines(text, peerIndex);
+  for (const {field, value} of lines) {
+    if (!field) continue;
+    draft[field] = ['addresses', 'dns', 'allowedIPs'].includes(field)
+      ? appendListField(draft[field], value) : value;
+  }
+  draft.sourceText = text;
+  draft.peerIndex = peerIndex;
+  draft.peerCount = lines.filter((line) => line.header && line.section === 'peer').length;
+  return draft;
+}
+
+function patchConf(draft: TunnelDraft): string {
+  const source = draft.sourceText!;
+  const peerIndex = draft.peerIndex ?? 0;
+  const original = parseConf(source, peerIndex);
+  const fields = [...Object.values(interfaceFields), ...Object.values(peerFields), ...Object.values(transportFields)];
+  const changed = new Set(fields.filter((field) => draft[field].trim() !== original[field].trim()));
+  if (changed.size === 0) return source;
+  const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = documentLines(source, peerIndex);
+  const present = new Set(lines.flatMap((line) => line.field ? [line.field] : []));
+  const written = new Set<DraftField>();
+  const setting = (field: DraftField): string => {
+    written.add(field);
+    const value = draft[field].trim();
+    if (!value) return '';
+    return `${fieldNames[field] ? `${fieldNames[field]} = ` : `# wg-quic: ${field}=`}${value}${newline}`;
+  };
+  let output = Object.values(transportFields)
+    .filter((field) => changed.has(field) && !present.has(field)).map(setting).join('');
+  for (const line of lines) {
+    if (line.field && changed.has(line.field)) {
+      if (!written.has(line.field)) output += setting(line.field);
       continue;
     }
-    if (line.startsWith('# wg-quic:')) {
-      const directive = line.slice('# wg-quic:'.length).trim();
-      const eq = directive.indexOf('=');
-      if (eq < 0) {
-        continue;
-      }
-      const key = directive.slice(0, eq).trim();
-      const value = directive.slice(eq + 1).trim();
-      if (section !== 'peer') {
-        switch (key) {
-          case 'carrier':
-            draft.carrier = value;
-            break;
-          case 'congestion':
-            draft.congestion = value;
-            break;
-          case 'fec':
-            draft.fec = value;
-            break;
-          case 'obfs':
-            draft.obfs = value;
-            break;
-        }
-      }
-      continue;
-    }
-    if (line.startsWith('#') || line.startsWith(';')) {
-      continue;
-    }
-    if (line.startsWith('[') && line.endsWith(']')) {
-      section = line.slice(1, -1).trim().toLowerCase();
-      if (section === 'peer') {
-        sawPeer = true;
-      }
-      continue;
-    }
-    const eq = line.indexOf('=');
-    if (eq < 0) {
-      continue;
-    }
-    const key = line.slice(0, eq).trim().toLowerCase();
-    const value = line.slice(eq + 1).trim();
-    if (section === 'interface') {
-      switch (key) {
-        case 'privatekey':
-          draft.privateKey = value;
-          break;
-        case 'address':
-          draft.addresses = appendListField(draft.addresses, value);
-          break;
-        case 'listenport':
-          draft.listenPort = value;
-          break;
-        case 'dns':
-          draft.dns = appendListField(draft.dns, value);
-          break;
-        case 'mtu':
-          draft.mtu = value;
-          break;
-      }
-    } else if (section === 'peer' && sawPeer) {
-      // Only project the first peer; later peers are out of MVP scope.
-      switch (key) {
-        case 'publickey':
-          if (!draft.peerPublicKey) {
-            draft.peerPublicKey = value;
-          }
-          break;
-        case 'presharedkey':
-          if (!draft.presharedKey) {
-            draft.presharedKey = value;
-          }
-          break;
-        case 'allowedips':
-          draft.allowedIPs = appendListField(draft.allowedIPs, value);
-          break;
-        case 'endpoint':
-          if (!draft.endpoint) {
-            draft.endpoint = value;
-          }
-          break;
-        case 'persistentkeepalive':
-          if (!draft.keepalive) {
-            draft.keepalive = value;
-          }
-          break;
-      }
+    output += line.raw;
+    if (line.header) {
+      const sectionFields = line.section === 'interface' ? interfaceFields
+        : line.section === 'peer' && line.peer === peerIndex ? peerFields : {};
+      const added = Object.values(sectionFields)
+        .filter((field) => changed.has(field) && !present.has(field) && !written.has(field));
+      if (added.length && !output.endsWith('\n')) output += newline;
+      output += added.map(setting).join('');
     }
   }
-  return draft;
+  // A profile without peers remains byte-for-byte unchanged until a user
+  // explicitly fills in a peer (or adds one in the source editor).
+  const addedPeer = Object.values(peerFields).filter((field) => changed.has(field) && !written.has(field));
+  if (addedPeer.length) {
+    if (!output.endsWith('\n')) output += newline;
+    output += `[Peer]${newline}${addedPeer.map(setting).join('')}`;
+  }
+  return output;
 }
 
 // buildConf renders the draft back into wg-quic configuration text. Transport
 // directives only emit when they differ from the defaults so generated files
 // stay minimal and match what Check/Validate accept.
 export function buildConf(draft: TunnelDraft): string {
+  if (draft.sourceText !== undefined) return patchConf(draft);
   const lines: string[] = [];
   const carrier = draft.carrier || 'quic';
   lines.push(`# wg-quic: carrier=${carrier}`);

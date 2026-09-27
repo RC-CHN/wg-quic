@@ -33,6 +33,9 @@ async function importConfigPath(
 }
 
 const api: DesktopAPI = {
+  confirmDiscard: () => ask('Discard unsaved changes to this configuration?', {
+    title: 'Unsaved changes', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Keep editing',
+  }),
   snapshot: () => invoke<DesktopSnapshot>('snapshot'),
   manage: (name: string, action: TunnelAction) =>
     invoke<DesktopSnapshot>('manage_tunnel', { name, action }),

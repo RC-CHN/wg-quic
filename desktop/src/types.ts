@@ -91,6 +91,7 @@ export interface TunnelKeys {
 }
 
 export interface DesktopAPI {
+  confirmDiscard(): Promise<boolean>;
   snapshot(): Promise<DesktopSnapshot>;
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;
