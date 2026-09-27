@@ -37,6 +37,14 @@ export async function runEditorInteractionSmoke(actions: {
     address.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     assert(address.value === '10.22.0.2/32', 'arrow key changed the draft');
     assert(actions.formIsDirty(), 'edited draft is not marked unsaved');
+    const language = document.getElementById('language-select') as HTMLSelectElement;
+    const originalLanguage = language.value;
+    language.value = 'zh';
+    language.dispatchEvent(new Event('change'));
+    assert(document.documentElement.lang === 'zh-CN' && document.getElementById('form-save')!.textContent === '检查并保存', 'Chinese editor labels are missing');
+    assert(address.value === '10.22.0.2/32' && input('form-private-key').value === generated, 'changing language lost the draft');
+    language.value = originalLanguage;
+    language.dispatchEvent(new Event('change'));
     await actions.cancelForm();
     assert(!document.getElementById('tunnel-form')!.classList.contains('hidden'), 'cancel ignored keep editing');
 

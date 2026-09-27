@@ -63,6 +63,7 @@ try {
   await call('Page.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1180, height: 760, deviceScaleFactor: 1, mobile: false });
   await call('Page.addScriptToEvaluateOnNewDocument', { source: `
+    localStorage.setItem('wg-quic-language', ${JSON.stringify(process.env.WG_QUIC_SMOKE_LANGUAGE || 'en')});
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       if (command === 'desktop_smoke_settings') return { mode: 'renderer' };
       if (command === 'snapshot') return {

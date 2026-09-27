@@ -1,5 +1,6 @@
+import { t } from './i18n';
 export async function copyText(text: string): Promise<void> {
-  if (!text) throw new Error('No public key is available');
+  if (!text) throw new Error(t('No public key is available'));
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -15,6 +16,6 @@ export async function copyText(text: string): Promise<void> {
     field.remove();
     focused?.focus();
     if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
-    if (!copied) throw new Error('Copy failed. Select and copy the public key manually.');
+    if (!copied) throw new Error(t('Copy failed. Select and copy the public key manually.'));
   }
 }

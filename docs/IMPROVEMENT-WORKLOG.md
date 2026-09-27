@@ -149,6 +149,20 @@ checks; Chromium cancel, duplicate prevention during refresh, partial result
 and failed-export recovery scenarios. Actual UAC/pkexec dialogs and installed
 service captures require their native deployment environment.
 
+## Chinese/English interaction copy
+
+The UI and native confirmation/save dialogs follow the system language and
+offer a remembered English/Chinese selector. Static labels and explicit message
+templates share one dictionary; user names, paths, keys and native diagnostic
+details are never translated or treated as markup. Language switching changes
+copy without rebuilding the active editor. Core protocol values remain stable.
+
+Validation: translation interpolation/fallback tests, frontend checks, complete
+English and Chinese Chromium scenarios, and visual inspection of the Chinese
+editor at 1180 × 760. Tests cover switching language with a modified draft,
+visible save actions, status distinctions, restart confirmation, diagnostic
+cancellation/partial results, and public-key clipboard contents.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

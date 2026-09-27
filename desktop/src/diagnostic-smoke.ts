@@ -1,4 +1,5 @@
 import type { DesktopSnapshot } from './types';
+import { t } from './i18n';
 
 export async function runDiagnosticInteractionSmoke(actions: {refresh(): Promise<void>; collect(): Promise<void>}): Promise<void> {
   const original = { ...window.wgQuic };
@@ -23,7 +24,7 @@ export async function runDiagnosticInteractionSmoke(actions: {refresh(): Promise
     release();
     await collecting;
     await actions.refresh();
-    assert(!button().disabled && result().includes('Partial') && result().includes('/partial.zip'), 'partial result was hidden or shown as complete');
+    assert(!button().disabled && result() === t('Partial diagnostics saved: {0}. {1}', '/partial.zip', 'Runtime restarted'), 'partial result was hidden or shown as complete');
     window.wgQuic.collectDiagnostics = async () => { throw new Error('Synthetic export failure'); };
     await actions.collect();
     assert(!button().disabled && result().includes('Synthetic export failure'), 'failed export is not recoverable');

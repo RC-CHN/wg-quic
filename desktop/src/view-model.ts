@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { TunnelAction, TunnelView } from './types';
 
 export interface ManagementServiceDisplay {
@@ -16,31 +17,31 @@ export function managementServiceDisplay(
   switch (status) {
     case 'ready':
       return {
-        label: 'Management service ready',
+        label: t('Management service ready'),
         state: 'ready',
         needsAttention: false,
       };
     case 'unauthorized':
       return {
-        label: 'Administrator approval on changes',
+        label: t('Administrator approval on changes'),
         state: 'fallback',
         needsAttention: false,
       };
     case 'incompatible':
       return {
-        label: 'Management service needs an update',
+        label: t('Management service needs an update'),
         state: 'error',
         needsAttention: true,
       };
     case 'unavailable':
       return {
-        label: 'Management service unavailable',
+        label: t('Management service unavailable'),
         state: 'error',
         needsAttention: true,
       };
     default:
       return {
-        label: 'Management service check failed',
+        label: t('Management service check failed'),
         state: 'error',
         needsAttention: true,
       };
@@ -87,19 +88,19 @@ export function tunnelDisplayState(
 export function tunnelStateLabel(state: TunnelDisplayState): string {
   switch (state) {
     case 'active':
-      return 'Waiting for peer';
-    case 'connected': return 'Connected';
-    case 'partial': return 'Partially connected';
-    case 'connecting': return 'Connecting…';
-    case 'authenticating': return 'Authenticating…';
-    case 'reconnecting': return 'Reconnecting…';
-    case 'unknown': return 'Status unavailable';
+      return t('Waiting for peer');
+    case 'connected': return t('Connected');
+    case 'partial': return t('Partially connected');
+    case 'connecting': return t('Connecting…');
+    case 'authenticating': return t('Authenticating…');
+    case 'reconnecting': return t('Reconnecting…');
+    case 'unknown': return t('Status unavailable');
     case 'inactive':
-      return 'Inactive';
+      return t('Inactive');
     case 'activating':
-      return 'Activating…';
+      return t('Activating…');
     case 'deactivating':
-      return 'Deactivating…';
+      return t('Deactivating…');
   }
 }
 
@@ -114,14 +115,14 @@ export function actionProgressDescription(
     if (tunnel.running) {
       const sessions = tunnel.status?.stats.active_sessions || 0;
       return sessions > 0
-        ? `QUIC session established; finishing activation${elapsed}`
-        : `Interface is up; establishing QUIC session${elapsed}`;
+        ? t("QUIC session established; finishing activation{0}", elapsed)
+        : t("Interface is up; establishing QUIC session{0}", elapsed);
     }
-    return `Starting wg-quic-quick and creating the interface${elapsed}`;
+    return t("Starting wg-quic-quick and creating the interface{0}", elapsed);
   }
   return tunnel.running
-    ? `Stopping the service and cleaning up host state${elapsed}`
-    : `Finishing deactivation${elapsed}`;
+    ? t("Stopping the service and cleaning up host state{0}", elapsed)
+    : t("Finishing deactivation{0}", elapsed);
 }
 
 export function chooseSelectedTunnel(
@@ -171,14 +172,14 @@ export function formatRTT(microseconds = 0): string {
 
 export function formatFECRecovery(recovered = 0, rawLost = 0): string {
   if (rawLost <= 0) {
-    return 'No observed loss';
+    return t('No observed loss');
   }
-  return `${((recovered / rawLost) * 100).toFixed(1)}% recovered`;
+  return t("{0}% recovered", ((recovered / rawLost) * 100).toFixed(1));
 }
 
 export function managementErrorMessage(message: string): string {
   if (/outcome is unknown/i.test(message)) {
-    return `${message} Tunnel status was refreshed; verify it before retrying.`;
+    return t("{0} Tunnel status was refreshed; verify it before retrying.", message);
   }
   if (/administrator privileges|administrator approval/i.test(message)) {
     return message;
@@ -188,7 +189,7 @@ export function managementErrorMessage(message: string): string {
       message,
     )
   ) {
-    return `${message} Administrator privileges may be required.`;
+    return t("{0} Administrator privileges may be required.", message);
   }
   return message;
 }

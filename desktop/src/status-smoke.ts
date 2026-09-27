@@ -1,4 +1,5 @@
 import type { CoreStatus, DesktopSnapshot } from './types';
+import { t } from './i18n';
 
 export async function runStatusInteractionSmoke(refresh: () => Promise<void>): Promise<void> {
   const original = window.wgQuic.snapshot;
@@ -13,7 +14,7 @@ export async function runStatusInteractionSmoke(refresh: () => Promise<void>): P
   };
   try {
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === 'Status unavailable', 'unknown status looks stopped');
+    assert(document.getElementById('detail-state')!.textContent === t('Status unavailable'), 'unknown status looks stopped');
     assert((document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'unknown status offers activation');
     assert(!document.getElementById('retry-status')!.classList.contains('hidden'), 'no recovery action for unknown status');
     const item = document.querySelector<HTMLButtonElement>('.tunnel-item')!;
@@ -31,15 +32,15 @@ export async function runStatusInteractionSmoke(refresh: () => Promise<void>): P
       sessions: [{ session_id: 1, session_generation: 1, state: 'established', peers: [] }],
     } as unknown as CoreStatus;
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === 'Authenticating…', 'QUIC alone looks authenticated');
+    assert(document.getElementById('detail-state')!.textContent === t('Authenticating…'), 'QUIC alone looks authenticated');
     tunnel.status.sessions![0]!.peers = [{ public_key: 'peer', authenticated: true }];
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === 'Connected', 'authenticated peer not connected');
+    assert(document.getElementById('detail-state')!.textContent === t('Connected'), 'authenticated peer not connected');
     tunnel.running = false;
     tunnel.statusState = 'inactive';
     tunnel.status = undefined;
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === 'Inactive', 'inactive state not shown');
+    assert(document.getElementById('detail-state')!.textContent === t('Inactive'), 'inactive state not shown');
     assert(!(document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'inactive tunnel cannot activate');
   } finally {
     window.wgQuic.snapshot = original;

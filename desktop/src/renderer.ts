@@ -1,3 +1,4 @@
+import { t, currentLanguage, setLanguage, localizeDocument } from './i18n';
 import './styles.css';
 import './tauri-api';
 import { ConfigurationApplications } from './config-application';
@@ -36,6 +37,8 @@ import {
   type TunnelDraft,
 } from './tunnel-draft';
 
+localizeDocument();
+
 const byId = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
   if (!element) {
@@ -69,6 +72,7 @@ let formOriginal = '';
 let formOriginalName = '';
 let formRevision = 0;
 let formBusy = false;
+let formErrors: string[] = [];
 let publicKeyRevision = 0;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
@@ -93,11 +97,11 @@ function showToast(message: string, kind: 'ok' | 'error' = 'ok'): void {
 }
 
 function statusEndpoint(tunnel: TunnelView): string {
-  if (tunnel.statusState === 'unknown') return 'Status unavailable';
+  if (tunnel.statusState === 'unknown') return t('Status unavailable');
   if (!tunnel.running) {
-    return 'Endpoint shown when active';
+    return t('Endpoint shown when active');
   }
-  return tunnel.status?.peers?.[0]?.endpoint || 'No peer endpoint';
+  return tunnel.status?.peers?.[0]?.endpoint || t('No peer endpoint');
 }
 
 function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTMLButtonElement {
@@ -139,21 +143,21 @@ function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTM
 
 function stateDescription(tunnel: TunnelView): string {
   const state = tunnelDisplayState(tunnel);
-  if (state === 'unknown') return 'Status could not be read. The tunnel may still be running; refresh to check again.';
-  if (state === 'connected') return 'QUIC transport is established and WireGuard has authenticated the peer.';
-  if (state === 'partial') return 'Some peers are connected. Check the remaining peers below.';
-  if (state === 'authenticating') return 'QUIC is connected; waiting for WireGuard authentication.';
-  if (state === 'reconnecting') return 'The interface is up and the transport is reconnecting automatically.';
-  if (state === 'connecting') return 'The interface is up; connecting to the QUIC peer.';
-  if (state === 'activating') return 'The interface is being prepared; host network settings are not yet ready.';
+  if (state === 'unknown') return t('Status could not be read. The tunnel may still be running; refresh to check again.');
+  if (state === 'connected') return t('QUIC transport is established and WireGuard has authenticated the peer.');
+  if (state === 'partial') return t('Some peers are connected. Check the remaining peers below.');
+  if (state === 'authenticating') return t('QUIC is connected; waiting for WireGuard authentication.');
+  if (state === 'reconnecting') return t('The interface is up and the transport is reconnecting automatically.');
+  if (state === 'connecting') return t('The interface is up; connecting to the QUIC peer.');
+  if (state === 'activating') return t('The interface is being prepared; host network settings are not yet ready.');
   if (!tunnel.running) {
-    return 'The tunnel is configured and ready to activate.';
+    return t('The tunnel is configured and ready to activate.');
   }
   const sessions = tunnel.status?.stats.active_sessions || 0;
   if (sessions === 0) {
-    return 'The interface is active and waiting for a QUIC peer session.';
+    return t('The interface is active and waiting for a QUIC peer session.');
   }
-  return `${sessions} active QUIC ${sessions === 1 ? 'session' : 'sessions'}.`;
+  return t("{0} active QUIC {1}.", sessions, sessions === 1 ? 'session' : 'sessions');
 }
 
 function setText(id: string, value: string): void {
@@ -189,14 +193,14 @@ function renderDetail(tunnel?: TunnelView): void {
     setText(
       'detail-empty-title',
       current?.tunnels.length
-        ? 'Select a tunnel'
-        : 'Import a tunnel configuration',
+        ? t('Select a tunnel')
+        : t('Import a tunnel configuration'),
     );
     setText(
       'detail-empty-copy',
       current?.tunnels.length
-        ? 'Choose a tunnel from the list to inspect or control it.'
-        : 'wg-quic uses the same .conf files as wg-quic-quick.',
+        ? t('Choose a tunnel from the list to inspect or control it.')
+        : t('wg-quic uses the same .conf files as wg-quic-quick.'),
     );
     return;
   }
@@ -231,8 +235,8 @@ function renderDetail(tunnel?: TunnelView): void {
   toggle.textContent = action
     ? tunnelStateLabel(state)
     : tunnel.running
-      ? 'Deactivate'
-      : 'Activate';
+      ? t('Deactivate')
+      : t('Activate');
   toggle.className = `button ${tunnel.running ? 'danger' : 'primary'}`;
   toggle.dataset.name = tunnel.name;
   toggle.dataset.action = tunnel.running ? 'down' : 'up';
@@ -263,8 +267,8 @@ function renderDetail(tunnel?: TunnelView): void {
   setText(
     'detail-modes',
     status
-      ? `${status.fec_mode} FEC · ${status.obfs_mode} obfuscation`
-      : 'Runtime details unavailable while inactive',
+      ? t("{0} FEC · {1} obfuscation", status.fec_mode, status.obfs_mode)
+      : t('Runtime details unavailable while inactive'),
   );
   setText('detail-tx', formatBytes(stats?.wg_tx_bytes));
   setText('detail-rx', formatBytes(stats?.wg_rx_bytes));
@@ -284,7 +288,7 @@ function renderDetail(tunnel?: TunnelView): void {
   );
   setText(
     'detail-fec-parity',
-    `${(stats?.fec_current_parity_shards || 0).toLocaleString()} current parity · ${(stats?.fec_unrecovered || 0).toLocaleString()} residual`,
+    t("{0} current parity · {1} residual", (stats?.fec_current_parity_shards || 0).toLocaleString(), (stats?.fec_unrecovered || 0).toLocaleString()),
   );
   setText('detail-public-key', status?.public_key || '—');
   byId<HTMLButtonElement>('copy-public-key').disabled = !status?.public_key;
@@ -298,7 +302,7 @@ function renderDetail(tunnel?: TunnelView): void {
     peerSelect.replaceChildren(...peers.map((peer) => {
       const option = document.createElement('option');
       option.value = peer.public_key;
-      option.textContent = `${peer.endpoint || 'Peer'} · ${peer.public_key.slice(0, 12)}…`;
+      option.textContent = `${peer.endpoint || t('Peer')} · ${peer.public_key.slice(0, 12)}…`;
       return option;
     }));
     if (peers.some((peer) => peer.public_key === previousPeer)) peerSelect.value = previousPeer;
@@ -306,7 +310,7 @@ function renderDetail(tunnel?: TunnelView): void {
   peerSelect.disabled = collecting.has(tunnel.name);
   const collect = byId<HTMLButtonElement>('collect-diagnostics');
   collect.disabled = collecting.has(tunnel.name) || !tunnel.running || tunnel.statusState === 'unknown' || !peers.length;
-  collect.textContent = collecting.has(tunnel.name) ? 'Collecting (about 10 s)…' : 'Collect and export…';
+  collect.textContent = collecting.has(tunnel.name) ? t('Collecting (about 10 s)…') : t('Collect and export…');
   setText('diagnostic-result', diagnosticResults.get(tunnel.name) || '');
 }
 
@@ -320,8 +324,8 @@ async function collectDiagnostics(): Promise<void> {
   try {
     const result = await window.wgQuic.collectDiagnostics(name, peer);
     if (!result.canceled) diagnosticResults.set(name, result.complete
-      ? `Diagnostics saved: ${result.path}`
-      : `Partial diagnostics saved: ${result.path}. ${result.detail || ''}`);
+      ? t("Diagnostics saved: {0}", result.path)
+      : t("Partial diagnostics saved: {0}. {1}", result.path, result.detail || ''));
   } catch (error) { diagnosticResults.set(name, errorMessage(error)); }
   finally { collecting.delete(name); if (current) render(current); }
 }
@@ -330,18 +334,18 @@ function renderConfigurationState(tunnel: TunnelView, busy: boolean): void {
   const saved = applications.get(tunnel.configPath);
   byId('configuration-state').classList.toggle('hidden', !saved);
   if (!saved) return;
-  let message = 'Configuration saved. Apply it to the running tunnel when ready.';
-  if (tunnel.statusState === 'unknown') message = 'Configuration saved. Current runtime state could not be checked.';
-  else if (!tunnel.running) message = 'Configuration saved. It will be used on the next activation.';
-  else if (saved.state === 'restart_required') message = 'Saved changes require a restart. The current connection is still using the previous settings.';
-  else if (saved.state === 'failed') message = 'The saved configuration was not fully applied. Review the result before retrying.';
-  else if (saved.state === 'unknown') message = 'The application result is not yet known. Check the original transaction before retrying.';
-  if (applying.has(tunnel.name)) message = saved.state === 'unknown' ? 'Checking the application result…' : 'Applying saved configuration…';
+  let message = t('Configuration saved. Apply it to the running tunnel when ready.');
+  if (tunnel.statusState === 'unknown') message = t('Configuration saved. Current runtime state could not be checked.');
+  else if (!tunnel.running) message = t('Configuration saved. It will be used on the next activation.');
+  else if (saved.state === 'restart_required') message = t('Saved changes require a restart. The current connection is still using the previous settings.');
+  else if (saved.state === 'failed') message = t('The saved configuration was not fully applied. Review the result before retrying.');
+  else if (saved.state === 'unknown') message = t('The application result is not yet known. Check the original transaction before retrying.');
+  if (applying.has(tunnel.name)) message = saved.state === 'unknown' ? t('Checking the application result…') : t('Applying saved configuration…');
   setText('configuration-state-copy', message);
-  setText('configuration-result', [saved.message, ...(saved.restart_reasons || []), saved.request_id ? `Request: ${saved.request_id}` : ''].filter(Boolean).join('\n'));
+  setText('configuration-result', [saved.message, ...(saved.restart_reasons || []), saved.request_id ? t("Request: {0}", saved.request_id) : ''].filter(Boolean).join('\n'));
   const apply = byId<HTMLButtonElement>('apply-config');
   apply.dataset.name = tunnel.name;
-  apply.textContent = saved.state === 'unknown' ? 'Check application result' : 'Apply saved changes';
+  apply.textContent = saved.state === 'unknown' ? t('Check application result') : t('Apply saved changes');
   apply.disabled = busy || !tunnel.running || tunnel.statusState === 'unknown' || saved.state === 'restart_required' || (saved.state === 'unknown' && !saved.request_id);
   apply.classList.toggle('hidden', !tunnel.running || saved.state === 'restart_required');
   const restart = byId<HTMLButtonElement>('restart-tunnel');
@@ -360,7 +364,7 @@ async function applyConfiguration(name: string): Promise<void> {
   try {
     const result = await window.wgQuic.apply(name, saved?.state === 'unknown' ? saved.request_id : undefined);
     applications.set(tunnel.configPath, result);
-    if (result.state === 'applied') showToast(result.cleanup_pending ? 'Configuration applied; host cleanup is still pending.' : 'Saved configuration applied');
+    if (result.state === 'applied') showToast(result.cleanup_pending ? t('Configuration applied; host cleanup is still pending.') : t('Saved configuration applied'));
   } catch (error) {
     // A failed IPC/elevation command does not prove the supervisor rejected
     // the mutation. Keep a known transaction ID, and never retry blindly.
@@ -385,7 +389,7 @@ async function restartTunnel(name: string): Promise<void> {
     render(current!);
     renderMutation(await window.wgQuic.manage(name, 'up'));
     applications.clear(tunnel.configPath);
-    showToast(`${name} restarted with the saved configuration`);
+    showToast(t("{0} restarted with the saved configuration", name));
   } catch (error) {
     showToast(`${name}: ${managementErrorMessage(errorMessage(error))}`, 'error');
     await refresh(false);
@@ -440,21 +444,21 @@ function renderForm(): void {
   if (!formDraft) {
     return;
   }
-  setText('form-mode-label', formMode === 'new' ? 'NEW TUNNEL' : 'EDIT TUNNEL');
+  setText('form-mode-label', formMode === 'new' ? t('NEW TUNNEL') : t('EDIT TUNNEL'));
   setText(
     'form-title',
-    formMode === 'new' ? 'Create tunnel' : `Edit ${formDraft.name}`,
+    formMode === 'new' ? t('Create tunnel') : t("Edit {0}", formDraft.name),
   );
   fillFormFromDraft(formDraft);
   byId<HTMLTextAreaElement>('form-source').value = buildConf(formDraft);
   byId('form-structured').classList.toggle('hidden', formSourceMode);
   byId('form-source-field').classList.toggle('hidden', !formSourceMode);
-  byId<HTMLButtonElement>('form-source-toggle').textContent = formSourceMode ? 'Use form' : 'Edit source';
+  byId<HTMLButtonElement>('form-source-toggle').textContent = formSourceMode ? t('Use form') : t('Edit source');
   const peers = byId<HTMLSelectElement>('form-peer-select');
   peers.replaceChildren(...Array.from({ length: formDraft.peerCount || 1 }, (_, index) => {
     const option = document.createElement('option');
     option.value = String(index);
-    option.textContent = `Peer ${index + 1}`;
+    option.textContent = t("Peer {0}", index + 1);
     return option;
   }));
   peers.value = String(formDraft.peerIndex || 0);
@@ -462,6 +466,7 @@ function renderForm(): void {
   byId('form-peer-selection').classList.toggle('hidden', peers.disabled);
   byId<HTMLInputElement>('form-name').disabled = formMode === 'edit';
   byId('form-errors').classList.add('hidden');
+  formErrors = [];
   void updatePublicKey();
 }
 
@@ -483,7 +488,7 @@ async function updatePublicKey(): Promise<void> {
 }
 
 async function copyPublicKey(key: string): Promise<void> {
-  try { await copyText(key); showToast('Public key copied'); }
+  try { await copyText(key); showToast(t('Public key copied')); }
   catch (error) { showToast(errorMessage(error), 'error'); }
 }
 
@@ -521,12 +526,13 @@ function selectFormPeer(index: number): void {
 }
 
 function showFormErrors(errors: string[]): void {
+  formErrors = errors;
   const box = byId('form-errors');
   box.innerHTML = '';
   const list = document.createElement('ul');
   for (const error of errors) {
     const item = document.createElement('li');
-    item.textContent = error;
+    item.textContent = t(error);
     list.appendChild(item);
   }
   box.appendChild(list);
@@ -553,7 +559,7 @@ async function startNewTunnel(): Promise<void> {
       setPublicKey(keys.public_key);
     }
   } catch (error) {
-    showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
+    showToast(t("Generate keys failed: {0}", errorMessage(error)), 'error');
   }
 }
 
@@ -574,7 +580,7 @@ async function startEditTunnel(name: string): Promise<void> {
       render(current);
     }
   } catch (error) {
-    showToast(`Read tunnel failed: ${errorMessage(error)}`, 'error');
+    showToast(t("Read tunnel failed: {0}", errorMessage(error)), 'error');
   }
 }
 
@@ -609,7 +615,7 @@ async function generateKeyIntoForm(): Promise<void> {
       setPublicKey(keys.public_key);
     }
   } catch (error) {
-    showToast(`Generate keys failed: ${errorMessage(error)}`, 'error');
+    showToast(t("Generate keys failed: {0}", errorMessage(error)), 'error');
   }
 }
 
@@ -622,7 +628,7 @@ async function saveForm(): Promise<void> {
     draft.name = formDraft.name;
   }
   const errors = formSourceMode
-    ? (!draft.name ? ['Tunnel name is required.'] : [])
+    ? (!draft.name ? [t('Tunnel name is required.')] : [])
     : validateTunnelDraft(draft, formMode === 'new');
   if (errors.length > 0) {
     showFormErrors(errors);
@@ -652,7 +658,7 @@ async function saveForm(): Promise<void> {
     selectedName = savedName;
     render(current);
     showToast(
-      wasNew ? `Tunnel ${savedName} created` : `Configuration saved for ${savedName}`,
+      wasNew ? t("Tunnel {0} created", savedName) : t("Configuration saved for {0}", savedName),
     );
   } catch (error) {
     showFormErrors([errorMessage(error)]);
@@ -668,16 +674,16 @@ function setNotice(snapshot: DesktopSnapshot): void {
   const { backend } = snapshot;
   if (!backend.supported) {
     notice.classList.remove('hidden');
-    setText('notice-title', 'Tunnel controls unavailable on this platform');
+    setText('notice-title', t('Tunnel controls unavailable on this platform'));
     setText(
       'notice-detail',
-      'The interface is available as a preview, but wg-quic-quick host integration currently supports Windows and Linux.',
+      t('The interface is available as a preview, but wg-quic-quick host integration currently supports Windows and Linux.'),
     );
     return;
   }
   if (backend.error) {
     notice.classList.remove('hidden');
-    setText('notice-title', 'Native runtime needs attention');
+    setText('notice-title', t('Native runtime needs attention'));
     setText('notice-detail', backend.error);
     return;
   }
@@ -691,8 +697,8 @@ function setNotice(snapshot: DesktopSnapshot): void {
     setText(
       'notice-detail',
       backend.managementStatus === 'incompatible'
-        ? 'The installed service does not match this desktop version. Repair or reinstall wg-quic; administrator approval will be used as a fallback.'
-        : 'Repair or reinstall wg-quic to restore one-click tunnel controls. Administrator approval will be used as a fallback.',
+        ? t('The installed service does not match this desktop version. Repair or reinstall wg-quic; administrator approval will be used as a fallback.')
+        : t('Repair or reinstall wg-quic to restore one-click tunnel controls. Administrator approval will be used as a fallback.'),
     );
     return;
   }
@@ -706,20 +712,20 @@ function render(snapshot: DesktopSnapshot): void {
 
   setText(
     'tunnel-count',
-    `${snapshot.tunnels.length} ${snapshot.tunnels.length === 1 ? 'tunnel' : 'tunnels'}`,
+    t(snapshot.tunnels.length === 1 ? '{0} tunnel' : '{0} tunnels', snapshot.tunnels.length),
   );
   setText('config-location', snapshot.backend.configDirectory);
   setText(
     'last-refresh',
-    `Updated ${refreshedAtDate(snapshot.refreshedAt).toLocaleTimeString()}`,
+    t("Updated {0}", refreshedAtDate(snapshot.refreshedAt).toLocaleTimeString()),
   );
   setText(
     'runtime-title',
     snapshot.backend.error
-      ? 'Runtime unavailable'
+      ? t('Runtime unavailable')
       : snapshot.backend.supported
-        ? 'Runtime ready'
-        : 'UI preview',
+        ? t('Runtime ready')
+        : t('UI preview'),
   );
   setText(
     'runtime-version',
@@ -817,7 +823,7 @@ async function manageTunnel(
       const tunnel = current?.tunnels.find((item) => item.name === name);
       if (tunnel?.running) applications.clear(tunnel.configPath);
     }
-    showToast(`${name} ${action === 'up' ? 'activated' : 'deactivated'}`);
+    showToast(t(action === 'up' ? 'Tunnel {0} activated' : 'Tunnel {0} deactivated', name));
   } catch (error) {
     showToast(
       `${name}: ${managementErrorMessage(errorMessage(error))}`,
@@ -837,7 +843,7 @@ async function manageTunnel(
 async function checkTunnel(name: string): Promise<void> {
   try {
     const result = await window.wgQuic.check(name);
-    showToast(result || `${name} is valid`);
+    showToast(result || t("{0} is valid", name));
   } catch (error) {
     showToast(`${name}: ${errorMessage(error)}`, 'error');
   }
@@ -856,7 +862,7 @@ async function deleteTunnel(name: string): Promise<void> {
       selectedName = undefined;
     }
     renderMutation(result.snapshot);
-    showToast(`${name} deleted`);
+    showToast(t("{0} deleted", name));
   } catch (error) {
     showToast(`${name}: ${errorMessage(error)}`, 'error');
     await refresh(false);
@@ -875,11 +881,11 @@ async function importTunnel(): Promise<void> {
     }
     renderMutation(result.snapshot);
     if (!result.canceled && result.importedName) {
-      showToast(`${result.importedName} imported`);
+      showToast(t("{0} imported", result.importedName));
     }
   } catch (error) {
     showToast(
-      `${errorMessage(error)} Writing the system configuration directory may require administrator privileges.`,
+      t("{0} Writing the system configuration directory may require administrator privileges.", errorMessage(error)),
       'error',
     );
   }
@@ -915,6 +921,20 @@ byId('theme-toggle').addEventListener('click', () => {
 });
 
 byId('refresh').addEventListener('click', () => void refresh());
+byId<HTMLSelectElement>('language-select').value = currentLanguage();
+byId('language-select').addEventListener('change', () => {
+  setLanguage(byId<HTMLSelectElement>('language-select').value === 'zh' ? 'zh' : 'en');
+  localizeDocument();
+  // Change copy only: switching language must never rebuild an active draft.
+  if (formDraft) {
+    setText('form-mode-label', formMode === 'new' ? t('NEW TUNNEL') : t('EDIT TUNNEL'));
+    setText('form-title', formMode === 'new' ? t('Create tunnel') : t('Edit {0}', formDraft.name));
+    setText('form-source-toggle', formSourceMode ? t('Use form') : t('Edit source'));
+    for (const option of Array.from(byId<HTMLSelectElement>('form-peer-select').options)) option.textContent = t('Peer {0}', Number(option.value) + 1);
+    if (formErrors.length) showFormErrors(formErrors);
+  }
+  if (current) render(current);
+});
 byId('collect-diagnostics').addEventListener('click', () => void collectDiagnostics());
 byId('copy-public-key').addEventListener('click', () => {
   const key = current?.tunnels.find((tunnel) => tunnel.name === selectedName)?.status?.public_key;

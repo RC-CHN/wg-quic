@@ -949,6 +949,7 @@ dd {
 .diagnostic-actions { margin-top: 18px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12px; }
 .diagnostic-actions select { max-width: 100%; background: var(--panel-deep); color: var(--text); padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
 .diagnostic-actions p { width: 100%; overflow-wrap: anywhere; color: var(--muted); }
+#language-select { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px; font-size: 12px; }
 
 .peer-empty {
   padding: 20px 15px;

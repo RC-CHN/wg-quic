@@ -1,4 +1,5 @@
 import type { CoreStatus, DesktopSnapshot } from './types';
+import { t } from './i18n';
 
 export async function runApplicationInteractionSmoke(actions: {
   refresh(): Promise<void>; edit(name: string): Promise<void>; save(): Promise<void>;
@@ -47,7 +48,7 @@ export async function runApplicationInteractionSmoke(actions: {
       return requestID ? {state: 'applied'} : {state: 'unknown', request_id: id};
     };
     await actions.apply('apply-fixture');
-    assert(document.getElementById('apply-config')!.textContent === 'Check application result', 'unknown result offers a fresh retry');
+    assert(document.getElementById('apply-config')!.textContent === t('Check application result'), 'unknown result offers a fresh retry');
     await actions.apply('apply-fixture');
     assert(requestIDs.length === 2 && requestIDs[0] === undefined && requestIDs[1] === id, 'result check did not reuse the transaction ID');
     assert(document.getElementById('configuration-state')!.classList.contains('hidden'), 'applied state remained pending');

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { ask, open, save } from '@tauri-apps/plugin-dialog';
 import type {
@@ -35,16 +36,16 @@ async function importConfigPath(
 
 const api: DesktopAPI = {
   collectDiagnostics: async (name, peer) => {
-    const destination = await save({ title: 'Save diagnostics to a new ZIP file', defaultPath: `wg-quic-${name}-${Date.now()}.zip`, filters: [{name: 'ZIP archive', extensions: ['zip']}] });
+    const destination = await save({ title: t('Save diagnostics to a new ZIP file'), defaultPath: `wg-quic-${name}-${Date.now()}.zip`, filters: [{name: t('ZIP archive'), extensions: ['zip']}] });
     if (!destination) return { canceled: true };
     return invoke('collect_diagnostics', { name, peer, destination });
   },
-  confirmRestart: (name) => ask(`Restart "${name}" to apply the saved configuration? Traffic will be interrupted while the tunnel reconnects.`, {
-    title: 'Restart tunnel?', kind: 'warning', okLabel: 'Restart', cancelLabel: 'Keep running',
+  confirmRestart: (name) => ask(t("Restart \"{0}\" to apply the saved configuration? Traffic will be interrupted while the tunnel reconnects.", name), {
+    title: t('Restart tunnel?'), kind: 'warning', okLabel: t('Restart'), cancelLabel: t('Keep running'),
   }),
   apply: (name, requestId) => invoke<ApplyResult>('apply_tunnel', { name, requestId }),
-  confirmDiscard: () => ask('Discard unsaved changes to this configuration?', {
-    title: 'Unsaved changes', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Keep editing',
+  confirmDiscard: () => ask(t('Discard unsaved changes to this configuration?'), {
+    title: t('Unsaved changes'), kind: 'warning', okLabel: t('Discard'), cancelLabel: t('Keep editing'),
   }),
   snapshot: (selectedName, force = false) => invoke<DesktopSnapshot>('snapshot', { selectedName, force }),
   manage: (name: string, action: TunnelAction) =>
@@ -52,12 +53,12 @@ const api: DesktopAPI = {
   check: (name: string) => invoke<string>('check_tunnel', { name }),
   deleteTunnel: async (name: string): Promise<DeleteResult> => {
     const confirmed = await ask(
-      `Delete tunnel "${name}"? This stops the tunnel and removes its configuration. This cannot be undone.`,
+      t("Delete tunnel \"{0}\"? This stops the tunnel and removes its configuration. This cannot be undone.", name),
       {
-        title: 'Delete tunnel?',
+        title: t('Delete tunnel?'),
         kind: 'warning',
-        okLabel: 'Delete',
-        cancelLabel: 'Cancel',
+        okLabel: t('Delete'),
+        cancelLabel: t('Cancel'),
       },
     );
     if (!confirmed) {
@@ -78,10 +79,10 @@ const api: DesktopAPI = {
     invoke<DesktopSnapshot>('write_tunnel', { name, contents, overwrite }),
   importConfig: async () => {
     const selected = await open({
-      title: 'Import wg-quic configuration',
+      title: t('Import wg-quic configuration'),
       multiple: false,
       directory: false,
-      filters: [{ name: 'wg-quic configuration', extensions: ['conf'] }],
+      filters: [{ name: t('wg-quic configuration'), extensions: ['conf'] }],
     });
     if (!selected) {
       return { canceled: true, snapshot: await api.snapshot() };
@@ -94,12 +95,12 @@ const api: DesktopAPI = {
         throw error;
       }
       const replace = await ask(
-        `${selected} already exists. Replacing a running tunnel configuration does not restart it automatically.`,
+        t("{0} already exists. Replacing a running tunnel configuration does not restart it automatically.", selected),
         {
-          title: 'Replace tunnel configuration?',
+          title: t('Replace tunnel configuration?'),
           kind: 'warning',
-          okLabel: 'Replace',
-          cancelLabel: 'Cancel',
+          okLabel: t('Replace'),
+          cancelLabel: t('Cancel'),
         },
       );
       if (!replace) {
