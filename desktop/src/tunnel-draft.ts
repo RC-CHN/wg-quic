@@ -85,12 +85,16 @@ function documentLines(text: string, peerIndex: number) {
     const key = setting.slice(0, eq).trim();
     const value = setting.slice(eq + 1).trim();
     const field = eq < 0 || (!directive && /^[#;]/.test(line)) ? undefined
-      : directive ? transportFields[key]
-      : section === 'interface' ? interfaceFields[key.toLowerCase()]
-      : section === 'peer' && peer === peerIndex ? peerFields[key.toLowerCase()]
+      : directive ? ownField(transportFields, key)
+      : section === 'interface' ? ownField(interfaceFields, key.toLowerCase())
+      : section === 'peer' && peer === peerIndex ? ownField(peerFields, key.toLowerCase())
       : undefined;
     return { raw, section, peer, header: false, field, value };
   });
+}
+
+function ownField(fields: Record<string, DraftField>, key: string): DraftField | undefined {
+  return Object.hasOwn(fields, key) ? fields[key] : undefined;
 }
 
 export function parseConf(text: string, peerIndex = 0): TunnelDraft {

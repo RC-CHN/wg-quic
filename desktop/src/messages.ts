@@ -1,6 +1,7 @@
 // English source messages remain the fallback. Values supplied by the user
 // (names, paths, keys and native diagnostic details) are never translated.
 export const chinese: Record<string, string> = {
+  'An operation is in progress. Wait for it to finish before quitting.': '操作正在进行中，请完成后再退出。',
   '{0} tunnel': '{0} 个隧道', '{0} tunnels': '{0} 个隧道', 'Tunnel {0} activated': '隧道 {0} 已启用', 'Tunnel {0} deactivated': '隧道 {0} 已停用',
   'Waiting': '等待连接',
   'WireGuard over resilient QUIC': '基于 QUIC 的 WireGuard 隧道',

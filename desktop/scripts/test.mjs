@@ -37,6 +37,7 @@ try {
       path.join(outputDir, 'src', 'observation-clock.test.js'),
       path.join(outputDir, 'src', 'peer-rates.test.js'),
       path.join(outputDir, 'src', 'i18n.test.js'),
+      path.join(outputDir, 'src', 'contracts.test.js'),
       path.join(outputDir, 'src', 'view-model.test.js'),
       path.join(outputDir, 'src', 'tunnel-draft.test.js'),
       path.join(scriptDir, 'check-version.test.mjs'),

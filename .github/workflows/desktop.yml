@@ -22,6 +22,7 @@ on:
       - "tests/linux/**"
       - "third_party/**"
       - "desktop/**"
+      - "tests/fixtures/desktop/**"
   pull_request:
     paths:
       - ".github/workflows/desktop.yml"
@@ -34,6 +35,7 @@ on:
       - "tests/linux/**"
       - "third_party/**"
       - "desktop/**"
+      - "tests/fixtures/desktop/**"
   workflow_dispatch:
 
 permissions:
@@ -114,6 +116,15 @@ jobs:
       - name: Test desktop frontend and release behavior
         working-directory: desktop
         run: npm test
+      - name: Test English and Chinese browser interactions
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        shell: bash
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+        run: |
+          npm run smoke:browser
+          WG_QUIC_SMOKE_LANGUAGE=zh node scripts/smoke-browser.mjs
       - name: Prepare bundled native commands
         working-directory: desktop
         run: npm run native

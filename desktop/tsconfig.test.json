@@ -13,6 +13,7 @@
     "src/observation-clock.test.ts",
     "src/peer-rates.test.ts",
     "src/i18n.test.ts",
+    "src/contracts.test.ts",
     "src/config-application.ts",
     "src/config-application.test.ts",
     "src/types.ts",

@@ -163,6 +163,43 @@ editor at 1180 × 760. Tests cover switching language with a modified draft,
 visible save actions, status distinctions, restart confirmation, diagnostic
 cancellation/partial results, and public-key clipboard contents.
 
+## Shared contracts and final checks
+
+`tests/fixtures/desktop` pins the Go status envelope, Rust view mapping and
+TypeScript state interpretation. Shared configuration fixtures compare exact
+form output and Go semantic parsing, including two peers, IPv6, repeated fields,
+hooks, routing settings and peer FEC policy. Unknown form fields cannot resolve
+inherited JavaScript object properties. CI now runs both UI languages in
+Chromium, in addition to its existing installed WebKit/WebView lifecycle jobs.
+
+Tray Quit now routes through the same unsaved-edit guard as window closing;
+operations in progress prevent quitting with an explanation. List arrow keys
+move keyboard focus with the selection and avoid scrolling the page. Browser
+checks cover both behaviors. Backend caching avoids methods newer than the
+declared Rust minimum version.
+
+Final local validation:
+
+- Project-wide Go race tests; the only initial failure was a misspelled directive
+  in the new fixture, corrected and rerun with the config/quick race tests.
+- Full QUIC fork suite, including its integration tests; targeted fork/bind race
+  tests and the earlier FEC fuzz run.
+- Twelve Rust backend tests, including shared contracts, blocked status readers
+  and invalidation races.
+- TypeScript check and ten frontend/test-script suites under Node 22.23.2.
+- English/Chinese Chromium scenarios under Node 22, including actual clipboard
+  readback, draft/focus retention, failures, canceled/confirmed operations, and
+  visible save controls.
+- Linux release executable build and bundled native command checks, including
+  public-key derivation, both configuration fixtures and status protocol.
+- Windows and FreeBSD affected Go packages cross-compiled; repository dependency
+  boundary check passed.
+
+This environment has no display server/Xvfb, so the packaged Linux WebKit GUI
+was not launched. Windows UAC, tray execution and installed network lifecycle
+remain native CI checks. Browser IPC substitutions do not claim those results.
+No change was pushed, deployed, or used to modify a real tunnel configuration.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

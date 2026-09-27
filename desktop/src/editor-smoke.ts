@@ -10,6 +10,7 @@ export async function runEditorInteractionSmoke(actions: {
   toggleFormSource(): void;
   selectFormPeer(index: number): void;
   formIsDirty(): boolean;
+  canQuit(): Promise<boolean>;
 }): Promise<void> {
   const input = (id: string) => document.getElementById(id) as HTMLInputElement;
   const assert = (condition: boolean, message: string) => {
@@ -47,6 +48,7 @@ export async function runEditorInteractionSmoke(actions: {
     language.dispatchEvent(new Event('change'));
     await actions.cancelForm();
     assert(!document.getElementById('tunnel-form')!.classList.contains('hidden'), 'cancel ignored keep editing');
+    assert(!await actions.canQuit(), 'quit ignored keep editing');
 
     input('form-peer-public-key').value = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
     window.wgQuic.writeTunnel = async () => { throw new Error('Synthetic save failure'); };
@@ -68,6 +70,7 @@ export async function runEditorInteractionSmoke(actions: {
     assert(input('form-source').value.includes('second.example:443'), 'switching peers lost the edit');
     assert(input('form-source').value.includes('# preserved comment'), 'source/form round trip lost comments');
     discard = true;
+    assert(await actions.canQuit(), 'explicit discard cannot quit');
     await actions.cancelForm();
     assert(input('form-private-key').value === '' && input('form-source').value === '', 'closed editor retained secrets');
   } finally {

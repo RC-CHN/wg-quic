@@ -92,6 +92,18 @@ npm run smoke:native
 renderer to load a real backend snapshot, and exits through a deterministic
 result-file protocol. On headless Linux, run it through `xvfb-run`.
 
+For a complete Chinese browser pass, set `WG_QUIC_SMOKE_LANGUAGE=zh` when running
+`smoke:browser`. The language selector follows the system by default, remembers
+the user's choice and preserves unsaved edits when switched. Browser checks use
+a substituted native boundary and do not replace installed WebKit/WebView or
+privileged service testing. Shared Go/Rust/TypeScript status and configuration
+fixtures live in `tests/fixtures/desktop`; frontend tests consume them directly.
+
+Peer details include actual WireGuard rates, public-key copying and recent
+disconnections. Diagnostic export collects ten seconds of telemetry into a new
+ZIP file, preserving partial-result markers. It contains public keys and network
+endpoints, with no configuration secrets or payloads.
+
 CI builds both supported desktop targets. Linux installs the generated Deb
 before its renderer smoke. Windows builds the MSI and then runs both
 `tests/windows/privileged-lifecycle.ps1` against the bundled commands and

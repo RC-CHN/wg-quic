@@ -13,6 +13,8 @@ use tauri::{AppHandle, Manager, State};
 mod status_cache;
 
 #[cfg(target_os = "windows")]
+use tauri::Emitter;
+#[cfg(target_os = "windows")]
 use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, tray::TrayIconEvent, WindowEvent};
 
 #[derive(Default)]
@@ -547,7 +549,7 @@ fn snapshot_selected(
         if force
             || cache
                 .as_ref()
-                .is_none_or(|(at, _)| at.elapsed() > Duration::from_secs(15))
+                .map_or(true, |(at, _)| at.elapsed() > Duration::from_secs(15))
         {
             let status =
                 desktop_broker_status(&paths).unwrap_or_else(|error| DesktopBrokerStatus {
@@ -1020,6 +1022,11 @@ fn report_desktop_smoke(message: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn quit_desktop(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn complete_desktop_smoke(app: AppHandle, message: String, failed: bool) {
     if let Err(error) = write_desktop_smoke_result(&message) {
         eprintln!("{error}");
@@ -1065,7 +1072,10 @@ fn setup_windows_tray(app: &mut tauri::App) -> tauri::Result<()> {
             "show" => {
                 show_main_window(app);
             }
-            "quit" => app.exit(0),
+            "quit" => {
+                show_main_window(app);
+                let _ = app.emit("desktop-quit-requested", ());
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -1124,6 +1134,7 @@ pub fn run() {
             generate_keys,
             derive_public_key,
             collect_diagnostics,
+            quit_desktop,
             write_tunnel,
             import_config,
             open_config_directory,
@@ -1138,6 +1149,23 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_shared_go_desktop_status_contract() {
+        let fixtures: Vec<Value> =
+            serde_json::from_str(include_str!("../../../tests/fixtures/desktop/status.json"))
+                .unwrap();
+        for fixture in fixtures {
+            let report = parse_desktop_status(&fixture["report"].to_string(), "wg0").unwrap();
+            let view = tunnel_status_view("wg0".into(), "wg0.conf".into(), Ok(report));
+            assert_eq!(
+                serde_json::to_value(view).unwrap(),
+                fixture["view"],
+                "{}",
+                fixture["name"]
+            );
+        }
+    }
 
     #[test]
     fn validates_tunnel_names() {

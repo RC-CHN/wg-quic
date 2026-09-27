@@ -129,3 +129,5 @@ export function completeDesktopSmoke(
 export function reportDesktopSmoke(message: string): Promise<void> {
   return invoke('report_desktop_smoke', { message });
 }
+
+export const quitDesktop = (): Promise<void> => invoke('quit_desktop');

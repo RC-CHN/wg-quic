@@ -42,6 +42,12 @@ export async function runStatusInteractionSmoke(refresh: () => Promise<void>): P
     await refresh();
     assert(document.getElementById('detail-state')!.textContent === t('Inactive'), 'inactive state not shown');
     assert(!(document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'inactive tunnel cannot activate');
+    fixture.tunnels.push({ name: 'second', configPath: '/second.conf', running: false, statusState: 'inactive' });
+    await refresh();
+    item.focus();
+    const arrow = new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true});
+    item.dispatchEvent(arrow);
+    assert((document.activeElement as HTMLElement).dataset.name === 'second' && arrow.defaultPrevented, 'arrow navigation failed to move focus with selection');
   } finally {
     window.wgQuic.snapshot = original;
     await refresh();

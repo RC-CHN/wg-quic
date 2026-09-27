@@ -9,6 +9,7 @@ import {
   completeDesktopSmoke,
   desktopSmokeSettings,
   reportDesktopSmoke,
+  quitDesktop,
 } from './tauri-api';
 import type {
   CoreStatus,
@@ -112,6 +113,7 @@ function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTM
   item.dataset.name = tunnel.name;
   item.setAttribute('role', 'option');
   item.setAttribute('aria-selected', String(selectedName === tunnel.name));
+  item.tabIndex = selectedName === tunnel.name ? 0 : -1;
 
   const stateDot = item.children[0] || document.createElement('span');
   stateDot.className = `state-dot ${state}`;
@@ -503,6 +505,14 @@ function formIsDirty(): boolean {
 
 async function canLeaveForm(): Promise<boolean> {
   return !formBusy && (!formIsDirty() || await window.wgQuic.confirmDiscard());
+}
+
+async function canQuit(): Promise<boolean> {
+  if (pending.size || applying.size || collecting.size || formBusy) {
+    showToast(t('An operation is in progress. Wait for it to finish before quitting.'), 'error');
+    return false;
+  }
+  return canLeaveForm();
 }
 
 function toggleFormSource(): void {
@@ -1030,6 +1040,9 @@ document.addEventListener('keydown', (event) => {
     );
     selectedName = current.tunnels[next]?.name;
     render(current);
+    event.preventDefault();
+    tunnelList.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    void refresh(false);
   }
 });
 
@@ -1044,10 +1057,13 @@ async function start(): Promise<void> {
   smokeMode = smoke.mode;
   if (smoke.mode === 'none') {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().listen('desktop-quit-requested', async () => {
+      if (await canQuit()) await quitDesktop();
+    });
     await getCurrentWindow().onCloseRequested(async (event) => {
       // Windows closes to the tray and retains the draft. Linux closes the
       // application, so ask before discarding or interrupting a pending save.
-      if (current?.backend.platform === 'win32' || !await canLeaveForm()) {
+      if (current?.backend.platform === 'win32' || !await canQuit()) {
         event.preventDefault();
       }
     });
@@ -1074,6 +1090,7 @@ async function start(): Promise<void> {
     await runEditorInteractionSmoke({
       startNewTunnel, startEditTunnel, refresh: () => refreshSnapshot(),
       saveForm, cancelForm, toggleFormSource, selectFormPeer, formIsDirty,
+      canQuit,
     });
     const { runStatusInteractionSmoke } = await import('./status-smoke');
     await runStatusInteractionSmoke(refreshSnapshot);
