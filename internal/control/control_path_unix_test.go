@@ -53,6 +53,9 @@ func TestReadOnlyStatusEndpointIsWorldReadableAndStatusOnly(t *testing.T) {
 	if status.Interface != "status" || status.State != "up" {
 		t.Fatalf("Status() = %#v", status)
 	}
+	if readOnly, err := ReadOnly(path); err != nil || readOnly.Interface != "status" {
+		t.Fatalf("direct public status = %+v, error = %v", readOnly, err)
+	}
 	client := &LocalClient{path: path}
 	var resp response
 	if err := client.callAt(

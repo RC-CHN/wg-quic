@@ -49,6 +49,12 @@ export function managementServiceDisplay(
 
 export type TunnelDisplayState =
   | 'active'
+  | 'connected'
+  | 'partial'
+  | 'connecting'
+  | 'authenticating'
+  | 'reconnecting'
+  | 'unknown'
   | 'inactive'
   | 'activating'
   | 'deactivating';
@@ -63,13 +69,31 @@ export function tunnelDisplayState(
   if (pending === 'down') {
     return 'deactivating';
   }
-  return tunnel.running ? 'active' : 'inactive';
+  if (tunnel.statusState === 'unknown' || tunnel.statusDetail) return 'unknown';
+  if (tunnel.statusState === 'prepared') return 'activating';
+  if (!tunnel.running) return 'inactive';
+  const peers = tunnel.status?.peers || [];
+  const authenticated = new Set((tunnel.status?.sessions || [])
+    .filter((session) => session.state === 'established')
+    .flatMap((session) => (session.peers || []).filter((peer) => peer.authenticated).map((peer) => peer.public_key)));
+  const connected = peers.filter((peer) => peer.session === 'established' && authenticated.has(peer.public_key)).length;
+  if (connected > 0) return connected === peers.length ? 'connected' : 'partial';
+  if (peers.some((peer) => peer.session === 'reconnecting')) return 'reconnecting';
+  if (peers.some((peer) => peer.session === 'dialing')) return 'connecting';
+  if (peers.some((peer) => peer.session === 'established')) return 'authenticating';
+  return 'active';
 }
 
 export function tunnelStateLabel(state: TunnelDisplayState): string {
   switch (state) {
     case 'active':
-      return 'Active';
+      return 'Waiting for peer';
+    case 'connected': return 'Connected';
+    case 'partial': return 'Partially connected';
+    case 'connecting': return 'Connecting…';
+    case 'authenticating': return 'Authenticating…';
+    case 'reconnecting': return 'Reconnecting…';
+    case 'unknown': return 'Status unavailable';
     case 'inactive':
       return 'Inactive';
     case 'activating':

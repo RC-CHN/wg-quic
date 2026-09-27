@@ -56,10 +56,29 @@ struct TunnelView {
     name: String,
     config_path: String,
     running: bool,
+    status_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_code: Option<String>,
+    sampled_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     status_detail: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DesktopStatusReport {
+    protocol_version: u32,
+    state: String,
+    sampled_at: u64,
+    status: Option<Value>,
+    error: Option<DesktopStatusFailure>,
+}
+
+#[derive(Deserialize)]
+struct DesktopStatusFailure {
+    code: String,
+    message: String,
 }
 
 #[derive(Serialize)]
@@ -77,8 +96,6 @@ struct ImportResult {
     imported_name: String,
     snapshot: DesktopSnapshot,
 }
-
-const INACTIVE_STATUS_MARKER: &str = "interface is inactive:";
 
 #[derive(Serialize)]
 struct DesktopSmokeSettings {
@@ -503,30 +520,10 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
     let tunnels = profiles
         .into_iter()
         .map(|(name, config_path)| {
-            let status_result = run_output(
-                &paths.core,
-                &[argument("show"), argument(&name), argument("--json")],
-            )
-            .and_then(|output| parse_status(&output, &name));
-            match status_result {
-                Ok(status) => TunnelView {
-                    name,
-                    config_path: config_path.to_string_lossy().into_owned(),
-                    running: true,
-                    status: Some(status),
-                    status_detail: None,
-                },
-                Err(error) => {
-                    let status_detail = (!is_inactive_status_error(&error)).then_some(error);
-                    TunnelView {
-                        name,
-                        config_path: config_path.to_string_lossy().into_owned(),
-                        running: false,
-                        status: None,
-                        status_detail,
-                    }
-                }
-            }
+            let status_result =
+                run_output(&paths.quick, &[argument("desktop-status"), argument(&name)])
+                    .and_then(|output| parse_desktop_status(&output, &name));
+            tunnel_status_view(name, config_path, status_result)
         })
         .collect();
     Ok(DesktopSnapshot {
@@ -543,38 +540,64 @@ fn unix_timestamp_string() -> String {
     duration.as_millis().to_string()
 }
 
-fn parse_status(output: &str, expected_interface: &str) -> Result<Value, String> {
-    let status = serde_json::from_str::<Value>(output)
-        .map_err(|error| format!("wg-quic returned invalid status JSON: {error}"))?;
-    let interface = status.get("interface").and_then(Value::as_str);
-    let state = status.get("state").and_then(Value::as_str);
-    if interface != Some(expected_interface) || state != Some("up") {
-        return Err(format!(
-            "wg-quic returned status for interface {:?} in state {:?}",
-            interface, state
-        ));
+fn parse_desktop_status(
+    output: &str,
+    expected_interface: &str,
+) -> Result<DesktopStatusReport, String> {
+    let report: DesktopStatusReport = serde_json::from_str(output)
+        .map_err(|error| format!("invalid desktop status JSON: {error}"))?;
+    if report.protocol_version != 1
+        || !matches!(
+            report.state.as_str(),
+            "up" | "prepared" | "inactive" | "unknown"
+        )
+    {
+        return Err("unsupported desktop status protocol or state".into());
     }
-    Ok(status)
+    if let Some(status) = &report.status {
+        let expected_state = if report.state == "inactive" {
+            "down"
+        } else {
+            &report.state
+        };
+        if status.get("interface").and_then(Value::as_str) != Some(expected_interface)
+            || status.get("state").and_then(Value::as_str) != Some(expected_state)
+        {
+            return Err("desktop status belongs to a different interface or state".into());
+        }
+    } else if matches!(report.state.as_str(), "up" | "prepared") {
+        return Err("desktop status omitted the active interface".into());
+    }
+    Ok(report)
 }
 
-fn is_inactive_status_error(error: &str) -> bool {
-    if error.contains(INACTIVE_STATUS_MARKER) {
-        return true;
+fn tunnel_status_view(
+    name: String,
+    config_path: PathBuf,
+    result: Result<DesktopStatusReport, String>,
+) -> TunnelView {
+    match result {
+        Ok(report) => TunnelView {
+            name,
+            config_path: config_path.to_string_lossy().into_owned(),
+            running: report.state == "up",
+            status_state: report.state,
+            status_code: report.error.as_ref().map(|error| error.code.clone()),
+            sampled_at: report.sampled_at,
+            status: report.status,
+            status_detail: report.error.map(|error| error.message),
+        },
+        Err(error) => TunnelView {
+            name,
+            config_path: config_path.to_string_lossy().into_owned(),
+            running: false,
+            status_state: "unknown".into(),
+            status_code: Some("status_unavailable".into()),
+            sampled_at: 0,
+            status: None,
+            status_detail: Some(error),
+        },
     }
-
-    // Compatibility for older bundled cores that returned the two native
-    // Windows missing-pipe errors without the stable marker. New cores
-    // normalize these at the transport boundary; keeping this narrow fallback
-    // prevents an upgraded desktop from exposing raw device and pipe paths
-    // while the native commands are being replaced.
-    let lower = error.to_ascii_lowercase();
-    lower.contains(r"\\.\pipe\wg-quic-")
-        && lower.contains("-status:")
-        && lower
-            .matches("the system cannot find the file specified")
-            .count()
-            >= 2
-        && !lower.contains("access is denied")
 }
 
 fn windows_desktop_client_arguments(
@@ -940,28 +963,40 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_matching_active_status() {
-        let status = parse_status(r#"{"interface":"office","state":"up"}"#, "office")
-            .expect("parse active status");
-        assert_eq!(status["interface"], "office");
-        assert!(parse_status(r#"{"interface":"other","state":"up"}"#, "office").is_err());
-        assert!(parse_status(r#"{"interface":"office","state":"down"}"#, "office").is_err());
+    fn validates_versioned_desktop_status() {
+        let up = r#"{"protocol_version":1,"state":"up","sampled_at":100,"status":{"interface":"office","state":"up"}}"#;
+        assert!(parse_desktop_status(up, "office").is_ok());
+        assert!(parse_desktop_status(up, "other").is_err());
+        assert!(parse_desktop_status(
+            &up.replace("\"protocol_version\":1", "\"protocol_version\":2"),
+            "office"
+        )
+        .is_err());
+        assert!(parse_desktop_status(
+            r#"{"protocol_version":1,"state":"up","sampled_at":100}"#,
+            "office"
+        )
+        .is_err());
     }
 
     #[test]
-    fn recognizes_inactive_status_errors_without_hiding_access_failures() {
-        assert!(is_inactive_status_error(
-            r#"wg-quic show office failed: wg-quic: interface is inactive: \"office\""#
-        ));
-        assert!(is_inactive_status_error(
-            r#"wg-quic show wg0 --json failed with exit code 1: wg-quic: \\.\pipe\wg-quic-wg0: open \\.\pipe\wg-quic-wg0: The system cannot find the file specified. open \\.\pipe\wg-quic-wg0-status: The system cannot find the file specified."#
-        ));
-        assert!(!is_inactive_status_error(
-            "wg-quic show office failed: access is denied"
-        ));
-        assert!(!is_inactive_status_error(
-            r#"open \\.\pipe\wg-quic-wg0: Access is denied. open \\.\pipe\wg-quic-wg0-status: The system cannot find the file specified. The system cannot find the file specified."#
-        ));
+    fn status_failures_never_claim_a_stopped_tunnel() {
+        let unknown = r#"{"protocol_version":1,"state":"unknown","sampled_at":100,"error":{"code":"permission_denied","message":"synthetic localized error"}}"#;
+        let report = parse_desktop_status(unknown, "office").unwrap();
+        let view = tunnel_status_view("office".into(), "office.conf".into(), Ok(report));
+        assert_eq!(view.status_state, "unknown");
+        assert_eq!(view.status_code.as_deref(), Some("permission_denied"));
+        let unavailable =
+            tunnel_status_view("office".into(), "office.conf".into(), Err("timeout".into()));
+        assert_eq!(unavailable.status_state, "unknown");
+        let inactive = parse_desktop_status(
+            r#"{"protocol_version":1,"state":"inactive","sampled_at":100}"#,
+            "office",
+        )
+        .unwrap();
+        let view = tunnel_status_view("office".into(), "office.conf".into(), Ok(inactive));
+        assert_eq!(view.status_state, "inactive");
+        assert!(view.status_detail.is_none());
     }
 
     #[test]

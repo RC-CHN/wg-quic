@@ -5,6 +5,14 @@ export interface PeerStatus {
   endpoint?: string;
   generation: number;
   session: string;
+  authenticated_endpoint_generation?: number;
+  latest_handshake?: number;
+  last_rx?: number;
+  last_tx?: number;
+  reconnect_attempts?: number;
+  next_reconnect?: number;
+  transfer_rx?: number;
+  transfer_tx?: number;
 }
 
 export interface RuntimeStats {
@@ -40,6 +48,7 @@ export interface CoreStatus {
   obfs_mode: string;
   addresses?: string[];
   peers?: PeerStatus[];
+  sessions?: Array<{session_id: number; session_generation: number; state: string; peers?: Array<{public_key: string; authenticated: boolean}>}>;
   stats: RuntimeStats;
 }
 
@@ -47,6 +56,9 @@ export interface TunnelView {
   name: string;
   configPath: string;
   running: boolean;
+  statusState?: 'up' | 'prepared' | 'inactive' | 'unknown';
+  statusCode?: string;
+  sampledAt?: number;
   status?: CoreStatus;
   statusDetail?: string;
 }

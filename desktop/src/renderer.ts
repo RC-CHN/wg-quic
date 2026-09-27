@@ -82,6 +82,7 @@ function showToast(message: string, kind: 'ok' | 'error' = 'ok'): void {
 }
 
 function statusEndpoint(tunnel: TunnelView): string {
+  if (tunnel.statusState === 'unknown') return 'Status unavailable';
   if (!tunnel.running) {
     return 'Endpoint shown when active';
   }
@@ -125,6 +126,14 @@ function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
 }
 
 function stateDescription(tunnel: TunnelView): string {
+  const state = tunnelDisplayState(tunnel);
+  if (state === 'unknown') return 'Status could not be read. The tunnel may still be running; refresh to check again.';
+  if (state === 'connected') return 'QUIC transport is established and WireGuard has authenticated the peer.';
+  if (state === 'partial') return 'Some peers are connected. Check the remaining peers below.';
+  if (state === 'authenticating') return 'QUIC is connected; waiting for WireGuard authentication.';
+  if (state === 'reconnecting') return 'The interface is up and the transport is reconnecting automatically.';
+  if (state === 'connecting') return 'The interface is up; connecting to the QUIC peer.';
+  if (state === 'activating') return 'The interface is being prepared; host network settings are not yet ready.';
   if (!tunnel.running) {
     return 'The tunnel is configured and ready to activate.';
   }
@@ -236,7 +245,7 @@ function renderDetail(tunnel?: TunnelView): void {
   byId('detail-state-dot').className = `state-dot large ${state}`;
 
   const toggle = byId<HTMLButtonElement>('toggle-tunnel');
-  toggle.disabled = Boolean(action) || !backendSupported;
+  toggle.disabled = Boolean(action) || !backendSupported || state === 'unknown' || tunnel.statusState === 'prepared';
   toggle.setAttribute('aria-busy', String(Boolean(action)));
   toggle.textContent = action
     ? tunnelStateLabel(state)
@@ -254,6 +263,7 @@ function renderDetail(tunnel?: TunnelView): void {
     diagnostics.open = false;
   }
   setText('status-diagnostics-copy', tunnel.statusDetail || '');
+  byId('retry-status').classList.toggle('hidden', state !== 'unknown');
 
   const check = byId<HTMLButtonElement>('check-tunnel');
   check.disabled = Boolean(action);
@@ -761,6 +771,7 @@ byId('theme-toggle').addEventListener('click', () => {
 });
 
 byId('refresh').addEventListener('click', () => void refresh());
+byId('retry-status').addEventListener('click', () => void refresh());
 byId('import-config').addEventListener('click', () => void importTunnel());
 byId('empty-import').addEventListener('click', () => void importTunnel());
 byId('toggle-tunnel').addEventListener('click', (event) => {
@@ -880,6 +891,8 @@ async function start(): Promise<void> {
       startNewTunnel, startEditTunnel, refresh: () => refreshSnapshot(),
       saveForm, cancelForm, toggleFormSource, selectFormPeer, formIsDirty,
     });
+    const { runStatusInteractionSmoke } = await import('./status-smoke');
+    await runStatusInteractionSmoke(refreshSnapshot);
     await completeDesktopSmoke('wg-quic desktop renderer smoke test passed');
     return;
   }

@@ -333,6 +333,21 @@ func Read(path string) (Status, error) {
 	return NewClient(path).Status()
 }
 
+// ReadOnly reads the public status endpoint directly. Desktop observers must
+// not combine an unrelated failure of the privileged control endpoint with a
+// missing public socket and accidentally classify an access failure as down.
+func ReadOnly(path string) (Status, error) {
+	client := &LocalClient{path: path}
+	var resp response
+	if err := client.callAt(readOnlyStatusPath(path), request{Operation: "status"}, &resp); err != nil {
+		return Status{}, err
+	}
+	if resp.Status == nil {
+		return Status{}, errors.New("control response did not include status")
+	}
+	return *resp.Status, nil
+}
+
 func (c *LocalClient) Status() (Status, error) {
 	var resp response
 	err := c.callAt(c.path, request{Operation: "status"}, &resp)

@@ -35,6 +35,22 @@ test('pending commands override observed state labels', () => {
   assert.equal(tunnelStateLabel('deactivating'), 'Deactivating…');
 });
 
+test('interface readiness never implies authenticated connectivity', () => {
+  const up: TunnelView = { ...tunnel('alpha', true), statusState: 'up', status: {
+    peers: [{ public_key: 'peer', generation: 1, session: 'established', latest_handshake: 123 }],
+    sessions: [{ session_id: 1, session_generation: 1, state: 'established', peers: [] }],
+  } as unknown as CoreStatus };
+  assert.equal(tunnelDisplayState(up), 'authenticating');
+  up.status!.sessions![0]!.peers = [{ public_key: 'peer', authenticated: true }];
+  assert.equal(tunnelDisplayState(up), 'connected');
+  up.status!.peers!.push({ public_key: 'other', generation: 1, session: 'dialing' });
+  assert.equal(tunnelDisplayState(up), 'partial');
+  up.statusState = 'unknown';
+  assert.equal(tunnelDisplayState(up), 'unknown');
+  assert.equal(tunnelDisplayState({ ...tunnel('alpha'), statusDetail: 'permission denied' }), 'unknown');
+  assert.equal(tunnelDisplayState({ ...tunnel('alpha'), statusState: 'prepared' }), 'activating');
+});
+
 test('action progress copy follows observed core state', () => {
   const running = (sessions: number): TunnelView => ({
     ...tunnel('alpha', true),

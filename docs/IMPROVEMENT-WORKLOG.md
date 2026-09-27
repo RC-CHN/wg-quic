@@ -41,6 +41,19 @@ cannot alter completed-group counters. Received feedback enforces
 sentinel retained. Regression tests cover duplicates, malformed input and
 counter bounds. A five-second local fuzz run completed 134,362 executions.
 
+## Runtime status semantics
+
+`wg-quic-quick desktop-status NAME` reads only the public status endpoint and
+returns a versioned envelope with stable error codes. Missing endpoints are
+inactive; access errors, timeouts and malformed responses remain unknown.
+Desktop controls no longer suggest activation when observation failed. The
+UI separates interface preparation, waiting, dialing, reconnecting, transport
+authentication and authenticated/partial peer connectivity. A live QUIC session
+alone is insufficient to show Connected.
+
+Validation: Go status classification tests, Rust protocol and view mapping
+tests, TypeScript state tests and a real-browser status recovery scenario.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

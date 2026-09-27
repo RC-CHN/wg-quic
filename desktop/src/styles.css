@@ -420,10 +420,16 @@ dd {
   background: var(--panel-raised);
 }
 
-.state-dot.active {
+.state-dot.connected {
   border-color: var(--green);
   background: var(--green);
   box-shadow: 0 0 8px rgba(var(--green-rgb), 0.5);
+}
+
+.state-dot.unknown { border-color: var(--amber); background: var(--amber); }
+.tunnel-item-state.unknown, .tunnel-item-state.partial { color: var(--amber); }
+.state-dot.partial, .state-dot.reconnecting, .state-dot.connecting, .state-dot.authenticating {
+  border-color: var(--amber); background: var(--amber);
 }
 
 .state-dot.activating,
@@ -488,7 +494,7 @@ dd {
   font-weight: 650;
 }
 
-.tunnel-item-state.active {
+.tunnel-item-state.connected {
   color: var(--green);
 }
 

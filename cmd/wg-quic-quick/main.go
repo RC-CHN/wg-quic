@@ -32,6 +32,15 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "desktop-status":
+		if len(args) != 2 {
+			return usage()
+		}
+		status, err := quick.ReadDesktopStatus(args[1])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(status)
 	case "broker-service":
 		if len(args) != 1 {
 			return usage()
