@@ -69,6 +69,20 @@ cross-compilation, Rust backend tests, frontend checks and a Chromium scenario
 covering save, declined/accepted restart and unknown-result recovery. Windows
 privileged execution remains a native CI requirement.
 
+## Bounded desktop observations
+
+Four fixed workers collect status, with at most 64 queued reads and a six-second
+per-process timeout. Snapshots return available results after at most 500 ms of
+status waiting. The selected profile is scheduled first and cached for one second;
+background profiles refresh every ten seconds. Observations older than fifteen
+seconds become unknown. Windows broker probes have a separate fifteen-second
+cache and one-second timeout. Mutations invalidate in-flight observations in
+both the backend and renderer. Tunnel list elements retain keyboard focus across
+refreshes; observation errors cannot leave a permanently green connection.
+
+Validation: eleven Rust tests, including blocked readers and mutation races;
+frontend tests and Chromium smoke including actual list focus retention.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as

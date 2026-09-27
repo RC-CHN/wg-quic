@@ -1,6 +1,7 @@
 import './styles.css';
 import './tauri-api';
 import { ConfigurationApplications } from './config-application';
+import { ObservationClock } from './observation-clock';
 import {
   completeDesktopSmoke,
   desktopSmokeSettings,
@@ -52,6 +53,8 @@ const pending = new Map<string, TunnelAction>();
 const pendingSince = new Map<string, number>();
 const applying = new Set<string>();
 const applications = new ConfigurationApplications(localStorage);
+const observations = new ObservationClock();
+let forceRefresh = false;
 
 let current: DesktopSnapshot | null = null;
 let selectedName: string | undefined;
@@ -92,8 +95,8 @@ function statusEndpoint(tunnel: TunnelView): string {
   return tunnel.status?.peers?.[0]?.endpoint || 'No peer endpoint';
 }
 
-function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
-  const item = document.createElement('button');
+function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTMLButtonElement {
+  const item = existing || document.createElement('button');
   const state = tunnelDisplayState(tunnel, pending.get(tunnel.name));
   item.type = 'button';
   item.className = `tunnel-item ${selectedName === tunnel.name ? 'selected' : ''}`;
@@ -101,29 +104,30 @@ function createTunnelItem(tunnel: TunnelView): HTMLButtonElement {
   item.setAttribute('role', 'option');
   item.setAttribute('aria-selected', String(selectedName === tunnel.name));
 
-  const stateDot = document.createElement('span');
+  const stateDot = item.children[0] || document.createElement('span');
   stateDot.className = `state-dot ${state}`;
   stateDot.setAttribute('aria-hidden', 'true');
 
-  const copy = document.createElement('span');
+  const copy = item.children[1] || document.createElement('span');
   copy.className = 'tunnel-item-copy';
-  const name = document.createElement('strong');
+  const name = copy.children[0] || document.createElement('strong');
   name.textContent = tunnel.name;
-  const endpoint = document.createElement('span');
+  const endpoint = copy.children[1] || document.createElement('span');
   endpoint.textContent = statusEndpoint(tunnel);
-  copy.append(name, endpoint);
+  if (!existing) copy.append(name, endpoint);
 
-  const label = document.createElement('span');
+  const label = item.children[2] || document.createElement('span');
   label.className = `tunnel-item-state ${state}`;
   label.textContent = tunnelStateLabel(state);
-  item.append(stateDot, copy, label);
-  item.addEventListener('click', async () => {
+  if (!existing) item.append(stateDot, copy, label);
+  if (!existing) item.addEventListener('click', async () => {
     if (!await canLeaveForm()) return;
     dismissForm();
     selectedName = tunnel.name;
     if (current) {
       render(current);
     }
+    void refresh(false);
   });
   return item;
 }
@@ -352,6 +356,7 @@ async function applyConfiguration(name: string): Promise<void> {
     // the mutation. Keep a known transaction ID, and never retry blindly.
     applications.set(tunnel.configPath, { state: 'unknown', request_id: saved?.request_id, message: errorMessage(error) });
   } finally {
+    observations.invalidate();
     applying.delete(name);
     await refresh(false);
     if (current) render(current);
@@ -365,10 +370,10 @@ async function restartTunnel(name: string): Promise<void> {
   pendingSince.set(name, Date.now());
   render(current!);
   try {
-    render(await window.wgQuic.manage(name, 'down'));
+    renderMutation(await window.wgQuic.manage(name, 'down'));
     pending.set(name, 'up');
     render(current!);
-    render(await window.wgQuic.manage(name, 'up'));
+    renderMutation(await window.wgQuic.manage(name, 'up'));
     applications.clear(tunnel.configPath);
     showToast(`${name} restarted with the saved configuration`);
   } catch (error) {
@@ -606,6 +611,7 @@ async function saveForm(): Promise<void> {
     formDraft = null;
     formRevision++;
     clearFormSecrets();
+    observations.invalidate();
     current = snapshot;
     selectedName = savedName;
     render(current);
@@ -696,9 +702,13 @@ function render(snapshot: DesktopSnapshot): void {
   setText('management-label', management.label);
   byId('management-dot').className = `management-dot ${management.state}`;
 
-  tunnelList.replaceChildren(
-    ...snapshot.tunnels.map((tunnel) => createTunnelItem(tunnel)),
-  );
+  const existing = new Map(Array.from(tunnelList.querySelectorAll<HTMLButtonElement>('.tunnel-item')).map((item) => [item.dataset.name!, item]));
+  for (const [index, tunnel] of snapshot.tunnels.entries()) {
+    const item = createTunnelItem(tunnel, existing.get(tunnel.name));
+    existing.delete(tunnel.name);
+    if (tunnelList.children[index] !== item) tunnelList.insertBefore(item, tunnelList.children[index] || null);
+  }
+  for (const item of existing.values()) item.remove();
   tunnelList.classList.toggle('hidden', snapshot.tunnels.length === 0);
   noTunnels.classList.toggle('hidden', snapshot.tunnels.length !== 0);
   renderDetail(
@@ -707,10 +717,22 @@ function render(snapshot: DesktopSnapshot): void {
   document.body.dataset.ready = 'true';
 }
 
+function renderMutation(snapshot: DesktopSnapshot): void {
+  observations.invalidate();
+  render(snapshot);
+}
+
 const refreshSnapshot = createSingleFlight(async (): Promise<void> => {
   byId('refresh').classList.add('spinning');
+  const revision = observations.capture();
+  const force = forceRefresh;
+  forceRefresh = false;
   try {
-    render(await window.wgQuic.snapshot());
+    const snapshot = await window.wgQuic.snapshot(selectedName, force);
+    if (observations.accepts(revision)) render(snapshot);
+  } catch (error) {
+    if (current && observations.accepts(revision)) render({ ...current, tunnels: current.tunnels.map((tunnel) => ({ ...tunnel, statusState: 'unknown', statusCode: 'snapshot_failed', statusDetail: errorMessage(error) })) });
+    throw error;
   } finally {
     byId('refresh').classList.remove('spinning');
   }
@@ -722,6 +744,7 @@ interface RefreshResult {
 }
 
 async function refresh(showErrors = true): Promise<RefreshResult> {
+  forceRefresh ||= showErrors;
   try {
     await refreshSnapshot();
     return { ok: true };
@@ -753,7 +776,7 @@ async function manageTunnel(
     void refresh(false);
   }, 500);
   try {
-    render(await window.wgQuic.manage(name, action));
+    renderMutation(await window.wgQuic.manage(name, action));
     if (action === 'up') {
       const tunnel = current?.tunnels.find((item) => item.name === name);
       if (tunnel?.running) applications.clear(tunnel.configPath);
@@ -796,7 +819,7 @@ async function deleteTunnel(name: string): Promise<void> {
     if (selectedName === name) {
       selectedName = undefined;
     }
-    render(result.snapshot);
+    renderMutation(result.snapshot);
     showToast(`${name} deleted`);
   } catch (error) {
     showToast(`${name}: ${errorMessage(error)}`, 'error');
@@ -814,7 +837,7 @@ async function importTunnel(): Promise<void> {
       const tunnel = result.snapshot.tunnels.find((item) => item.name === result.importedName);
       if (tunnel) applications.set(tunnel.configPath, { state: 'saved' });
     }
-    render(result.snapshot);
+    renderMutation(result.snapshot);
     if (!result.canceled && result.importedName) {
       showToast(`${result.importedName} imported`);
     }

@@ -115,7 +115,7 @@ export interface DesktopAPI {
   confirmDiscard(): Promise<boolean>;
   confirmRestart(name: string): Promise<boolean>;
   apply(name: string, requestId?: string): Promise<ApplyResult>;
-  snapshot(): Promise<DesktopSnapshot>;
+  snapshot(selectedName?: string, force?: boolean): Promise<DesktopSnapshot>;
   manage(name: string, action: TunnelAction): Promise<DesktopSnapshot>;
   check(name: string): Promise<string>;
   deleteTunnel(name: string): Promise<DeleteResult>;

@@ -41,7 +41,7 @@ const api: DesktopAPI = {
   confirmDiscard: () => ask('Discard unsaved changes to this configuration?', {
     title: 'Unsaved changes', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Keep editing',
   }),
-  snapshot: () => invoke<DesktopSnapshot>('snapshot'),
+  snapshot: (selectedName, force = false) => invoke<DesktopSnapshot>('snapshot', { selectedName, force }),
   manage: (name: string, action: TunnelAction) =>
     invoke<DesktopSnapshot>('manage_tunnel', { name, action }),
   check: (name: string) => invoke<string>('check_tunnel', { name }),

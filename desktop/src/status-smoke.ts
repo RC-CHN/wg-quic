@@ -16,6 +16,10 @@ export async function runStatusInteractionSmoke(refresh: () => Promise<void>): P
     assert(document.getElementById('detail-state')!.textContent === 'Status unavailable', 'unknown status looks stopped');
     assert((document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'unknown status offers activation');
     assert(!document.getElementById('retry-status')!.classList.contains('hidden'), 'no recovery action for unknown status');
+    const item = document.querySelector<HTMLButtonElement>('.tunnel-item')!;
+    item.focus();
+    await refresh();
+    assert(document.activeElement === item, 'background refresh lost keyboard focus on the tunnel list');
     const tunnel = fixture.tunnels[0]!;
     tunnel.running = true;
     tunnel.statusState = 'up';

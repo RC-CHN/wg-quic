@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/observation-clock.test.ts",
     "src/config-application.ts",
     "src/config-application.test.ts",
     "src/types.ts",

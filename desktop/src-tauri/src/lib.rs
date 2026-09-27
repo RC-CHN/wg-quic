@@ -10,12 +10,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
 
+mod status_cache;
+
 #[cfg(target_os = "windows")]
 use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, tray::TrayIconEvent, WindowEvent};
 
 #[derive(Default)]
 struct BackendState {
     versions: Mutex<Option<(String, String)>>,
+    statuses: status_cache::StatusCache,
+    broker: Mutex<Option<(Instant, DesktopBrokerStatus)>>,
 }
 
 #[derive(Clone)]
@@ -43,14 +47,14 @@ struct BackendInfo {
     error: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct DesktopBrokerStatus {
     status: String,
     #[serde(default)]
     message: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TunnelView {
     name: String,
@@ -445,7 +449,11 @@ fn validate_backend_versions(core: &str, quick: &str) -> Result<(), String> {
 }
 
 fn desktop_broker_status(paths: &NativePaths) -> Result<DesktopBrokerStatus, String> {
-    let output = run_output(&paths.quick, &[argument("desktop-broker-status")])?;
+    let output = run_output_with_timeout(
+        &paths.quick,
+        &[argument("desktop-broker-status")],
+        Duration::from_secs(1),
+    )?;
     parse_desktop_broker_status(&output)
 }
 
@@ -465,6 +473,16 @@ fn parse_desktop_broker_status(output: &str) -> Result<DesktopBrokerStatus, Stri
 }
 
 fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapshot, String> {
+    state.statuses.invalidate();
+    snapshot_selected(app, state, None, true)
+}
+
+fn snapshot_selected(
+    app: &AppHandle,
+    state: &BackendState,
+    selected: Option<&str>,
+    force: bool,
+) -> Result<DesktopSnapshot, String> {
     let directory = config_directory();
     let mut backend = BackendInfo {
         platform: platform_name(),
@@ -499,16 +517,22 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
         Err(error) => backend.error = Some(error),
     }
     if cfg!(target_os = "windows") {
-        match desktop_broker_status(&paths) {
-            Ok(status) => {
-                backend.management_status = Some(status.status);
-                backend.management_message = status.message;
-            }
-            Err(error) => {
-                backend.management_status = Some("error".to_string());
-                backend.management_message = Some(error);
-            }
+        let mut cache = state.broker.lock().map_err(|error| error.to_string())?;
+        if force
+            || cache
+                .as_ref()
+                .is_none_or(|(at, _)| at.elapsed() > Duration::from_secs(15))
+        {
+            let status =
+                desktop_broker_status(&paths).unwrap_or_else(|error| DesktopBrokerStatus {
+                    status: "error".into(),
+                    message: Some(error),
+                });
+            *cache = Some((Instant::now(), status));
         }
+        let status = &cache.as_ref().unwrap().1;
+        backend.management_status = Some(status.status.clone());
+        backend.management_message = status.message.clone();
     }
     let profiles = match configured_profiles(&directory) {
         Ok(profiles) => profiles,
@@ -517,20 +541,24 @@ fn snapshot_inner(app: &AppHandle, state: &BackendState) -> Result<DesktopSnapsh
             Vec::new()
         }
     };
-    let tunnels = profiles
-        .into_iter()
-        .map(|(name, config_path)| {
-            let status_result =
-                run_output(&paths.quick, &[argument("desktop-status"), argument(&name)])
-                    .and_then(|output| parse_desktop_status(&output, &name));
-            tunnel_status_view(name, config_path, status_result)
-        })
-        .collect();
+    let tunnels = state
+        .statuses
+        .collect(profiles, paths.quick, selected, force);
     Ok(DesktopSnapshot {
         backend,
         tunnels,
         refreshed_at: unix_timestamp_string(),
     })
+}
+
+fn read_tunnel_status(name: String, config_path: PathBuf, quick: PathBuf) -> TunnelView {
+    let result = run_output_with_timeout(
+        &quick,
+        &[argument("desktop-status"), argument(&name)],
+        Duration::from_secs(6),
+    )
+    .and_then(|output| parse_desktop_status(&output, &name));
+    tunnel_status_view(name, config_path, result)
 }
 
 fn unix_timestamp_string() -> String {
@@ -650,8 +678,18 @@ fn run_privileged(
 }
 
 #[tauri::command(async)]
-fn snapshot(app: AppHandle, state: State<'_, BackendState>) -> Result<DesktopSnapshot, String> {
-    snapshot_inner(&app, &state)
+fn snapshot(
+    app: AppHandle,
+    state: State<'_, BackendState>,
+    selected_name: Option<String>,
+    force: Option<bool>,
+) -> Result<DesktopSnapshot, String> {
+    snapshot_selected(
+        &app,
+        &state,
+        selected_name.as_deref(),
+        force.unwrap_or(false),
+    )
 }
 
 #[tauri::command(async)]
@@ -680,7 +718,12 @@ fn check_tunnel(app: AppHandle, name: String) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
-fn apply_tunnel(app: AppHandle, name: String, request_id: Option<String>) -> Result<Value, String> {
+fn apply_tunnel(
+    app: AppHandle,
+    state: State<'_, BackendState>,
+    name: String,
+    request_id: Option<String>,
+) -> Result<Value, String> {
     validate_interface_name(&name)?;
     require_profile(&name)?;
     let paths = native_paths(&app)?;
@@ -708,7 +751,9 @@ fn apply_tunnel(app: AppHandle, name: String, request_id: Option<String>) -> Res
     } else {
         Path::new("pkexec")
     };
-    let output = run_output_with_timeout(program, &arguments, Duration::from_secs(100))?;
+    let output = run_output_with_timeout(program, &arguments, Duration::from_secs(100));
+    state.statuses.invalidate();
+    let output = output?;
     let result: Value =
         serde_json::from_str(&output).map_err(|error| format!("invalid apply result: {error}"))?;
     if !matches!(
