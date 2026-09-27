@@ -4,7 +4,8 @@
 // WebView with the actual snapshot and key-generation commands.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,7 @@ const child = spawn(browser, [
   '--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
   '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${profile}`,
 ], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+const browserClosed = new Promise((resolve) => child.once('close', resolve));
 let nextID = 0;
 let buffer = '';
 let stderr = '';
@@ -102,8 +104,10 @@ try {
   console.log(result.message);
 } finally {
   child.kill();
-  await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));
+  await browserClosed;
   for (const waiter of pending.values()) clearTimeout(waiter.timer);
   server.close();
-  rmSync(profile, { recursive: true, force: true });
+  // Chrome's subprocesses can finish writing their profile after the parent
+  // exits. Allow their handles and final directory entries to settle.
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

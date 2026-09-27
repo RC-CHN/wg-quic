@@ -1,6 +1,7 @@
 package quick
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -71,7 +72,16 @@ func TestDesktopSharedStatusContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(actual) != string(encoded) {
+	// Git may check text fixtures out with CRLF on Windows. Compare JSON
+	// without insignificant whitespace, while retaining every field/value.
+	var actualJSON, expectedJSON bytes.Buffer
+	if err := json.Compact(&actualJSON, actual); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Compact(&expectedJSON, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(actualJSON.Bytes(), expectedJSON.Bytes()) {
 		t.Fatal("Go status contract changed; review and regenerate tests/fixtures/desktop/status.json with UPDATE_DESKTOP_CONTRACT=1")
 	}
 }
