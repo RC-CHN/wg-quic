@@ -74,6 +74,9 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 	}
 	result := Result{Handled: true}
 	if p.kind == KindFeedback {
+		if !validFeedback(p.k, p.index, p.r) {
+			return result, errors.New("invalid FEC feedback counters")
+		}
 		result.ObservedFeedback = &Feedback{
 			Epoch: p.epoch, GroupID: p.groupID, Missing: p.index, Total: p.k, Recovered: p.r,
 		}
@@ -85,6 +88,9 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 	}
 	result.SendFeedback = append(result.SendFeedback, d.fastExpire()...)
 	if done := d.completed[p.groupID]; done != nil {
+		if done.epoch != p.epoch {
+			return result, errors.New("FEC epoch changed within completed group")
+		}
 		d.handleLateShard(done, p, &result)
 		return result, nil
 	}
@@ -169,25 +175,36 @@ func (d *Decoder) handleLateShard(done *completedGroup, p packet, result *Result
 	if p.kind != KindData || int(p.index) >= done.k || len(p.payload) < 3 {
 		return
 	}
+	frame, err := decodeDataShard(p.payload)
+	if err != nil {
+		return
+	}
 	bit := uint64(1) << uint(p.index)
 	switch {
 	case done.reconstructed&bit != 0:
 		// Reconstructed at finalization: the shard was reordered, not lost.
 		done.missing--
 		done.recovered--
+		done.reconstructed &^= bit
 	case done.delivered&bit == 0:
 		// Never delivered. Deliver a copy now; the pooled receive datagram
 		// backing p.payload is released after Handle returns.
-		frame, err := decodeDataShard(p.payload)
-		if err != nil {
-			return
-		}
 		done.delivered |= bit
 		done.missing--
 		result.Frames = append(result.Frames, append([]byte(nil), frame...))
 	default:
 		// Already delivered from the original shard: pure duplicate.
 	}
+}
+
+// A group whose dimensions never arrived uses (total=0, missing=1) as a
+// bounded loss indication. All dimensioned groups obey recovered <= missing
+// <= total, including untrusted feedback received over the carrier.
+func validFeedback(total, missing, recovered uint16) bool {
+	if total == 0 {
+		return missing <= 1 && recovered == 0
+	}
+	return total <= MaxDataShards && recovered <= missing && missing <= total
 }
 
 // Expire advances receiver state even when no more datagrams arrive.

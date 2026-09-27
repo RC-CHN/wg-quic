@@ -32,6 +32,15 @@ smoke against the built assets with a substituted native boundary. The same
 interaction scenario is included in the packaged WebKit/WebView smoke. Native
 installed-platform execution is separate from this browser check.
 
+## FEC accounting
+
+Late reconstructed shards now clear their accounting bit after the first
+arrival. Repeated arrivals are idempotent; malformed payloads and changed epochs
+cannot alter completed-group counters. Received feedback enforces
+`recovered <= missing <= total`, with the existing bounded unknown-dimensions
+sentinel retained. Regression tests cover duplicates, malformed input and
+counter bounds. A five-second local fuzz run completed 134,362 executions.
+
 Validation records below distinguish local execution, cross-compilation and
 CI-only platform coverage. A throughput improvement requires an end-to-end
 measurement; allocation and synthetic benchmark improvements are reported as
