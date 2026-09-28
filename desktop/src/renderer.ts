@@ -76,6 +76,9 @@ let formBusy = false;
 let formErrors: string[] = [];
 let publicKeyRevision = 0;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let detailTab: 'overview' | 'diagnostics' = 'overview';
+let displayedName: string | undefined;
+
 let smokeMode: 'none' | 'renderer' | 'integration' | 'tray' = 'none';
 
 function errorMessage(error: unknown): string {
@@ -111,6 +114,7 @@ function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTM
   item.type = 'button';
   item.className = `tunnel-item ${selectedName === tunnel.name ? 'selected' : ''}`;
   item.dataset.name = tunnel.name;
+  item.title = tunnel.name;
   item.setAttribute('role', 'option');
   item.setAttribute('aria-selected', String(selectedName === tunnel.name));
   item.tabIndex = selectedName === tunnel.name ? 0 : -1;
@@ -132,7 +136,7 @@ function createTunnelItem(tunnel: TunnelView, existing?: HTMLButtonElement): HTM
   label.textContent = tunnelStateLabel(state);
   if (!existing) item.append(stateDot, copy, label);
   if (!existing) item.addEventListener('click', async () => {
-    if (!await canLeaveForm()) return;
+    if (formDraft && !await canLeaveForm()) return;
     dismissForm();
     selectedName = tunnel.name;
     if (current) {
@@ -196,19 +200,25 @@ function renderDetail(tunnel?: TunnelView): void {
       'detail-empty-title',
       current?.tunnels.length
         ? t('Select a tunnel')
-        : t('Import a tunnel configuration'),
+        : t('Add your first tunnel'),
     );
     setText(
       'detail-empty-copy',
       current?.tunnels.length
         ? t('Choose a tunnel from the list to inspect or control it.')
-        : t('wg-quic uses the same .conf files as wg-quic-quick.'),
+        : t('Have a configuration file? Import it to get started. You can also create a tunnel with the details from your administrator.'),
     );
     return;
   }
 
+  if (displayedName !== tunnel.name) {
+    displayedName = tunnel.name;
+    selectDetailTab('overview');
+    byId<HTMLDetailsElement>('tunnel-menu').open = false;
+    byId('tunnel-detail').querySelector('.detail-scroll')!.scrollTop = 0;
+  }
   const status = tunnel.status;
-  const stats = status?.stats;
+  const stats = tunnel.statusState === 'unknown' ? undefined : status?.stats;
   const action = pending.get(tunnel.name);
   const busy = Boolean(action) || applying.has(tunnel.name);
   const state = tunnelDisplayState(tunnel, action);
@@ -237,9 +247,9 @@ function renderDetail(tunnel?: TunnelView): void {
   toggle.textContent = action
     ? tunnelStateLabel(state)
     : tunnel.running
-      ? t('Deactivate')
-      : t('Activate');
-  toggle.className = `button ${tunnel.running ? 'danger' : 'primary'}`;
+      ? t('Disconnect')
+      : t('Connect');
+  toggle.className = `button ${tunnel.running ? 'secondary' : 'primary'}`;
   toggle.dataset.name = tunnel.name;
   toggle.dataset.action = tunnel.running ? 'down' : 'up';
 
@@ -272,8 +282,8 @@ function renderDetail(tunnel?: TunnelView): void {
       ? t("{0} FEC · {1} obfuscation", status.fec_mode, status.obfs_mode)
       : t('Runtime details unavailable while inactive'),
   );
-  setText('detail-tx', formatBytes(stats?.wg_tx_bytes));
-  setText('detail-rx', formatBytes(stats?.wg_rx_bytes));
+  setText('detail-tx', stats ? formatBytes(stats.wg_tx_bytes) : '—');
+  setText('detail-rx', stats ? formatBytes(stats.wg_rx_bytes) : '—');
   setText('detail-rtt', formatRTT(stats?.quic_smoothed_rtt_us));
   setText(
     'detail-bandwidth',
@@ -295,6 +305,7 @@ function renderDetail(tunnel?: TunnelView): void {
   setText('detail-public-key', status?.public_key || '—');
   byId<HTMLButtonElement>('copy-public-key').disabled = !status?.public_key;
   renderPeers(tunnel, showToast);
+  setText('peer-count', t('{0} configured', status?.peers?.length || 0));
   const peerSelect = byId<HTMLSelectElement>('diagnostic-peer');
   const previousPeer = peerSelect.value;
   const peers = status?.peers || [];
@@ -454,6 +465,7 @@ function renderForm(): void {
   fillFormFromDraft(formDraft);
   byId<HTMLTextAreaElement>('form-source').value = buildConf(formDraft);
   byId('form-structured').classList.toggle('hidden', formSourceMode);
+  document.querySelectorAll('.structured-only').forEach((element) => element.classList.toggle('hidden', formSourceMode));
   byId('form-source-field').classList.toggle('hidden', !formSourceMode);
   byId<HTMLButtonElement>('form-source-toggle').textContent = formSourceMode ? t('Use form') : t('Edit source');
   const peers = byId<HTMLSelectElement>('form-peer-select');
@@ -761,6 +773,7 @@ function render(snapshot: DesktopSnapshot): void {
     if (tunnelList.children[index] !== item) tunnelList.insertBefore(item, tunnelList.children[index] || null);
   }
   for (const item of existing.values()) item.remove();
+  filterTunnelList();
   tunnelList.classList.toggle('hidden', snapshot.tunnels.length === 0);
   noTunnels.classList.toggle('hidden', snapshot.tunnels.length !== 0);
   renderDetail(
@@ -901,6 +914,48 @@ async function importTunnel(): Promise<void> {
   }
 }
 
+function filterTunnelList(): void {
+  const query = byId<HTMLInputElement>('tunnel-search').value.trim().toLocaleLowerCase();
+  const items = Array.from(tunnelList.querySelectorAll<HTMLButtonElement>('.tunnel-item'));
+  for (const item of items) item.classList.toggle('hidden', !item.dataset.name!.toLocaleLowerCase().includes(query));
+  const visible = items.filter((item) => !item.classList.contains('hidden'));
+  // Preserve selection while filtering, but keep a keyboard entry into results.
+  for (const item of items) item.tabIndex = item.dataset.name === selectedName && visible.includes(item) ? 0 : -1;
+  if (!visible.some((item) => item.tabIndex === 0) && visible[0]) visible[0].tabIndex = 0;
+  byId('no-results').classList.toggle('hidden', !items.length || visible.length > 0);
+}
+
+function selectDetailTab(tab: 'overview' | 'diagnostics', focus = false): void {
+  detailTab = tab;
+  for (const name of ['overview', 'diagnostics'] as const) {
+    const button = byId<HTMLButtonElement>(`tab-${name}`);
+    button.setAttribute('aria-selected', String(name === tab));
+    button.tabIndex = name === tab ? 0 : -1;
+    byId(`panel-${name}`).classList.toggle('hidden', name !== tab);
+  }
+  if (focus) byId(`tab-${tab}`).focus();
+}
+byId('tunnel-search').addEventListener('input', filterTunnelList);
+byId('tunnel-search').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { byId<HTMLInputElement>('tunnel-search').value = ''; filterTunnelList(); }
+  if (event.key === 'ArrowDown') { tunnelList.querySelector<HTMLButtonElement>('.tunnel-item:not(.hidden)')?.focus(); event.preventDefault(); }
+});
+for (const tab of ['overview', 'diagnostics'] as const) {
+  byId(`tab-${tab}`).addEventListener('click', () => selectDetailTab(tab));
+  byId(`tab-${tab}`).addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    selectDetailTab(event.key === 'Home' ? 'overview' : event.key === 'End' ? 'diagnostics' : detailTab === 'overview' ? 'diagnostics' : 'overview', true);
+  });
+}
+const tunnelMenu = byId<HTMLDetailsElement>('tunnel-menu');
+document.addEventListener('click', (event) => {
+  if (event.target instanceof Node && (!tunnelMenu.contains(event.target) || event.target instanceof HTMLButtonElement)) tunnelMenu.open = false;
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && tunnelMenu.open) { tunnelMenu.open = false; tunnelMenu.querySelector('summary')!.focus(); event.preventDefault(); }
+});
+
 function applyTheme(theme: 'dark' | 'light'): void {
   document.documentElement.dataset.theme = theme;
   byId<HTMLSpanElement>('theme-icon').textContent =
@@ -988,6 +1043,7 @@ byId('delete-tunnel').addEventListener('click', (event) => {
   }
 });
 byId('new-tunnel').addEventListener('click', () => void startNewTunnel());
+byId('empty-new').addEventListener('click', () => void startNewTunnel());
 byId('edit-tunnel').addEventListener('click', (event) => {
   const name = (event.currentTarget as HTMLButtonElement).dataset.name;
   if (name) {
@@ -1024,26 +1080,17 @@ document.addEventListener('keydown', (event) => {
     void refresh();
     return;
   }
-  if (
-    !formDraft &&
-    !(event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) &&
-    (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
-    current?.tunnels.length
-  ) {
-    const index = current.tunnels.findIndex(
-      (tunnel) => tunnel.name === selectedName,
-    );
-    const delta = event.key === 'ArrowDown' ? 1 : -1;
-    const next = Math.max(
-      0,
-      Math.min(current.tunnels.length - 1, index + delta),
-    );
-    selectedName = current.tunnels[next]?.name;
-    render(current);
+  if (!formDraft && event.target instanceof HTMLElement && tunnelList.contains(event.target) &&
+      ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    const items = Array.from(tunnelList.querySelectorAll<HTMLButtonElement>('.tunnel-item:not(.hidden)'));
+    const index = items.findIndex((item) => item.dataset.name === selectedName);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
+      Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+    const item = items[next];
+    if (item) { item.click(); item.focus(); }
     event.preventDefault();
-    tunnelList.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
-    void refresh(false);
   }
+
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -1094,6 +1141,8 @@ async function start(): Promise<void> {
     });
     const { runStatusInteractionSmoke } = await import('./status-smoke');
     await runStatusInteractionSmoke(refreshSnapshot);
+    const { runWorkspaceInteractionSmoke } = await import('./workspace-smoke');
+    await runWorkspaceInteractionSmoke(refreshSnapshot);
     const { runApplicationInteractionSmoke } = await import('./application-smoke');
     await runApplicationInteractionSmoke({ refresh: refreshSnapshot, edit: startEditTunnel, save: saveForm, apply: applyConfiguration, restart: restartTunnel });
     const { runDiagnosticInteractionSmoke } = await import('./diagnostic-smoke');
