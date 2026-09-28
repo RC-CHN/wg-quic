@@ -300,7 +300,7 @@ function renderDetail(tunnel?: TunnelView): void {
   setText('detail-pacing', formatBitRate(stats?.quic_pacing_rate_bps));
   setText(
     'detail-fec-recovered',
-    (stats?.fec_recovered || 0).toLocaleString(),
+    stats ? (stats.fec_recovered || 0).toLocaleString() : '—',
   );
   setText(
     'detail-fec-loss',
@@ -313,7 +313,8 @@ function renderDetail(tunnel?: TunnelView): void {
   setText('detail-public-key', status?.public_key || '—');
   byId<HTMLButtonElement>('copy-public-key').disabled = !status?.public_key;
   renderPeers(tunnel, showToast);
-  setText('peer-count', t('{0} configured', status?.peers?.length || 0));
+  setText('peer-count', status && tunnel.statusState !== 'unknown' ? t('{0} configured', status.peers?.length || 0) : '');
+  byId('tunnel-detail').querySelector('.metrics-grid')!.classList.toggle('hidden', !stats);
   const peerSelect = byId<HTMLSelectElement>('diagnostic-peer');
   const previousPeer = peerSelect.value;
   const peers = status?.peers || [];

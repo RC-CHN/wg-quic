@@ -42,6 +42,8 @@ export async function runStatusInteractionSmoke(refresh: () => Promise<void>): P
     await refresh();
     assert(document.getElementById('detail-state')!.textContent === t('Inactive'), 'inactive state not shown');
     assert(!(document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'inactive tunnel cannot activate');
+    assert(document.getElementById('peer-count')!.textContent === '', 'inactive runtime claims no configured peers');
+    assert(document.querySelector('.metrics-grid')!.classList.contains('hidden'), 'inactive runtime shows empty traffic cards');
     fixture.tunnels.push({ name: 'second', configPath: '/second.conf', running: false, statusState: 'inactive' });
     await refresh();
     item.focus();
