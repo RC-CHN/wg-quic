@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## v0.3.8 - 2026-09-28
+
+OPNsense configuration reliability and independent protocol interoperability.
+
+- Show inherited congestion, FEC and obfuscation per instance in the peer editor,
+  with read-only values, instance editor links and inactive FEC preference hints.
+- Report actual apply outcomes; distinguish saved settings from running settings,
+  require confirmation for a scoped restart, reject stale confirmations and
+  retain structured failure replies. Prevent supervisor processes inheriting
+  the web-operation lock.
+- Preserve instance memberships on partial peer updates and validate generator
+  associations before saving both models together.
+- Reject stale generator responses and instance revisions, keep private keys,
+  profiles and QR codes after saving or switching tabs, and make endpoint/DNS
+  overrides local to the generated profile. Creating another peer is explicit.
+- Make plugin static checks fail when JavaScript or rendered templates fail.
+- Publish a standalone, language-independent wire specification covering QUIC,
+  Salamander, WireGuard handshake, framing, RS matrix, feedback and test vectors.
+- Verify embedded vectors independently in Python and against the deployed Go
+  engine. A separate Rust implementation passes six bidirectional network cases,
+  including default Salamander, PSK, fragmentation and injected FEC loss recovery.
+  Run these checks in regular and release CI; support Windows CRLF checkouts.
+
+
 ## v0.3.7 - 2026-09-27
 
 Desktop usability, bounded resource use, and observability release.
