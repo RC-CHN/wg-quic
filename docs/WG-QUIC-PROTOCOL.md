@@ -1,29 +1,65 @@
 # wg-quic protocol v1
 
-Status: v1 wire contract frozen for `v0.1.2` and later; local adaptive policy
-remains experimental. Last reviewed 11 August 2026.
+Status: normative specification of the deployed `wg-quic/1` protocol, checked
+against release 0.3.7 on 28 September 2026. This is a specification clarification,
+not a new wire version and not an IETF standard.
 
-This document describes the protocol implemented by this repository. It is
-split deliberately into two parts:
+This document is self-contained at the application protocol level. It requires
+no repository, programming language, runtime, package, source file, private
+constants, generated fixture or vendor-specific QUIC extension. Implementers
+may use any implementation of the public cryptographic and QUIC standards
+listed in section 12. Those standards define the underlying general-purpose
+primitives; all wg-quic-specific values, framing, algorithms, state transitions
+and test inputs/outputs are given here, including the inner WireGuard handshake.
 
-- **Wire protocol** defines the bytes and behavior another implementation must
-  reproduce to interoperate.
-- **Local adaptive policy** describes the current sender algorithms and
-  defaults. Those choices are observable, but are not negotiated and are not
-  wire compatibility requirements.
+**MUST**, **MUST NOT**, **SHOULD** and **MAY** express protocol requirements.
+A requirement concerns emitted bytes or interoperable semantics unless marked
+as a local policy. Local scheduling, congestion estimation and UI behavior are
+not part of the wire protocol. There are no proposed future extensions in this
+specification. An implementation claiming full v1 compatibility must receive
+both raw and FEC records even if it sends only raw records.
 
-The words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** define the v1
-interoperability contract beginning with `v0.1.2`. This is not an IETF
-standard. A disagreement between this document, implementation, and tests is a
-release-blocking specification bug; it is not permission to change v1 wire
-behavior silently. The sources named in
-[Implementation map](#implementation-map) provide the executable conformance
-reference for the affected release.
+### 0.1 Provisioning and a minimal implementation path
+
+Out of band, each side receives its own 32-byte X25519 static private key, the
+other side's 32-byte public key, the same optional 32-byte PSK, and allowed inner
+IP prefixes. At least one side needs a reachable UDP IP address and port for the
+other side. There is no discovery service, HTTP request, password login, fixed
+UDP port, certificate enrollment or key exchange outside those described below.
+Both sides may listen and dial. The QUIC client role and WireGuard initiator role
+are separate roles; a completed connection carries traffic in both directions.
+
+Default deployment settings are `congestion=auto`, `fec=auto`,
+`obfs=salamander`, and an inner interface MTU of 1280. Congestion and FEC sender
+choices may differ between sides. Obfuscation mode and key material MUST agree.
+A minimal interoperable sender may use standard QUIC Reno or CUBIC and raw
+WGQ1 without FEC, while implementing the complete WGQF receiver in section 5.
+No proprietary congestion controller is needed to complete either handshake.
+
+The three transport settings belong to a local interface/instance and apply to
+its peers. `peer.fec-latency` is a local per-peer scheduling preference, not a
+negotiated field. Their textual spellings do not appear in any network packet.
+If implementing profile import, recognize `# wg-quic: congestion = VALUE`,
+`# wg-quic: fec = VALUE`, and `# wg-quic: obfs = VALUE` under `[Interface]`;
+accepted values are respectively `auto|model|reno|cubic`, `auto|off`, and
+`salamander|none`. Under `[Peer]`, `# wg-quic: peer.fec-latency = VALUE` accepts
+`latency|balanced|throughput`, default `balanced`. A profile reader must not
+silently discard these comment directives. WireGuard keys in profiles use
+standard padded Base64; all wire operations use the decoded bytes.
+
+### 0.2 Notation
+
+`||` means byte concatenation; `x[a:b]` includes offset `a` and excludes `b`.
+All offsets and lengths count octets. Text constants are exact ASCII without a
+trailing zero or newline. Hex strings encode bytes, not ASCII hex on the wire.
+`u16_be`/`u32_le` etc. specify unsigned fixed-width integer byte order. There is
+no structure alignment or implicit padding. Application headers are big-endian;
+inner WireGuard headers are little-endian. QUIC uses its standard varints.
 
 ## 1. Scope and invariants
 
 wg-quic retains the WireGuard protocol and replaces only its UDP bind. Both
-ends therefore run a WireGuard userspace device, but carry each complete,
+ends therefore implement WireGuard, and carry each complete,
 already encrypted WireGuard datagram through a separate QUIC session. A stock
 WireGuard UDP endpoint does not implement this outer protocol and cannot
 interoperate with wg-quic.
@@ -60,11 +96,18 @@ message. FEC feedback is itself an unreliable QUIC DATAGRAM.
 
 ### 2.1 UDP and QUIC
 
-The only implemented carrier is UDP. The current pinned quic-go supports QUIC
-v1 (RFC 9000) and QUIC v2 (RFC 9369), with v1 offered first. Peers need at
+The only implemented carrier is UDP. The deployed endpoint supports QUIC
+v1 (RFC 9000) and QUIC v2 (RFC 9369), with v1 offered first. Implementing QUIC
+v1 is sufficient for interoperability. Peers need at
 least one QUIC version in common.
 
-An implementation MUST negotiate QUIC DATAGRAM support (RFC 9221). Application
+An implementation MUST negotiate QUIC DATAGRAM support (RFC 9221). Advertise
+transport parameter `max_datagram_frame_size` (ID `0x20`) with a nonzero value;
+65535 is a suitable value. A sender still obeys the peer's limit and the path
+packet budget. Both DATAGRAM frame types `0x30` (remaining bytes) and `0x31`
+(explicit QUIC-varint length) carry the identical application payload. There is
+no HTTP/3, WebTransport session ID, DATAGRAM flow ID, prefix or stream handshake
+between QUIC DATAGRAM and the WGQ1/WGQF magic. Application
 payloads are sent as DATAGRAM frames and MUST NOT be converted to QUIC streams.
 Every data, parity, close, and feedback record is consequently unreliable and
 unordered. QUIC ACK, handshake, path-validation, and PMTU packets remain
@@ -78,14 +121,17 @@ wg-quic/1
 
 The current implementation uses an initial QUIC packet size of 1200 bytes,
 enables path MTU discovery when the platform supports it, disables incoming
-bidirectional and unidirectional streams, and does not use 0-RTT. Those are
+bidirectional and unidirectional streams, and does not use 0-RTT. The current handshake idle timeout is 4 seconds, connection idle
+timeout 15 seconds, and keepalive period 5 seconds. These are
 current local settings; only successful DATAGRAM and ALPN negotiation is
 required for application interoperability.
 
 ### 2.2 Outer TLS is not peer identity
 
 TLS 1.3 is required. The current listener creates a random Ed25519 self-signed
-certificate when the carrier is opened; it is valid for 24 hours. The dialer
+certificate when the carrier is opened; it is valid for 24 hours. A compatible dialer must support the Ed25519 TLS signature scheme `0x0807`
+and a standard TLS 1.3 cipher suite (for example `TLS_AES_128_GCM_SHA256`,
+`0x1301`). The dialer
 does not validate that certificate or a server name, and the listener does not
 request a client certificate.
 
@@ -148,7 +194,16 @@ K = BLAKE2b-256(
 `psk_marker` is the single byte `0x00` and `optional_psk` is empty when no PSK
 is configured. Otherwise `psk_marker` is `0x01` and `optional_psk` is the 32
 PSK bytes. BLAKE2b is unkeyed in this derivation. X25519 makes the result
-symmetric between the two peers.
+symmetric between the two peers. Apply RFC 7748 scalar clamping inside X25519:
+clear private byte 0 bits 0..2, clear byte 31 bit 7, set byte 31 bit 6. Reject
+an all-zero shared result. Public coordinates are 32-byte little-endian values.
+BLAKE2b-256 means digest length 32 set in the BLAKE2 parameter block; it is
+**not** the first half of a BLAKE2b-512 digest. The same distinction applies to
+BLAKE2s-128 MACs in section 9.
+
+An absent PSK and an explicitly configured all-zero PSK produce **different
+Salamander keys** because of the marker. Do not normalize them to the same
+input. Inner WireGuard, by contrast, uses 32 zero bytes when no PSK is present.
 
 ### 3.2 Record format
 
@@ -209,7 +264,7 @@ replacement for WireGuard authentication.
 
 ## 4. WGQ1 carrier frame
 
-The payload of an unprotected QUIC DATAGRAM is one WGQ1 frame. A protected FEC
+The payload of a QUIC DATAGRAM sent without FEC is one WGQ1 frame. A protected FEC
 data shard also contains exactly one WGQ1 frame after its source-length prefix.
 All multibyte integers in wg-quic application headers are unsigned and
 big-endian.
@@ -326,21 +381,44 @@ to the length of the largest source shard. Encode byte positions independently
 with systematic Reed-Solomon over GF(2^8), primitive polynomial `0x11d` and
 generator `2`.
 
-The coding matrix is the default matrix used by
-`github.com/klauspost/reedsolomon` v1.14.1: construct a `(k+r) x k`
-Vandermonde matrix `V` where `V[row][column] = row^column` in GF(2^8), then
-right-multiply it by the inverse of its top `k x k` submatrix. The top `k`
-rows are consequently the identity matrix; wire parity index `j` is matrix
-row `k+j`. `WithAutoGoroutines` is only an execution optimization and does not
-change the code words.
+Define field addition as bytewise XOR. Field multiplication is carryless
+polynomial multiplication reduced modulo `x^8+x^4+x^3+x^2+1` (`0x11d`):
+
+```text
+mul(a,b):
+    z = 0
+    while b != 0:
+        if (b AND 1) != 0: z = z XOR a
+        a = a << 1
+        if (a AND 256) != 0: a = a XOR 0x11d
+        b = b >> 1
+    return z
+```
+
+`pow(a,0)=1`, including `pow(0,0)=1`; subsequent powers use `mul`.
+The inverse of a nonzero element `a` is `pow(a,254)`. Construct a
+`(k+r) x k` Vandermonde matrix `V[row,column]=pow(row,column)`, with row and
+column indices starting at zero. Let `T` be its first `k` rows. Compute
+`M=V*T^-1` entirely in this field. Matrix inversion uses Gaussian elimination:
+augment `T` with the identity, swap in a nonzero pivot for each column, multiply
+the pivot row by the pivot's inverse, then XOR a scaled pivot row into every
+other row to zero that column. The resulting right half is `T^-1`.
+
+The top `k` rows of `M` are the identity. For each byte position `b` and parity
+index `j`, emit `P[j,b] = XOR_i mul(M[k+j,i], D[i,b])`. There is no integer
+carry, logarithm-base ambiguity, first-parity XOR shortcut, Cauchy matrix,
+transposed matrix, or special case for `r=1`. For reconstruction select any `k`
+available distinct rows of `M` to form `A`; the corresponding received bytes
+form `Y`. Original source bytes are `D=A^-1*Y`. This fully defines the codec
+without reference to a library or its defaults.
 
 The wire decoder accepts `1 <= k <= 32` and `0 <= r <= 8`. A parity index MUST
 be smaller than `r`. Every parity payload has the padded shard length. On
 reconstruction, the two-byte source length removes padding and must describe a
 non-empty WGQ1 frame that fits in the reconstructed shard.
 
-The current automatic sender normally uses at most eight data shards and four
-parity shards, but those are local-policy limits, not smaller wire fields.
+A receiver MUST support the full 32-data / 8-parity range. Smaller local
+sender group choices do not narrow the accepted wire range.
 
 ### 5.4 Close and group completion
 
@@ -354,8 +432,8 @@ completes the group and emits feedback.
 
 Data, parity, and close are all unreliable. In particular, if every parity
 record and close are lost, the receiver never learns `k`, even though it may
-have delivered received systematic shards. That group expires without FEC
-feedback. QUIC transport-loss counters are the current sender's secondary
+have delivered received systematic shards. Ordinary timer expiry without known dimensions emits no feedback. A newer
+group can instead trigger the unknown-dimensions feedback described below. QUIC transport-loss counters are the current sender's secondary
 signal for this case.
 
 ### 5.5 Feedback
@@ -368,13 +446,32 @@ receiver may send one feedback record:
 - `recovered` is the subset reconstructed successfully; and
 - `epoch` and group ID copy the data group.
 
-Thus `0 <= recovered <= missing <= total` for canonical feedback. Feedback is
+For dimensioned groups, `1 <= total <= 32` and
+`0 <= recovered <= missing <= total`. There is also an existing zero-total
+form: `total=0`, `recovered=0`, and `missing=0` or `1`. The form `(0,1,0)`
+means dimensions never arrived and a bounded unrecovered-loss indication is
+being reported; it does not mean a one-source group. Receivers MUST accept
+these forms and reject other counter relationships. Empty payload and zero
+unused fields remain canonical. Feedback is
 best-effort, is not retransmitted, and may itself be lost. The sender applies
 feedback only when its epoch matches the current FEC epoch.
 
 The current receiver keeps at most 1,024 incomplete FEC groups per QUIC
 session, expires them after 3 seconds, polls expiration every 500 ms, and keeps
-up to 4,096 recently completed group IDs for duplicate suppression. The local
+up to 4,096 just-completed groups while deferring feedback for a 10 ms
+reordering grace period (actual emission may wait until the next packet or
+500 ms poll). During that grace, late originals already recovered are not
+redelivered, and their missing/recovered counts are reduced. The completed
+entry is removed when feedback is emitted; duplicate suppression is not
+permanent. WireGuard must still reject replayed transport counters.
+
+An existing receiver may discard an incomplete group when the newest observed
+group ID is at least 4 greater, emitting dimensioned loss feedback or the
+`(total=0,missing=1,recovered=0)` form. QUIC DATAGRAMs can in fact reorder;
+this is an aggressive deployed receiver heuristic, not an ordering guarantee.
+Senders targeting this receiver SHOULD have at most four concurrently open
+groups, emit group IDs in increasing order at allocation, and close groups
+promptly. A receiver may use the full 3-second timeout instead. The local
 feedback queue holds 64 records; excess feedback is dropped. These bounds are
 defensive implementation limits, not negotiated values.
 
@@ -471,231 +568,444 @@ WireGuard peer, transport-control feedback does not have the same end-to-end
 identity guarantee as an authenticated WireGuard packet. Feedback can affect
 local FEC policy and telemetry but never bypasses WireGuard packet validation.
 
-The current feedback parser does not reject every noncanonical relationship
-such as `missing > total`, does not deduplicate feedback at the sender, and
-ignores some unused fields. A new implementation SHOULD emit only canonical
-records and SHOULD validate these relationships even when interoperating with
-the current lenient receiver.
+The deployed receiver validates feedback counters as specified in section 5.5.
+Some unused header fields remain lenient. A sender MUST emit canonical records;
+implementations MUST NOT depend on another receiver ignoring invalid fields.
 
-## Part II: local adaptive policy
+## 9. Inner WireGuard handshake and transport
 
-Everything below describes the present implementation but is not negotiated
-on the wire. Two conforming peers may use different algorithms and still
-interoperate if they emit valid v1 records.
+Implementing the outer QUIC handshake alone is insufficient. This section
+specifies the inner messages carried as the *entire* payload reconstructed from
+WGQ1. An existing standard WireGuard engine may supply/consume these messages;
+a new implementation can use the algorithms below. There is no extra wg-quic
+signature, public-key announcement, challenge, connection ID or login packet.
 
-## 9. Configuration-to-runtime mapping
+### 9.1 Primitives and state
 
-The default transport configuration is:
+Let `S_i,s_i` and `S_r,s_r` be static public/private keys of initiator and
+responder, and `E_i,e_i` / `E_r,e_r` their fresh ephemeral keypairs. Uppercase
+names denote public keys. Static keys are provisioned; each handshake uses new
+cryptographically random 32-byte ephemeral private keys. `DH(s,P)` is X25519
+as defined in section 3. Reject all-zero DH results.
 
-```text
-carrier=quic
-congestion=auto
-fec=auto
-obfs=salamander
-```
+Define:
 
-Current accepted values are:
+- `H(x)`: unkeyed BLAKE2s with 32-byte output.
+- `MAC(k,x)`: keyed BLAKE2s with **16-byte output parameter**, not HMAC and not
+  truncated BLAKE2s-256.
+- `HM(k,x)`: HMAC using BLAKE2s-256 and a 64-byte hash block size. For a key
+  longer than 64 bytes replace it with `H(key)`; zero-pad shorter keys to 64.
+  `HM(k,x)=H((k XOR 0x5c*64) || H((k XOR 0x36*64) || x))`.
+- `KDF(c,x,n)`: `t=HM(c,x)`; `t1=HM(t,01)`;
+  `t2=HM(t,t1||02)`; `t3=HM(t,t2||03)`. Return the first `n` outputs.
+  The bytes `01`, `02`, `03` are single bytes, not characters.
+- `Seal(k,n,p,a)`: RFC 8439 ChaCha20-Poly1305 with 32-byte key, nonce
+  `00000000 || u64_le(n)`, plaintext `p`, associated data `a`, returning
+  ciphertext followed by its 16-byte tag. `Open` authenticates before returning
+  plaintext. A failure MUST discard the message without advancing state.
+- `PSK`: provisioned PSK, or 32 zero bytes if absent.
 
-- congestion: `auto`, `model`, `reno`, or `cubic`;
-- FEC: `auto` or `off`; and
-- obfuscation: `salamander` or `none`.
+The chain key `c`, transcript hash `h`, AEAD keys and session keys are 32 bytes.
+An index is a randomly chosen local `u32` not in use by another retained
+handshake/session. Index zero has no special wire meaning. Keep separate
+handshake state per attempt; do not confuse WireGuard receiver indices with
+QUIC connection IDs or WGQ1 packet IDs.
 
-`congestion=auto` currently maps directly to the experimental `model`
-controller. It does not probe or negotiate a controller with the peer. Reno
-and CUBIC are benchmark/debug alternatives.
+### 9.2 Message layouts
 
-The per-peer directive
-`peer.fec-latency=latency|balanced|throughput` selects a local encoder profile.
-`balanced` uses the interface values; `latency` caps data shards at four,
-forces interleave one, and caps the flush deadline at 1 ms; `throughput` uses
-at least interleave two and a 4 ms flush deadline. Outbound sessions inherit
-the configured endpoint's peer policy. Inbound and roamed sessions receive a
-policy only after WireGuard authenticates the peer identity. A live change
-flushes the old group before reconfiguring the encoder, so it changes no v1
-record syntax and never reinterprets an in-flight group.
+All integer fields in this table are **little-endian**. The type is a single
+byte followed by three zero bytes (equivalently the indicated `u32_le`).
 
-## 10. Current adaptive FEC sender
+| Message | Exact layout, `offset:length` |
+| --- | --- |
+| Initiation, type 1, 148 bytes | `0:4 type`, `4:4 sender index I`, `8:32 E_i`, `40:48 encrypted S_i`, `88:28 encrypted timestamp`, `116:16 mac1`, `132:16 mac2` |
+| Response, type 2, 92 bytes | `0:4 type`, `4:4 sender index R`, `8:4 receiver I`, `12:32 E_r`, `44:16 encrypted empty`, `60:16 mac1`, `76:16 mac2` |
+| Cookie reply, type 3, 64 bytes | `0:4 type`, `4:4 receiver`, `8:24 XChaCha nonce`, `32:32 encrypted cookie` |
+| Transport, type 4, at least 32 bytes | `0:4 type`, `4:4 receiver`, `8:8 counter`, `16:rest encrypted inner packet plus tag` |
 
-The current automatic sender uses these defaults:
+Reject unsupported types, nonzero reserved bytes, wrong fixed lengths and
+truncated transport messages. Outer fragmentation does not alter these bytes.
 
-| Setting | Current value |
-| --- | ---: |
-| Default interface data-shard limit | 32 |
-| Initial target parity | 1 |
-| Partial-group flush deadline | 2 ms |
-| Controller parity range | 0 through 8 |
-| Controller interleave range | 1 through 4 |
-| Healthy-path protected probe | one group after 4,096 raw frames |
-| Normal decrease evidence | 32 groups |
+### 9.3 Initiation
 
-For a partial group with `k` source shards, emitted parity is bounded by
-`min(target_parity, max(1, floor(k/2)))` and by the wire maximum. The sender
-increments epoch only at the next group boundary after the target changes.
-
-The controller maintains a loss EWMA from receiver feedback. Its sample weight
-is clamped between 1/32 and 1/4. Using the default 32-source interface profile, it
-chooses the smallest parity count whose independent-loss estimate gives a
-probability of losing more than that many shards in the resulting group of at
-most 0.5%, with a current maximum of eight.
-
-At RTT up to 100 ms, an estimated loss at or below 0.1% permits the parity-zero
-fast path. Above 100 ms that threshold scales by `100 ms / path RTT`, down to a
-floor of 0.01%. A transition from one parity shard to zero also requires
-`32 * ceil(RTT / 100 ms)` clean groups on a long-RTT path, capped at 256;
-surplus parity above one still drains on the normal 32-group window.
-
-Unrecovered groups raise protection more quickly. The sender also samples
-cumulative QUIC sent/lost counters every 32 WGQ1 frames regardless of current
-parity, and updates only after at least 128 newly sent QUIC packets. While
-parity is zero, two or more losses at a sample rate of at least 0.5%
-immediately leave the fast path. A protected probe with even one missing
-source shard has the same effect, including when FEC repaired that shard.
-
-These thresholds, the independent-loss model, and the local peer profiles are
-implementation policy. They may change without a wire-version change.
-
-## 11. Current capacity and congestion model
-
-The experimental `model` controller is BBR-like but is not BBRv3. It measures
-acknowledged congestion-controlled QUIC packet bytes, so source data, parity,
-and QUIC packet overhead consume the measured delivery and pacing budget.
-UDP/IP headers and the 16-byte Salamander envelope are added below quic-go and
-are not explicitly debited from that byte counter. Useful WireGuard bytes are
-a separate product metric and are not used to pretend that parity is free.
-
-Current behavior includes:
-
-- delivery samples over windows between 5 and 50 ms, derived from RTT;
-- a ten-slot delivery-sample window used to raise the bandwidth estimate;
-  ordinary samples do not lower the estimate, and ACK-compression samples are
-  bounded by 1.5 times in-flight bytes over the path RTT;
-- a startup pacing gain of 2.0 and a steady probing gain of 1.10;
-- a target congestion window of twice the estimated bandwidth-delay product;
-- exit from startup after three capacity-limited rounds without 25% bandwidth
-  growth;
-- no multiplicative response to random packet loss alone;
-- model reductions for ECN or loss accompanied by standing queue growth;
-- a dynamic path-local propagation RTT and queue-delay estimate; and
-- reset to a four-packet minimum window after a retransmission timeout.
-
-The standing-queue test requires at least 5 ms of excess smoothed RTT and a
-relative threshold of 25%; a more severe 50% threshold triggers repeated
-model reduction. The path RTT baseline can move after sustained access-path
-changes instead of retaining only the connection-lifetime minimum.
-
-FEC feedback currently supplies recoverable and residual-loss classification
-to the model's telemetry. It does **not** directly increase delivery samples,
-exempt lost QUIC packets from accounting, or change the current bandwidth/cwnd
-formula. Parity selection remains in the separate FEC controller.
-
-## 12. Scheduling, queues, and telemetry
-
-The local send path gives priority to WireGuard handshake initiation,
-handshake response, cookie reply, and empty transport keepalive packets. The
-default bulk send queue is 1024 items, the priority queue is at least 64 items,
-and the FEC feedback queue is 64 items. Admission is bounded; full queues cause
-local drops rather than unbounded delay. Priority does not currently change
-FEC group membership or QUIC's wire pacing rules.
-
-Status exposes, among other local measurements:
-
-- WireGuard packets/bytes and WGQ1/WGQF QUIC-DATAGRAM payload packets/bytes
-  (the latter `wire_*` counters do not include QUIC, UDP/IP, or Salamander
-  headers);
-- queue depth and drops;
-- FEC data/parity, raw missing, recovered, unrecovered, current parity, and
-  loss estimate;
-- QUIC acknowledged/lost bytes and packets;
-- minimum/latest/smoothed/path RTT and estimated queue delay; and
-- congestion window, bytes in flight, bandwidth estimate, pacing rate, and
-  model state.
-
-Status additionally advertises `session_telemetry_v1` and exposes the same
-measurements independently for every active QUIC session. Session observations
-include the connection role and generation, configured and current outer
-endpoint, authenticated/configured peer associations, RTT variation, cumulative
-PTO firings, and packets later classified as spurious loss. A session can be
-associated with multiple WireGuard peers; implementations and collectors must
-not duplicate its QUIC counters into a separate copy for each peer. These
-portable observations use the same schema on Unix and Windows. A
-platform-specific host or socket counter must separately report whether its
-source is supported instead of using zero to mean both "unavailable" and "no
-events". Session enumeration is bounded, prioritizes configured outbound
-connections, and reports the excluded count as `session_telemetry_omitted`.
-
-These status values and the local control socket are not wire-protocol fields.
-They can change independently of v1 interoperability.
-
-## 13. Current implementation limits
-
-The implemented profile has the following deliberate or known limits:
-
-- UDP is the only carrier; there is no TCP or other fallback for blanket UDP
-  blocking.
-- There is no padding, packet-size shaping, port hopping, multipath scheduler,
-  or application-layer reliable retransmission.
-- FEC adapts parity and burst interleave. Per-peer policy can change `k`,
-  interleave, and flush deadline at a group boundary, but the path controller
-  does not continuously tune `k`, flush deadline, repair deadlines, or
-  per-packet protection.
-- FEC completion and feedback use 3-second expiry, which is not derived from
-  a peer latency policy.
-- Feedback and malformed-frame diagnostics are incomplete.
-- The model controller has no explicit source/repair budget split, confidence
-  score, fairness guarantee, or complete BBRv3 state machine.
-- Malformed-record tables/fuzzing, duplicate-feedback tests, and explicit
-  `auto`/`off` asymmetric interoperability tests are still missing. Golden
-  vectors lock the WGQ1, WGQF, and Salamander v1 bytes, and recovery, expiry,
-  controller, framing, and full WireGuard-over-carrier behavior are covered.
-
-## 14. Non-normative design intent and validation contract
-
-wg-quic is intended to preserve useful delivery and bounded stalls after
-direct userspace WireGuard becomes unstable, heavily rate-limited, or
-protocol-discriminated. Winning clean-LAN peak throughput is secondary. The
-principal measurements are the impairment usability boundary, interval
-goodput floor, P95/P99 and longest stall, recovery after blackout or path
-change, residual post-FEC loss, total outer bytes per useful byte, queue delay,
-local drops, and fairness to a competing flow.
-
-Performance claims should keep MTU, workload, direction, host placement, path
-schedule, and measurement interval fixed; use at least five 30--60 second
-repetitions for random or burst loss; report medians and dispersion rather
-than the best run; and include outer wire bytes, local drops, TCP capacity,
-low-rate UDP, direct userspace WireGuard, no-FEC wg-quic, and adaptive-FEC
-wg-quic baselines. The controlled fixture and field interpretation live in
-[`tests/benchmark/README.md`](../tests/benchmark/README.md).
-
-Future work should preserve one total congestion-controlled wire budget:
+The initiator initializes and sends:
 
 ```text
-source budget + repair budget + control budget <= total wire budget
+c = H("Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s")
+h = H(c || "WireGuard v1 zx2c4 Jason@zx2c4.com")
+h = H(h || S_r)
+E_i = X25519(e_i, basepoint_9)
+c = KDF(c, E_i, 1)[0]
+h = H(h || E_i)
+(c, key) = KDF(c, DH(e_i, S_r), 2)
+enc_static = Seal(key, 0, S_i, h)
+h = H(h || enc_static)
+(c, key) = KDF(c, DH(s_i, S_r), 2)
+enc_timestamp = Seal(key, 0, timestamp, h)
+h = H(h || enc_timestamp)
+body = u32_le(1) || u32_le(I) || E_i || enc_static || enc_timestamp
+mac1 = MAC(H("mac1----" || S_r), body)
+mac2 = 16 zero bytes, unless a live cookie exists (section 9.7)
+initiation = body || mac1 || mac2
 ```
 
-FEC recovery by itself must not be interpreted as proof that loss is
-non-congestive; ECN, queue growth, RTT, delivery collapse, and fairness remain
-safety signals. Any future incompatible feedback, coding, or carrier change
-must follow the versioning rules in section 7.
+`basepoint_9` is `09` followed by 31 zero bytes. The 12-byte timestamp is
+`u64_be(0x400000000000000a + Unix_seconds) || u32_be(nanoseconds)`.
+Nanoseconds are in `[0,999999999]`. The deployed sender clears the low 24 bits
+of nanoseconds to reduce timing precision. Ensure a later attempt has a later
+timestamp; do not use the deterministic vector's timestamp in a live network.
 
-## 15. Implementation map
+The responder verifies `mac1` using its own static public key before expensive
+work and may require `mac2` under load. It repeats the transcript/chain steps,
+using `DH(s_r,E_i)` to decrypt the initiator static key. It then looks up that
+static key in its configured peers; unknown peers MUST be rejected. Next use
+`DH(s_r,S_i)` to authenticate/decrypt the timestamp. The timestamp MUST be
+lexicographically greater than the last accepted timestamp for this peer. A
+current responder also rate-limits accepted initiations from the same peer to
+at most 50 per second. Only after these checks commit `c,h,E_i,I` and the latest
+timestamp. An invalid packet must not replace authenticated peer state.
 
-The primary sources reviewed for this specification are:
+### 9.4 Response and confirmation
 
-- QUIC/TLS/ALPN and Datagram carrier:
-  `internal/transport/quic/carrier.go`;
-- Salamander derivation and UDP envelope:
-  `internal/transport/obfs/salamander.go` and platform GSO helpers;
-- WGQ1 framing, validation, and reassembly:
-  `internal/bind/framing.go`;
-- session, fragmentation, FEC dispatch, feedback, and queues:
-  `internal/bind/bind.go`;
-- WGQF bytes, codec, encoder, decoder, and controller:
-  `internal/transport/fec/{wire,codec,encoder,decoder,controller}.go`;
-- configuration surface and runtime mapping:
-  `internal/config/config.go` and `internal/core/transport.go`;
-- custom congestion and capacity estimator:
-  `third_party/quic-go/internal/congestion/model_sender.go` and
-  `third_party/quic-go/connection.go`; and
-- behavior coverage: the corresponding tests under `internal/bind`,
-  `internal/transport/{quic,obfs,fec}`, and
-  [`tests/WIREGUARD-FORK.md`](../tests/WIREGUARD-FORK.md).
+Starting from the committed initiation state, the responder computes:
+
+```text
+E_r = X25519(e_r, basepoint_9)
+h = H(h || E_r)
+c = KDF(c, E_r, 1)[0]
+c = KDF(c, DH(e_r, E_i), 1)[0]
+c = KDF(c, DH(e_r, S_i), 1)[0]
+(c, tau, key) = KDF(c, PSK, 3)
+h = H(h || tau)
+enc_empty = Seal(key, 0, empty_bytes, h)
+h = H(h || enc_empty)
+body = u32_le(2) || u32_le(R) || u32_le(I) || E_r || enc_empty
+mac1 = MAC(H("mac1----" || S_i), body)
+response = body || mac1 || mac2
+(K_i_to_r, K_r_to_i) = KDF(c, empty_bytes, 2)
+```
+
+`mac2` is zero or calculated from a cookie as below. The initiator finds the
+outstanding handshake by receiver index `I`, checks `mac1`, performs the same
+steps using `DH(e_i,E_r)` and `DH(s_i,E_r)`, and authenticates `enc_empty`.
+Only on successful verification does it install the two transport keys. Each
+direction's send counter starts at zero. Erase the ephemeral private keys,
+chain key, transcript hash and temporary AEAD keys when no longer needed.
+
+The initiator immediately sends an authenticated type-4 message, using the
+new initiator-to-responder key and receiver index `R`. If there is no pending
+IP packet, send an empty keepalive. This is key confirmation: the responder
+holds new keys as pending and MUST wait for a valid type-4 message using them
+before treating that session as established for outbound traffic. It can use
+a still-valid previous keypair while waiting. Successful TLS establishment is
+not a substitute for this confirmation.
+
+### 9.5 Transport messages and inner delivery
+
+To send an IP packet `p`:
+
+```text
+counter = next_send_counter; next_send_counter += 1
+padded = p || zero padding to a multiple of 16 bytes
+header = u32_le(4) || u32_le(remote_receiver_index) || u64_le(counter)
+packet = header || Seal(direction_key, counter, padded, empty_bytes)
+```
+
+The 16-byte transport header is **not** AEAD associated data. The receiver
+index selects the key; the counter supplies the nonce. The deployed sender
+caps padding at the configured inner MTU, so a receiver MUST also accept
+non-multiple-of-16 plaintext lengths. An empty keepalive has no plaintext and
+is exactly 32 bytes including header/tag. Never reuse a counter under a key.
+
+The receiver authenticates before committing replay-window changes. Keep a
+sliding replay window per receive key, supporting out-of-order counters while
+rejecting duplicates and counters too old for the window. The deployed window
+is approximately 8192 counters. Reject counter values at or above
+`2^64 - 2^13 - 1` and keys aged 180 seconds or more. A new keypair starts fresh
+counters and a fresh replay window. Keep the current/previous pair and a
+pending responder pair only as long as needed for orderly rekeying.
+
+After decryption, empty plaintext is a keepalive. Otherwise inspect the IP
+version nibble: IPv4's total length at offsets 2..3 (big-endian) or IPv6's
+payload length at offsets 4..5 plus its 40-byte header determines the delivered
+length. Verify minimum header size and length within decrypted plaintext;
+strip padding using the IP length, never by trimming zero bytes. Reject unknown
+versions, invalid lengths, and an inner source address outside the authenticated
+peer's allowed prefixes. Outbound destination-to-peer selection is local
+routing policy. It MUST NOT replace inbound source validation.
+
+An outer remote-address change can update the peer's endpoint only after
+WireGuard authentication and replay checks. Keep QUIC path validation active.
+Reconnecting QUIC does not by itself reset WireGuard keys/counters; conversely,
+WireGuard rekeying can happen inside an existing QUIC connection.
+
+### 9.6 Loss, timers and simultaneous handshakes
+
+Handshake initiation/response/cookie and transport messages all use the same
+WGQ1/WGQF path; none is sent directly as plain UDP or as a reliable QUIC stream.
+Do not add an application ACK, duplicate a Noise handshake deliberately, or
+wait for FEC feedback before passing a received systematic shard to WireGuard.
+
+For interoperable WireGuard behavior: retry an unanswered initiation after
+5 seconds plus random jitter 0..333 ms, with fresh ephemeral key and timestamp.
+Stop retrying after 90 seconds until new outbound work arrives. Rekey after
+sending `2^60` messages or, as handshake initiator, when a key is 120 seconds
+old and sending data; an initiator receiving traffic should rekey by 105
+seconds. Reject keys at 180 seconds, and erase unused key material after 540
+seconds without replacement. These intervals are seconds, not milliseconds.
+
+After receiving data, if no outgoing packet follows within 10 seconds, send an
+empty keepalive. After sending data with no reply for 15 seconds, attempt a new
+handshake. A separately configured persistent-keepalive interval may maintain
+NAT state; it is not a wire field. QUIC's own keepalive is distinct.
+
+Allow inbound handshakes even while an outbound attempt is pending. Use receiver
+indices and transcript state to choose the right attempt, never outer UDP
+address alone. Multiple QUIC connections may transiently carry the same peer;
+WireGuard replay protection remains per key, not per QUIC connection.
+
+### 9.7 Cookies under load
+
+A recipient with a valid `mac1` but no acceptable `mac2` may send a type-3 cookie
+reply rather than doing a handshake. A cookie is a 16-byte secret tied to the
+source endpoint. A responder can derive it as `MAC(rotating_secret, source)`
+with a random 32-byte secret rotated every 120 seconds. `source` is its local
+binary representation of the observed IP and UDP port; the other endpoint never
+recomputes this value, so that private representation is not an interop field.
+
+Cookie reply fields:
+
+```text
+receiver = sender index of the triggering initiation or response
+cookie_key = H("cookie--" || cookie_sender_static_public_key)
+nonce = 24 cryptographically random bytes
+encrypted_cookie = XSeal(cookie_key, nonce, cookie, triggering_mac1)
+reply = u32_le(3) || u32_le(receiver) || nonce || encrypted_cookie
+```
+
+`XSeal` is XChaCha20-Poly1305: derive a subkey with HChaCha20 using the original
+key and first 16 nonce bytes, then use RFC 8439 AEAD with that subkey and nonce
+`00000000 || nonce[16:24]`. HChaCha20 initializes ChaCha's 16 little-endian
+32-bit words with the four constants `61707865 3320646e 79622d32 6b206574`,
+eight key words and four nonce words; run the standard 20 ChaCha rounds,
+without the final addition of the initial state, and serialize words
+`0,1,2,3,12,13,14,15` little-endian as the subkey. The AEAD associated data is
+the 16-byte `mac1` of the triggering message, not the entire handshake.
+
+A cookie receiver locates the outstanding attempt using `receiver`, derives
+`cookie_key` from its configured remote public key and decrypts using its saved
+last sent `mac1`. On success cache the cookie for at most 120 seconds. When
+sending the next handshake message to that peer, compute:
+
+```text
+mac2 = MAC(cookie, body || mac1)
+```
+
+This cookie mechanism is inside the WireGuard datagram and unrelated to QUIC
+Retry tokens. The cookie reply itself is wrapped in WGQ1/FEC/QUIC/Salamander.
+A full implementation must handle cookie replies even if its own responder
+never enables cookie-based load shedding.
+
+## 10. Embedded interoperability vectors
+
+All strings in this JSON are hexadecimal bytes; matrix entries are ordinary
+integer byte values. Concatenate a string's digits without whitespace. These
+are synthetic public test secrets only; NEVER use them as deployment keys.
+No external fixture file is needed.
+
+- `salamander` uses private/static keys A and B, the shown PSK and salt. Both
+  directions derive `key`. `key_absent_psk` and `key_zero_psk` intentionally
+  differ. `plain` is a short artificial QUIC-shaped input for testing the
+  envelope, **not** a complete valid QUIC Initial.
+- `noise` reuses the static keys and PSK from `salamander`, with the specified
+  fresh ephemeral inputs, initiator index `0x01020304`, responder index
+  `0x05060708`, Unix timestamp 1700000000 and zero nanoseconds. Both MAC2 fields
+  are zero. `keepalive` is the first initiator-to-responder transport message,
+  counter zero. `framed_initiation` is one WGQ1 frame, packet ID 1.
+- `fragments` wraps dummy payload `010203040506070809` into three fragments;
+  accept order 2,0,1 and reconstruct the original bytes. Dummy payloads in this
+  and the FEC vector test outer framing, not WireGuard authentication.
+- `fec` is epoch 1, group 1, `k=3,r=2`. Data shard lengths differ and `shards`
+  includes zero padding for coding. `data` contains unpadded on-wire data
+  records. Feed only `data[0]`, `parity[0]`, `parity[1]`: recover frames 1 and 2
+  without redelivering frame 0, and emit the shown dimensioned `feedback` after
+  grace. `close` is the complete close record. The zero-total feedback vector
+  demonstrates the separate unknown-dimensions form.
+
+```json
+{
+  "salamander": {
+    "private_a": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_a": "8f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f",
+    "private_b": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "public_b": "358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254",
+    "shared": "9663aa1da97e848a914a436d04163dfbb89178f107f1b5b77ed3854203382854",
+    "psk": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "key": "a5432c4f3449673fc9be625ff0881346cbf1b4172ba6378661e84a9ab2a34ecc",
+    "key_absent_psk": "2b08a7e0e61d73525db836a38cb892254b0c3204e85931b3b656c978e10e514b",
+    "key_zero_psk": "f61f5c3e5848cc4ffca6047f229c0554974773051e0841808884861838a5acfa",
+    "salt": "0102030405060708",
+    "hint": "f71ea486b3282427",
+    "stream": "a0d422732a082a7e9f143eb0dc1cd157eb3619b074ec6a6e3cdc14686d25fe8f",
+    "plain": "c000000001080102030405060708",
+    "wire": "0102030405060708f71ea486b328242760d422732b002b7c9c103bb6db14"
+  },
+  "noise": {
+    "ephemeral_private_a": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "ephemeral_public_a": "79a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51a",
+    "ephemeral_private_b": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    "ephemeral_public_b": "675dd574ed7789310b3d2e7681f3790b466c773b1521fecf36577958371ea52f",
+    "timestamp": "400000006553f10a00000000",
+    "initiation": "010000000403020179a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51af0225eb421886af8f54fb31289d49dcd82b0f6f3279d40d7cff913fece0c64ad226eef3320755b393b72f16842c8d7ee78a74e937e3f2a828ff4ecc11547a9c7d1ee1b22fedf3178ecbaddb325e375e3dd7bb6b996692092d3d0deba00000000000000000000000000000000",
+    "chain_after_initiation": "5b3722a25c7c69706cfbbef606c70681a400fd1b6dab82533b1266606d6ede42",
+    "hash_after_initiation": "99419dec0d190b62da00339f2bf2675ea547e09e6e9971aa475f595ccf8f8f3c",
+    "response": "020000000807060504030201675dd574ed7789310b3d2e7681f3790b466c773b1521fecf36577958371ea52f095f43d1e4ebc37fc2dfe187cffb0cae163bf89f3d35d219316b75498184af4900000000000000000000000000000000",
+    "chain_final": "5bf7a0954c8634f08c37053098a30f50b64ba5aec671da1527472be2079a8fff",
+    "hash_final": "db980f6a7dcde6d67276e39ab4e621eb48ffad8421bf06cd302f6b892993b153",
+    "sending_key_a": "5f5adf1120d2983a88f9a4a510b2b5d4ab7f26c4d0ff3ed13bebc5221a65e1a6",
+    "sending_key_b": "335840fe731665d85a1772dd9f3bea6702ce640b81af6b36d49594927251ec92",
+    "keepalive": "04000000080706050000000000000000f6ad3e0ef17f7c448ee031cd18296c80",
+    "framed_initiation": "574751310100000000000000010000000100000094010000000403020179a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51af0225eb421886af8f54fb31289d49dcd82b0f6f3279d40d7cff913fece0c64ad226eef3320755b393b72f16842c8d7ee78a74e937e3f2a828ff4ecc11547a9c7d1ee1b22fedf3178ecbaddb325e375e3dd7bb6b996692092d3d0deba00000000000000000000000000000000"
+  },
+  "fragments": [
+    "574751310101020304050607080000000300000009010203",
+    "574751310101020304050607080001000300000009040506",
+    "574751310101020304050607080002000300000009070809"
+  ],
+  "fec": {
+    "matrix": [
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        1
+      ],
+      [
+        1,
+        1,
+        1
+      ],
+      [
+        15,
+        8,
+        6
+      ]
+    ],
+    "frames": [
+      "574751310100000000000000010000000100000001aa",
+      "574751310100000000000000020000000100000002bbcc",
+      "574751310100000000000000030000000100000003ddeeff"
+    ],
+    "shards": [
+      "0016574751310100000000000000010000000100000001aa0000",
+      "0017574751310100000000000000020000000100000002bbcc00",
+      "0018574751310100000000000000030000000100000003ddeeff"
+    ],
+    "data": [
+      "5747514601000001000000000000000100000000000000180016574751310100000000000000010000000100000001aa",
+      "5747514601000001000000000000000100010000000000190017574751310100000000000000020000000100000002bbcc",
+      "57475146010000010000000000000001000200000000001a0018574751310100000000000000030000000100000003ddeeff"
+    ],
+    "parity": [
+      "57475146010100010000000000000001000000030002001a0019574751310100000000000000000000000100000000cc22ff",
+      "57475146010100010000000000000001000100030002001a003a5747513101000000000000001500000001000000150d7038"
+    ],
+    "close": "574751460102000100000000000000010000000300020000",
+    "feedback": "574751460103000100000000000000010002000300020000",
+    "unknown_dimensions_feedback": "574751460103000100000000000000010001000000000000"
+  }
+}
+```
+
+### 10.1 Negative vectors derived from the positive cases
+
+Each transformation below must fail at the indicated layer, without delivery
+to an inner network interface and without an unbounded allocation:
+
+| Input transformation | Required outcome |
+| --- | --- |
+| Flip one bit of Salamander hint | No matching key; drop before QUIC |
+| Flip one bit of the obfuscated ciphertext | QUIC authentication normally fails; Salamander alone has no payload MAC |
+| Offer only ALPN `wg-quic/2` | No compatible ALPN; handshake fails |
+| Set WGQ1 version to 2, count to 0, index equal to count, or total to 65536 | Drop malformed WGQ1 |
+| Change WGQF payload-length field without changing payload | Drop as malformed WGQF, not as WGQ1 |
+| Parity `k=33`, `r=9`, or index equal to `r` | Reject the dimensions/index |
+| Same FEC group with a different epoch or inconsistent announced dimensions | Reject the conflicting record |
+| Feedback `(total,missing,recovered)=(3,4,0)` or `(0,1,1)` | Reject invalid feedback |
+| Flip initiation MAC1, encrypted static or timestamp bytes | Reject before committing peer handshake state |
+| Use a different inner PSK in the response | `enc_empty` authentication fails |
+| Replay the initiation after it was accepted | Reject non-increasing timestamp |
+| Replay an authenticated type-4 counter after delivery | Drop as replay; no second inner packet |
+| Valid encrypted IP with an unauthorized source prefix | Reject inner packet despite valid AEAD |
+
+## 11. Independent implementation acceptance procedure
+
+A successful test means both handshakes **and** bidirectional authenticated
+inner delivery, not just a UDP socket, TLS connection or "connected" label.
+
+1. Implement primitives and compare every value in section 10, including the
+   matrix and recovery from two missing source shards. Check the negative
+   cases before attempting network interoperability.
+2. Provision fresh static keys A/B and reciprocal peer public keys. Use A inner
+   IP `10.200.0.1/32`, B `10.200.0.2/32`, matching allowed peer prefixes, MTU
+   1280, reachable UDP endpoints, initially `obfs=none`, `fec=off` for sending.
+   Each receiver still supports WGQF. A may be an existing endpoint and B the
+   new implementation. Begin with QUIC v1 and ALPN `wg-quic/1`.
+3. Complete QUIC/TLS, send a freshly generated WireGuard initiation in WGQ1,
+   receive a response, verify it, send key confirmation, and exchange valid
+   inner IPv4 ICMP echo or UDP request/reply packets. Verify decrypted inner
+   addresses/payloads, not just a recent handshake timestamp. Reverse which
+   endpoint initiates and repeat.
+4. Enable `obfs=salamander` at both ends. Test no PSK, then the same randomly
+   generated nonzero PSK at both ends. Verify both envelope directions and full
+   inner delivery. Deliberately mismatch obfuscation mode and PSK: neither may
+   yield authenticated inner traffic. Restore agreement and verify recovery.
+5. Enable an automatic-FEC sender at the existing endpoint while the independent
+   sender remains raw. Accept raw, systematic, parity, close and feedback
+   records interleaved in both directions. Induce source-shard loss within the
+   FEC capacity and verify exact reconstruction; induce greater loss and verify
+   bounded expiry with no fabricated plaintext or stalled unrelated groups.
+6. Force WGQ1 fragmentation by choosing a smaller DATAGRAM payload budget; drop,
+   reorder and duplicate fragments. Verify no partial packet delivery and no
+   cross-connection reassembly. Repeat with FEC around individual fragments.
+7. Exercise cookies, simultaneous dialing, idle periods, outer reconnect and
+   WireGuard rekey. Keep traffic running beyond 180 seconds. Change the UDP
+   source port/address and verify authenticated migration. Replay old transport
+   packets and inject an authenticated packet with an unauthorized inner source.
+8. Record version/ALPN, provisioned modes, packet size limits, which roles were
+   tested, matching vector checks, bidirectional payload counts and observed
+   failure behavior. Record any unimplemented capability explicitly. Do not
+   call a WGQ1-only receiver or a client that ignores cookies fully compatible.
+
+QUIC connection IDs, TLS randomness, certificates, packet numbers and timing
+make a universal fixed full-network transcript inappropriate. The deterministic
+vectors stop at the QUIC application/UDP-envelope boundaries; RFC-conforming
+QUIC provides the transport between those boundaries. No vendor fork is needed.
+
+## 12. Public standards and algorithm identities
+
+These references identify general-purpose primitives and transport standards;
+all application-specific constants and choices are specified in this document.
+
+- [RFC 9000 — QUIC v1](https://www.rfc-editor.org/rfc/rfc9000.html),
+  [RFC 9001 — TLS for QUIC](https://www.rfc-editor.org/rfc/rfc9001.html), and
+  [RFC 9002 — QUIC loss detection and congestion control](https://www.rfc-editor.org/rfc/rfc9002.html).
+- [RFC 9221 — QUIC DATAGRAM](https://www.rfc-editor.org/rfc/rfc9221.html);
+  [RFC 9369 — QUIC v2](https://www.rfc-editor.org/rfc/rfc9369.html) is optional.
+- [RFC 8446 — TLS 1.3](https://www.rfc-editor.org/rfc/rfc8446.html),
+  [RFC 7748 — X25519](https://www.rfc-editor.org/rfc/rfc7748.html),
+  [RFC 7693 — BLAKE2](https://www.rfc-editor.org/rfc/rfc7693.html), and
+  [RFC 8439 — ChaCha20-Poly1305](https://www.rfc-editor.org/rfc/rfc8439.html).
+- [WireGuard protocol overview](https://www.wireguard.com/protocol/) and
+  [technical paper](https://www.wireguard.com/papers/wireguard.pdf) describe the
+  standard inner protocol. Section 9 supplies the exact inner layouts and
+  calculations needed here; no WireGuard implementation language is required.

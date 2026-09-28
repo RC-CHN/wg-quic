@@ -607,9 +607,10 @@ sends an immutable configuration snapshot to the supervised core through
 standard input. Private and preshared keys do not enter process arguments, and
 the supervised core does not reread the profile path.
 
-The wire format, transport directives, security boundaries, adaptive FEC
-policy, and current limitations are documented in
-[`docs/WG-QUIC-PROTOCOL.md`](docs/WG-QUIC-PROTOCOL.md).
+The standalone, language-independent [wire protocol specification](docs/WG-QUIC-PROTOCOL.md)
+includes the complete handshake, byte layouts, coding matrix, embedded test
+vectors and an interoperability checklist. It requires no repository source.
+[Local adaptive policy notes](docs/WG-QUIC-LOCAL-POLICY.md) are separate.
 
 ## Development and verification
 
