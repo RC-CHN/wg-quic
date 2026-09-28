@@ -43,7 +43,7 @@ export async function runEditorInteractionSmoke(actions: {
     const originalLanguage = language.value;
     language.value = 'zh';
     language.dispatchEvent(new Event('change'));
-    assert(document.documentElement.lang === 'zh-CN' && document.getElementById('form-save')!.textContent === '检查并保存', 'Chinese editor labels are missing');
+    assert(document.documentElement.lang === 'zh-CN' && document.getElementById('form-save')!.textContent?.trim() === '检查并保存', 'Chinese editor labels are missing');
     assert(address.value === '10.22.0.2/32' && input('form-private-key').value === generated, 'changing language lost the draft');
     language.value = originalLanguage;
     language.dispatchEvent(new Event('change'));
