@@ -178,6 +178,17 @@ function setText(id: string, value: string): void {
   byId(id).textContent = value;
 }
 
+function setMetric(id: string, value: string): void {
+  const target = byId(id);
+  if (target.textContent === value) return;
+  const split = value.lastIndexOf(' ');
+  if (split < 0) { target.textContent = value; return; }
+  const unit = document.createElement('span');
+  unit.className = 'metric-unit';
+  unit.textContent = value.slice(split);
+  target.replaceChildren(document.createTextNode(value.slice(0, split)), unit);
+}
+
 function refreshedAtDate(value: string): Date {
   return /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
 }
@@ -197,6 +208,7 @@ function tunnelSummary(tunnel: TunnelView): string {
 
 function renderDetail(tunnel?: TunnelView): void {
   const inForm = formDraft !== null;
+  setText('keyboard-hint', inForm ? t('Ctrl+S save configuration') : t('Ctrl+O import · Ctrl+R refresh'));
   tunnelForm.classList.toggle('hidden', !inForm);
   detail.classList.toggle('hidden', inForm || !tunnel);
   detailEmpty.classList.toggle('hidden', inForm || Boolean(tunnel));
@@ -233,7 +245,9 @@ function renderDetail(tunnel?: TunnelView): void {
   const backendSupported = Boolean(current?.backend.supported);
 
   setText('detail-name', tunnel.name);
-  setText('detail-summary', tunnelSummary(tunnel));
+  const summary = tunnelSummary(tunnel);
+  setText('detail-summary', summary);
+  byId('detail-summary').classList.toggle('hidden', summary === '—');
   setText('detail-path', tunnel.configPath);
   setText('detail-state', tunnelStateLabel(state));
   const startedAt = pendingSince.get(tunnel.name);
@@ -290,9 +304,9 @@ function renderDetail(tunnel?: TunnelView): void {
       ? t("{0} FEC · {1} obfuscation", status.fec_mode, status.obfs_mode)
       : t('Runtime details unavailable while inactive'),
   );
-  setText('detail-tx', stats ? formatBytes(stats.wg_tx_bytes) : '—');
-  setText('detail-rx', stats ? formatBytes(stats.wg_rx_bytes) : '—');
-  setText('detail-rtt', formatRTT(stats?.quic_smoothed_rtt_us));
+  setMetric('detail-tx', stats ? formatBytes(stats.wg_tx_bytes) : '—');
+  setMetric('detail-rx', stats ? formatBytes(stats.wg_rx_bytes) : '—');
+  setMetric('detail-rtt', formatRTT(stats?.quic_smoothed_rtt_us));
   setText(
     'detail-bandwidth',
     formatBitRate(stats?.quic_bandwidth_estimate_bps),
@@ -356,6 +370,7 @@ function renderConfigurationState(tunnel: TunnelView, busy: boolean): void {
   const saved = applications.get(tunnel.configPath);
   byId('configuration-state').classList.toggle('hidden', !saved);
   if (!saved) return;
+  byId('configuration-state').dataset.tone = saved.state === 'failed' ? 'error' : tunnel.running || tunnel.statusState === 'unknown' ? 'attention' : 'info';
   let message = t('Configuration saved. Apply it to the running tunnel when ready.');
   if (tunnel.statusState === 'unknown') message = t('Configuration saved. Current runtime state could not be checked.');
   else if (!tunnel.running) message = t('Configuration saved. It will be used on the next activation.');
@@ -504,7 +519,7 @@ function renderForm(): void {
   if (!formDraft) {
     return;
   }
-  setText('form-mode-label', formMode === 'new' ? t('NEW TUNNEL') : t('EDIT TUNNEL'));
+
   setText(
     'form-title',
     formMode === 'new' ? t('Create tunnel') : t("Edit {0}", formDraft.name),
@@ -827,7 +842,7 @@ function render(snapshot: DesktopSnapshot): void {
   setText('config-location', snapshot.backend.configDirectory);
   setText(
     'last-refresh',
-    t("Updated {0}", refreshedAtDate(snapshot.refreshedAt).toLocaleTimeString()),
+    t("Updated {0}", refreshedAtDate(snapshot.refreshedAt).toLocaleTimeString(currentLanguage() === 'zh' ? 'zh-CN' : 'en-US', { hour12: false })),
   );
   setText(
     'runtime-title',
@@ -1078,9 +1093,12 @@ byId<HTMLSelectElement>('language-select').value = currentLanguage();
 byId('language-select').addEventListener('change', () => {
   setLanguage(byId<HTMLSelectElement>('language-select').value === 'zh' ? 'zh' : 'en');
   localizeDocument();
+  // Successful transient notifications belong to the previous language.
+  if (toast.classList.contains('ok')) toast.classList.add('hidden');
+  toast.querySelector('button')?.setAttribute('aria-label', t('Dismiss notification'));
   // Change copy only: switching language must never rebuild an active draft.
   if (formDraft) {
-    setText('form-mode-label', formMode === 'new' ? t('NEW TUNNEL') : t('EDIT TUNNEL'));
+
     setText('form-title', formMode === 'new' ? t('Create tunnel') : t('Edit {0}', formDraft.name));
     setText('form-source-toggle', formSourceMode ? t('Use form') : t('Edit source'));
     for (const option of Array.from(byId<HTMLSelectElement>('form-peer-select').options)) option.textContent = t('Peer {0}', Number(option.value) + 1);

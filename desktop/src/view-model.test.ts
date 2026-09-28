@@ -8,6 +8,7 @@ import {
   formatBitRate,
   formatBytes,
   formatFECRecovery,
+  formatHandshakeAge,
   formatRTT,
   managementErrorMessage,
   managementServiceDisplay,
@@ -172,4 +173,18 @@ test('single-flight callers share failures and retry after settlement', async ()
   await assert.rejects(overlapping, expected);
   assert.equal(await run(), 'recovered');
   assert.equal(calls, 2);
+});
+
+
+test('handshake age distinguishes missing observations and clock skew', () => {
+  const now = 2000000000000;
+  for (const missing of [undefined, 0, -1, NaN, Infinity, 1e100]) {
+    assert.equal(formatHandshakeAge(missing, now), 'No handshake yet');
+  }
+  assert.equal(formatHandshakeAge(now / 1000, now), 'Just now');
+  assert.equal(formatHandshakeAge(now / 1000 - 20, now), '20 s ago');
+  assert.equal(formatHandshakeAge(now / 1000 - 121, now), '2 min ago');
+  assert.equal(formatHandshakeAge(now / 1000 - 7200, now), '2 h ago');
+  assert.equal(formatHandshakeAge(now / 1000 - 172800, now), '2 d ago');
+  assert.equal(formatHandshakeAge(now / 1000 + 30, now), 'Check system clock');
 });

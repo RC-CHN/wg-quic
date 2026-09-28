@@ -1,55 +1,157 @@
-import type { CoreStatus, DesktopSnapshot } from './types';
-import { t } from './i18n';
+import type { CoreStatus, DesktopSnapshot } from "./types";
+import { t } from "./i18n";
 
-export async function runStatusInteractionSmoke(refresh: () => Promise<void>): Promise<void> {
+export async function runStatusInteractionSmoke(
+  refresh: () => Promise<void>,
+): Promise<void> {
   const original = window.wgQuic.snapshot;
   const base = await original();
-  const fixture: DesktopSnapshot = { ...base, tunnels: [{
-    name: 'status-fixture', configPath: '/fixture.conf', running: false,
-    statusState: 'unknown', statusCode: 'permission_denied', statusDetail: 'Synthetic permission failure',
-  }] };
+  const fixture: DesktopSnapshot = {
+    ...base,
+    tunnels: [
+      {
+        name: "status-fixture",
+        configPath: "/fixture.conf",
+        running: false,
+        statusState: "unknown",
+        statusCode: "permission_denied",
+        statusDetail: "Synthetic permission failure",
+      },
+    ],
+  };
   window.wgQuic.snapshot = async () => fixture;
   const assert = (condition: boolean, message: string) => {
     if (!condition) throw new Error(`status interaction: ${message}`);
   };
   try {
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === t('Status unavailable'), 'unknown status looks stopped');
-    assert((document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'unknown status offers activation');
-    assert(!document.getElementById('retry-status')!.classList.contains('hidden'), 'no recovery action for unknown status');
-    const item = document.querySelector<HTMLButtonElement>('.tunnel-item')!;
+    assert(
+      document.getElementById("detail-state")!.textContent ===
+        t("Status unavailable"),
+      "unknown status looks stopped",
+    );
+    assert(
+      (document.getElementById("toggle-tunnel") as HTMLButtonElement).disabled,
+      "unknown status offers activation",
+    );
+    assert(
+      !document.getElementById("retry-status")!.classList.contains("hidden"),
+      "no recovery action for unknown status",
+    );
+    const item = document.querySelector<HTMLButtonElement>(".tunnel-item")!;
     item.focus();
     await refresh();
-    assert(document.activeElement === item, 'background refresh lost keyboard focus on the tunnel list');
+    assert(
+      document.activeElement === item,
+      "background refresh lost keyboard focus on the tunnel list",
+    );
     const tunnel = fixture.tunnels[0]!;
     tunnel.running = true;
-    tunnel.statusState = 'up';
+    tunnel.statusState = "up";
     tunnel.statusDetail = undefined;
     tunnel.status = {
-      interface: tunnel.name, state: 'up', carrier: 'quic', fec_mode: 'auto', obfs_mode: 'salamander',
+      interface: tunnel.name,
+      state: "up",
+      carrier: "quic",
+      fec_mode: "auto",
+      obfs_mode: "salamander",
       stats: { active_sessions: 1 },
-      peers: [{ public_key: 'peer', session: 'established', generation: 1 }],
-      sessions: [{ session_id: 1, session_generation: 1, state: 'established', peers: [] }],
+      peers: [{ public_key: "peer", session: "established", generation: 1 }],
+      sessions: [
+        {
+          session_id: 1,
+          session_generation: 1,
+          state: "established",
+          peers: [],
+        },
+      ],
     } as unknown as CoreStatus;
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === t('Authenticating…'), 'QUIC alone looks authenticated');
-    tunnel.status.sessions![0]!.peers = [{ public_key: 'peer', authenticated: true }];
+    assert(
+      document.getElementById("detail-state")!.textContent ===
+        t("Authenticating…"),
+      "QUIC alone looks authenticated",
+    );
+    tunnel.status.sessions![0]!.peers = [
+      { public_key: "peer", authenticated: true },
+    ];
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === t('Connected'), 'authenticated peer not connected');
+    assert(
+      document.getElementById("detail-state")!.textContent === t("Connected"),
+      "authenticated peer not connected",
+    );
+    const peerRow = document.querySelector<HTMLElement>("[data-peer]")!;
+    const peerText = (field: string) =>
+      peerRow.querySelector<HTMLElement>(`[data-field="${field}"]`)!
+        .textContent;
+    assert(
+      peerText("rx-rate") === t("Measuring…"),
+      "unsampled rate appears as measured zero",
+    );
+    assert(
+      peerText("rx-total") === "—",
+      "missing counter appears as measured zero",
+    );
+    tunnel.status.observation_id = "peer-smoke";
+    tunnel.sampledAt = 1000;
+    tunnel.status.peers![0]!.transfer_rx = 0;
+    tunnel.status.peers![0]!.transfer_tx = 100;
+    await refresh();
+    const copy = peerRow.querySelector<HTMLButtonElement>("button")!;
+    copy.focus();
+    tunnel.sampledAt = 2000;
+    await refresh();
+    assert(peerText("rx-rate") === "0 bps", "measured zero rate is hidden");
+    assert(peerText("rx-total") === "0 B", "measured zero bytes are hidden");
+    assert(
+      document.activeElement === copy,
+      "peer refresh loses keyboard focus",
+    );
+    tunnel.statusState = "unknown";
+    await refresh();
+    assert(
+      peerText("rx-rate") === "—" && peerText("rx-total") === "—",
+      "unknown observation shows stale counters",
+    );
     tunnel.running = false;
-    tunnel.statusState = 'inactive';
+    tunnel.statusState = "inactive";
     tunnel.status = undefined;
     await refresh();
-    assert(document.getElementById('detail-state')!.textContent === t('Inactive'), 'inactive state not shown');
-    assert(!(document.getElementById('toggle-tunnel') as HTMLButtonElement).disabled, 'inactive tunnel cannot activate');
-    assert(document.getElementById('peer-count')!.textContent === '', 'inactive runtime claims no configured peers');
-    assert(document.querySelector('.metrics-grid')!.classList.contains('hidden'), 'inactive runtime shows empty traffic cards');
-    fixture.tunnels.push({ name: 'second', configPath: '/second.conf', running: false, statusState: 'inactive' });
+    assert(
+      document.getElementById("detail-state")!.textContent === t("Inactive"),
+      "inactive state not shown",
+    );
+    assert(
+      !(document.getElementById("toggle-tunnel") as HTMLButtonElement).disabled,
+      "inactive tunnel cannot activate",
+    );
+    assert(
+      document.getElementById("peer-count")!.textContent === "",
+      "inactive runtime claims no configured peers",
+    );
+    assert(
+      document.querySelector(".metrics-grid")!.classList.contains("hidden"),
+      "inactive runtime shows empty traffic cards",
+    );
+    fixture.tunnels.push({
+      name: "second",
+      configPath: "/second.conf",
+      running: false,
+      statusState: "inactive",
+    });
     await refresh();
     item.focus();
-    const arrow = new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true});
+    const arrow = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
     item.dispatchEvent(arrow);
-    assert((document.activeElement as HTMLElement).dataset.name === 'second' && arrow.defaultPrevented, 'arrow navigation failed to move focus with selection');
+    assert(
+      (document.activeElement as HTMLElement).dataset.name === "second" &&
+        arrow.defaultPrevented,
+      "arrow navigation failed to move focus with selection",
+    );
   } finally {
     window.wgQuic.snapshot = original;
     await refresh();

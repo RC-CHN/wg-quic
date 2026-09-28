@@ -16,8 +16,7 @@
           <span class="brand-mark" aria-hidden="true"
             ><svg viewBox="0 0 24 24">
               <path d="m4 7 4 10 4-10 4 10 4-10M4 12h16" /></svg></span
-          ><strong>wg-quic</strong
-          ><span class="brand-subtitle">Private connections, clearly.</span>
+          ><strong>wg-quic</strong>
         </div>
         <div class="header-actions">
           <select id="language-select" aria-label="Language / 语言">
@@ -58,10 +57,10 @@
             </button>
           </div>
           <div class="sidebar-actions">
-            <button class="button primary" id="import-config" type="button">
-              Import tunnel…</button
+            <button class="button secondary" id="import-config" type="button">
+              Import…</button
             ><button class="button secondary" id="new-tunnel" type="button">
-              New tunnel
+              New
             </button>
           </div>
           <div class="sidebar-search">
@@ -125,7 +124,6 @@
                 <path d="M19 24h10m-17-7v-5m24 5v-5m-24 19v5m24-5v5" />
               </svg>
             </div>
-            <span class="eyebrow">YOUR CONNECTIONS</span>
             <h1 id="detail-empty-title">Add your first tunnel</h1>
             <p id="detail-empty-copy">
               Have a configuration file? Import it to get started. You can also
@@ -145,7 +143,6 @@
           <article class="tunnel-detail hidden" id="tunnel-detail">
             <header class="detail-header">
               <div class="detail-title">
-                <span class="eyebrow">TUNNEL</span>
                 <h1 id="detail-name">—</h1>
                 <p class="detail-summary" id="detail-summary">—</p>
               </div>
@@ -201,7 +198,6 @@
                 role="status"
               >
                 <div>
-                  <strong>Saved configuration</strong>
                   <p id="configuration-state-copy"></p>
                   <pre id="configuration-result"></pre>
                 </div>
@@ -377,16 +373,14 @@
           <article class="tunnel-form hidden" id="tunnel-form">
             <header class="detail-header">
               <div class="detail-title">
-                <span class="eyebrow" id="form-mode-label">NEW TUNNEL</span>
-                <h1 id="form-title">Create tunnel</h1>
-                <span
-                  id="form-draft-state"
-                  class="draft-state"
-                  role="status"
-                ></span>
-                <p class="detail-summary">
-                  Set up this device, then add the peer you want to reach.
-                </p>
+                <div class="form-title-line">
+                  <h1 id="form-title">Create tunnel</h1>
+                  <span
+                    id="form-draft-state"
+                    class="draft-state"
+                    role="status"
+                  ></span>
+                </div>
               </div>
               <button
                 class="button secondary"
@@ -418,6 +412,7 @@
                         <label for="form-name">Tunnel name</label
                         ><input
                           id="form-name"
+                          aria-required="true"
                           type="text"
                           placeholder="e.g. home"
                           autocomplete="off"
@@ -430,6 +425,7 @@
                         <label for="form-addresses">Tunnel address</label
                         ><input
                           id="form-addresses"
+                          aria-required="true"
                           type="text"
                           placeholder="10.0.0.2/32"
                           autocomplete="off"
@@ -474,6 +470,7 @@
                         <label for="form-peer-public-key">Peer public key</label
                         ><input
                           id="form-peer-public-key"
+                          aria-required="true"
                           class="key-input"
                           type="text"
                           placeholder="Paste the other peer’s public key"
@@ -499,6 +496,7 @@
                           <label for="form-allowed-ips">Allowed IPs</label
                           ><input
                             id="form-allowed-ips"
+                            aria-required="true"
                             type="text"
                             placeholder="0.0.0.0/0, ::/0"
                             autocomplete="off"
@@ -671,7 +669,7 @@
       </main>
       <footer>
         <span id="last-refresh">Not refreshed yet</span
-        ><span>Ctrl+O import · Ctrl+R refresh</span>
+        ><span id="keyboard-hint">Ctrl+O import · Ctrl+R refresh</span>
       </footer>
     </div>
     <script type="module" src="/renderer.ts"></script>

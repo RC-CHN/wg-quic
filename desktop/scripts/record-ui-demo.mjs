@@ -96,6 +96,10 @@ try {
   caption("概览：先看连接状态，再看流量和对端。所有网络状态均为演示数据。");
   await pause(3500);
   await page.screenshot({ path: path.join(output, "overview-light.png") });
+  caption("对端卡片：分别查看接收、发送与累计流量；公钥旁即可复制，握手时间按当前语言显示。");
+  await page.locator('.peer-handshake').scrollIntoViewIfNeeded();
+  await pause(2600);
+  await page.screenshot({ path: path.join(output, "peer-card.png") });
   caption("导入配置后自动选中新隧道，是否连接由你决定。");
   await click("#import-config");
   await pause(2200);

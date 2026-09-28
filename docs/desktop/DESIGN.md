@@ -44,3 +44,10 @@ available; they must never force a horizontal page scrollbar.
 - Test minimum 920 × 620 and default 1180 × 760 windows, both languages/themes,
   long names, multiple peers, empty/search states, errors and keyboard operation.
   Screenshots use synthetic fixtures; no production credentials or private data.
+
+Peer cards label receive and send rates separately from their cumulative byte
+counters. Missing samples show a measuring state; a measured zero remains zero.
+The copy action sits beside a shortened public key (both ends retained). Handshake
+age uses the selected language; the exact local timestamp is available on hover.
+Typography uses shared sizes and colors for titles, values, labels and secondary
+information. Brand slogans and redundant introductory labels are omitted.

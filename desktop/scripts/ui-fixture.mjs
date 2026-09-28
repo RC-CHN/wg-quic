@@ -6,6 +6,7 @@ export function installUIFixture() {
   const configuration = `# wg-quic: congestion = auto\n# wg-quic: fec = auto\n# wg-quic: obfs = salamander\n[Interface]\nPrivateKey = ${privateKey}\nAddress = 10.24.0.2/32\n[Peer]\nPublicKey = ${publicKey}\nAllowedIPs = 10.24.0.0/16\nEndpoint = vpn.example.com:51820\n`;
   const status = (name) => ({
     interface: name,
+    observation_id: `demo-${name}-${Date.now()}`,
     state: "up",
     listen_port: 51820,
     carrier: "quic",
@@ -28,6 +29,7 @@ export function installUIFixture() {
     peers: [
       {
         public_key: publicKey,
+        generation: 1,
         endpoint: "vpn.example.com:51820",
         session: "established",
         latest_handshake: Math.floor(Date.now() / 1000),
@@ -55,6 +57,7 @@ export function installUIFixture() {
     name,
     configPath: `/etc/wg-quic/${name}.conf`,
     running,
+    sampledAt: Date.now(),
     statusState: running ? "up" : "inactive",
     ...(running ? { status: status(name) } : {}),
   });
@@ -76,6 +79,18 @@ export function installUIFixture() {
     failSave: false,
   };
   const getSnapshot = () => {
+    const now = Date.now();
+    for (const item of state.snapshot.tunnels) {
+      if (!item.running || !item.status) continue;
+      const seconds = Math.max(0, now - item.sampledAt) / 1000;
+      const rx = Math.round(seconds * 256000),
+        tx = Math.round(seconds * 64000);
+      item.status.stats.wg_rx_bytes += rx;
+      item.status.stats.wg_tx_bytes += tx;
+      item.status.peers[0].transfer_rx += rx;
+      item.status.peers[0].transfer_tx += tx;
+      item.sampledAt = now;
+    }
     state.snapshot.refreshedAt = String(Date.now());
     return structuredClone(state.snapshot);
   };
@@ -100,7 +115,9 @@ export function installUIFixture() {
         if (state.failSave) {
           state.failSave = false;
           throw Error(
-            document.documentElement.lang.startsWith("zh") ? "演示：配置暂时无法保存，草稿已保留，请重试。" : "Demo: configuration could not be saved. Your draft is kept; try again.",
+            document.documentElement.lang.startsWith("zh")
+              ? "演示：配置暂时无法保存，草稿已保留，请重试。"
+              : "Demo: configuration could not be saved. Your draft is kept; try again.",
           );
         }
         state.configurations[args.name] = args.contents;
