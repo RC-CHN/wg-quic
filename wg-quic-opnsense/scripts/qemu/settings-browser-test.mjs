@@ -110,6 +110,65 @@ try {
     await page.locator('#reconfigureAct').click();
     await page.locator('#wg-quic-apply-results').getByText('saveFailed',{exact:true}).waitFor();
     assert.equal(requests.length,4,'failed saves must not apply');
+    for (const script of ['jquery.qrcode.js','qrcode.js']) {
+        await page.addScriptTag({path:path.join(core, 'src/opnsense/www/js', script)});
+    }
+    await page.evaluate(() => {
+        const names = ['endpoint','peer_dns','name','pubkey','privkey','address','psk','tunneladdress','keepalive'];
+        const fields = names.map(name=>'<tr><td><input id="configbuilder.'+name+'"></td></tr>').join('');
+        $('body').append('<form id="frm_config_builder"><table><tr><td><select id="configbuilder.servers"><option value="a">A</option><option value="b">B</option></select></td></tr>'+fields+'<tr><td><textarea id="configbuilder.output"></textarea></td><td></td><td></td></tr><tr><td><span id="configbuilder.store_btn"></span></td></tr></table></form><button id="btn_configbuilder_save"></button>');
+        WgQuicSettings.configBuilder(Object.fromEntries(['store','next','choose','loading','loadFailed','noAddress','inherited','saved','saveFailed','unknown','discard','cancel'].map(key=>[key,key])));
+        for (const name of ['pubkey','privkey']) $(document.getElementById('configbuilder.'+name)).val('fixture-key');
+        $(document.getElementById('configbuilder.name')).val('draft-name');
+        $(document.getElementById('configbuilder.tunneladdress')).val('0.0.0.0/0');
+    });
+    const info = {status:'ok', pubkey:'server-key', revision:'revision', address:'10.0.0.2/32', peer_dns:'1.1.1.1', endpoint:'example.com:51820', mtu:'1280', congestion:'model', fec:'off', obfs:'none'};
+    let builderHeld, loadFail = false, builderSave = false;
+    let catchBuilder;
+    await page.route('**/api/wireguardquic/client/get_server_info/*', async route => {
+        if (catchBuilder) { const callback=catchBuilder;catchBuilder=null;callback(route);return; }
+        await route.fulfill({json:loadFail ? {status:'failed'} : info});
+    });
+    const builderRequests=[];
+    await page.route('**/api/wireguardquic/client/add_client_builder', async route => {
+        builderRequests.push(route.request().postData());
+        await route.fulfill({json:builderSave ? {result:'saved',uuid:'created'} : {result:'failed'}});
+    });
+    const choose = id=>page.evaluate(id=>$(document.getElementById('configbuilder.servers')).val(id).trigger('change'),id);
+    const config=page.locator('[id="configbuilder.output"]');
+    const builder=page.locator('#btn_configbuilder_save');
+    await choose('a');
+    await page.waitForFunction(()=>document.getElementById('configbuilder.output').value.includes('obfs = none'));
+    assert.match(await config.inputValue(),/congestion = model/);
+    const caughtBuilder=new Promise(resolve=>{catchBuilder=route=>{builderHeld=route;resolve();};});
+    await choose('a'); await caughtBuilder; await choose('b');
+    await page.waitForFunction(()=>document.getElementById('configbuilder.output').value.includes('obfs = none'));
+    await builderHeld.fulfill({json:{...info,pubkey:'WRONG',obfs:'salamander'}});
+    await page.waitForTimeout(100);
+    assert.ok(!(await config.inputValue()).includes('WRONG'));
+    loadFail=true; await choose('a');
+    await page.getByText('loadFailed',{exact:true}).waitFor();
+    assert.equal(await config.inputValue(),'');
+    assert.equal(await builder.isDisabled(),true);
+    assert.equal(await page.locator('[id="configbuilder.name"]').inputValue(),'draft-name');
+    loadFail=false; await choose('b');
+    await page.waitForFunction(()=>document.getElementById('configbuilder.output').value.includes('obfs = none'));
+    await page.locator('[id="configbuilder.endpoint"]').fill('override.example:443');
+    const draft=await config.inputValue();
+    await builder.click();
+    await page.locator('#builder-notice').getByText('saveFailed',{exact:true}).waitFor();
+    assert.equal(await config.inputValue(),draft);
+    assert.equal(await builder.isDisabled(),false);
+    builderSave=true; await builder.click();
+    await page.getByText('saved',{exact:true}).waitFor();
+    assert.equal(await config.inputValue(),draft);
+    assert.equal(await builder.isDisabled(),true);
+    assert.ok(builderRequests.every(body=>body.includes('revision')));
+    assert.ok(!requests.some(request=>request.url.includes('/server/set_server')));
+    // Starting the next peer is explicit; cancelling preserves private material.
+    await page.getByRole('button',{name:'next',exact:true}).click();
+    await page.locator('.bootstrap-dialog .btn').filter({hasText:'cancel'}).click();
+    assert.equal(await config.inputValue(),draft);
     assert.deepEqual(errors, []);
     console.log('OPNsense inherited transport browser interactions passed');
 } finally {

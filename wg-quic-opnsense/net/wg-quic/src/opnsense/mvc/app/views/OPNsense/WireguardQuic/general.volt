@@ -34,7 +34,7 @@ $(document).ready(function() {
             ajaxGet('/api/wireguardquic/client/list_servers', {}, function(data) {
                 if (data.rows !== undefined) {
                     data.rows.forEach(function(row) {
-                        $('#server_filter').append($('<option/>').val(row.uuid).html(row.name));
+                        $('#server_filter').append($('<option/>').val(row.uuid).text(row.name));
                     });
                     $('#server_filter').selectpicker('refresh');
                 }
@@ -122,141 +122,24 @@ $(document).ready(function() {
     });
 
     $('#control_label_configbuilder\\.psk').append($('#pskgen_cb_div').detach().show());
-    $('#pskgen_cb').click(function() {
-        ajaxGet('/api/wireguardquic/client/psk', {}, function(data) {
-            if (data.status === 'ok') {
-                $('#configbuilder\\.psk').val(data.psk).change();
-            }
-        });
+    const configBuilder = WgQuicSettings.configBuilder({
+        store: {{ lang._('Store peer') | json_encode() }},
+        next: {{ lang._('New peer') | json_encode() }},
+        choose: {{ lang._('Choose an instance to generate a profile.') | json_encode() }},
+        loading: {{ lang._('Loading instance settings…') | json_encode() }},
+        loadFailed: {{ lang._('Could not load complete instance settings. Select the instance again to retry.') | json_encode() }},
+        noAddress: {{ lang._('This instance has no available peer address. Enter an address explicitly.') | json_encode() }},
+        inherited: {{ lang._('Inherited instance transport') | json_encode() }},
+        saved: {{ lang._('Peer saved. Copy the configuration or scan the QR code before creating the next peer. Apply saved changes to activate it.') | json_encode() }},
+        saveFailed: {{ lang._('Peer was not saved. Your configuration and keys have been kept. Review the errors before retrying.') | json_encode() }},
+        unknown: {{ lang._('The save result is unknown. Check the peer list before creating another peer. Your configuration and keys have been kept.') | json_encode() }},
+        discard: {{ lang._('Start a new peer? Copy the current configuration first; its private key is not stored on this firewall.') | json_encode() }},
+        cancel: {{ lang._('Cancel') | json_encode() }}
     });
-
-    const outputRow = $('#configbuilder\\.output').closest('tr');
-    outputRow.find('td:eq(2)').empty().append($('<div id="qrcode"/>'));
-    $('#configbuilder\\.output').css('max-width', '100%').css('height', '256px').change(function() {
-        $('#qrcode').empty().qrcode($(this).val());
-    });
-
-    $('#configbuilder\\.servers').change(function() {
-        ajaxGet('/api/wireguardquic/client/get_server_info/' + $(this).val(), {}, function(data) {
-            if (data.status === 'ok') {
-                const endpoint = $('#configbuilder\\.endpoint');
-                const peerDns = $('#configbuilder\\.peer_dns');
-                $('#configbuilder\\.address').val(data.address);
-                peerDns.val(data.peer_dns).data('org-value', data.peer_dns);
-                endpoint
-                    .val(data.endpoint)
-                    .data('org-value', data.endpoint)
-                    .data('mtu', data.mtu)
-                    .data('pubkey', data.pubkey)
-                    .data('congestion', data.congestion || 'auto')
-                    .data('fec', data.fec || 'auto')
-                    .data('obfs', data.obfs || 'salamander')
-                    .change();
-            }
-        });
-    });
-
-    $('#configbuilder\\.store_btn').replaceWith($('#btn_configbuilder_save'));
-    $('#btn_configbuilder_save').click(function() {
-        const instanceId = $('#configbuilder\\.servers').val();
-        const endpoint = $('#configbuilder\\.endpoint');
-        const peerDns = $('#configbuilder\\.peer_dns');
-        const peer = {
-            configbuilder: {
-                enabled: '1',
-                name: $('#configbuilder\\.name').val(),
-                pubkey: $('#configbuilder\\.pubkey').val(),
-                psk: $('#configbuilder\\.psk').val(),
-                tunneladdress: $('#configbuilder\\.address').val(),
-                keepalive: $('#configbuilder\\.keepalive').val(),
-                server: instanceId,
-                endpoint: endpoint.val()
-            }
-        };
-        ajaxCall('/api/wireguardquic/client/add_client_builder', peer, function(data) {
-            if (data.validations) {
-                if (data.validations['configbuilder.tunneladdress']) {
-                    data.validations['configbuilder.address'] =
-                        data.validations['configbuilder.tunneladdress'];
-                    delete data.validations['configbuilder.tunneladdress'];
-                }
-                handleFormValidation('frm_config_builder', data.validations);
-            } else if (
-                endpoint.val() !== endpoint.data('org-value') ||
-                peerDns.val() !== peerDns.data('org-value')
-            ) {
-                ajaxCall(
-                    '/api/wireguardquic/server/set_server/' + instanceId,
-                    {server: {endpoint: endpoint.val(), peer_dns: peerDns.val()}},
-                    configBuilderNew
-                );
-            } else {
-                configBuilderNew();
-            }
-        });
-    });
-
-    $('input[id ^= "configbuilder\\."]').change(configBuilderUpdate);
-    $('select[id ^= "configbuilder\\."]').change(configBuilderUpdate);
-
-    function configBuilderNew() {
-        mapDataToFormUI({
-            'frm_config_builder': '/api/wireguardquic/client/get_client_builder'
-        }).done(function() {
-            formatTokenizersUI();
-            $('.selectpicker').selectpicker('refresh');
-            ajaxGet('/api/wireguardquic/server/key_pair', {}, function(data) {
-                if (data.status === 'ok') {
-                    $('#configbuilder\\.pubkey').val(data.pubkey);
-                    $('#configbuilder\\.privkey').val(data.privkey).change();
-                }
-            });
-            $('#configbuilder\\.tunneladdress').val('0.0.0.0/0,::/0');
-            clearFormValidation('frm_config_builder');
-        });
-    }
-
-    function configBuilderUpdate() {
-        const rows = ['[Interface]'];
-        rows.push('PrivateKey = ' + $('#configbuilder\\.privkey').val());
-        if ($('#configbuilder\\.address').val()) {
-            rows.push('Address = ' + $('#configbuilder\\.address').val());
-        }
-        if ($('#configbuilder\\.peer_dns').val()) {
-            rows.push('DNS = ' + $('#configbuilder\\.peer_dns').val());
-        }
-        if ($('#configbuilder\\.endpoint').data('mtu')) {
-            rows.push('MTU = ' + $('#configbuilder\\.endpoint').data('mtu'));
-        }
-        rows.push(
-            '# wg-quic: congestion = ' +
-            ($('#configbuilder\\.endpoint').data('congestion') || 'auto')
-        );
-        rows.push(
-            '# wg-quic: fec = ' +
-            ($('#configbuilder\\.endpoint').data('fec') || 'auto')
-        );
-        rows.push(
-            '# wg-quic: obfs = ' +
-            ($('#configbuilder\\.endpoint').data('obfs') || 'salamander')
-        );
-        rows.push('', '[Peer]');
-        rows.push('# wg-quic: peer.fec-latency = balanced');
-        rows.push('PublicKey = ' + $('#configbuilder\\.endpoint').data('pubkey'));
-        if ($('#configbuilder\\.psk').val()) {
-            rows.push('PresharedKey = ' + $('#configbuilder\\.psk').val());
-        }
-        rows.push('Endpoint = ' + $('#configbuilder\\.endpoint').val());
-        rows.push('AllowedIPs = ' + $('#configbuilder\\.tunneladdress').val());
-        if ($('#configbuilder\\.keepalive').val()) {
-            rows.push('PersistentKeepalive = ' + $('#configbuilder\\.keepalive').val());
-        }
-        $('#configbuilder\\.output').val(rows.join('\n')).change();
-    }
 
     $('a[data-toggle="tab"]').on('shown.bs.tab', function(event) {
         if (event.target.id === 'tab_configbuilder') {
-            configBuilderNew();
+            configBuilder.open();
         } else if (event.target.id === 'tab_peers') {
             $('#{{clientGrid["table_id"]}}').bootgrid('reload');
         } else if (event.target.id === 'tab_instances') {

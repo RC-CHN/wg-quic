@@ -289,3 +289,10 @@ the instance link opens the correct editor, apply reports `restart_required`,
 a changed configuration rejects an old confirmation, and a fresh confirmation
 restarts successfully. A subsequent apply succeeds without restarting. The
 operation lock is close-on-exec so a launched supervisor cannot retain it.
+
+The generator regression also checks out-of-order instance replies, failed
+loads and saves, stale instance revisions, profile-only endpoint/DNS overrides,
+retention of keys/output after saving and across tab switches, and cancelling
+creation of the next peer. Native model coverage verifies that partial peer
+updates and rejected updates preserve memberships, and generator creation
+attaches its peer in the same validated configuration save.

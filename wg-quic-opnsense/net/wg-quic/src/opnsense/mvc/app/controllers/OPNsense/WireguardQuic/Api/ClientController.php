@@ -160,12 +160,28 @@ class ClientController extends ApiMutableModelControllerBase
                 'configbuilder.servers' => gettext('Select an existing instance before generating a peer.'),
             ]];
         }
+        $server = (new Server())->getNodeByReference('servers.server.' . $serverId);
+        if (isset($input['revision']) && (!is_string($input['revision']) ||
+            !hash_equals($this->builderRevision($server), $input['revision']))) {
+            return ['result' => 'failed', 'validations' => [
+                'configbuilder.servers' => gettext('Instance settings changed. Select the instance again to refresh the profile before saving.'),
+            ]];
+        }
         $uuid = $this->getModel()->clients->generateUUID();
         $result = $this->setBase('configbuilder', 'clients.client', $uuid);
         if (($result['result'] ?? '') === 'saved') {
             $result['uuid'] = $uuid;
         }
         return $result;
+    }
+
+    private function builderRevision($server)
+    {
+        $values = [];
+        foreach (['pubkey', 'endpoint', 'peer_dns', 'mtu', 'congestion', 'fec', 'obfs', 'tunneladdress', 'peers'] as $key) {
+            $values[$key] = (string)$server->$key;
+        }
+        return hash('sha256', json_encode($values));
     }
 
     public function getServerInfoAction($uuid = null)
@@ -186,6 +202,7 @@ class ClientController extends ApiMutableModelControllerBase
             $result['congestion'] = (string)$node->congestion;
             $result['fec'] = (string)$node->fec;
             $result['obfs'] = (string)$node->obfs;
+            $result['revision'] = $this->builderRevision($node);
             $subnets = [];
             $usedAddresses = [];
 

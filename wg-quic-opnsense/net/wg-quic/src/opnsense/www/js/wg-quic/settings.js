@@ -154,5 +154,136 @@ window.WgQuicSettings = (() => {
             $('#change_message_base_form').show();
         });
     }
-    return {peerTransport, applyWorkflow};
+    function configBuilder(text) {
+        const field = (name) => $(document.getElementById('configbuilder.' + name));
+        const form = $('#frm_config_builder');
+        const save = $('#btn_configbuilder_save').text(text.store);
+        field('store_btn').replaceWith(save);
+        const next = $('<button type="button" class="btn btn-default"/>').text(text.next).insertAfter(save);
+        const notice = $('<div id="builder-notice" role="status" aria-live="polite"/>').insertBefore(save);
+        const transport = $('<p id="builder-transport"/>').insertAfter(field('servers'));
+        const output = field('output').prop('readonly', true).css({'max-width':'100%', height:'256px'});
+        output.closest('tr').find('td:eq(2)').empty().append($('<div id="qrcode"/>'));
+        let opened = false, busy = false, saved = false, uncertain = false, serial = 0, instance = null;
+        function message(value) { notice.text(value); }
+        function update() {
+            const ready = instance && !busy && field('privkey').val() && field('pubkey').val() && field('address').val() && field('endpoint').val();
+            save.prop('disabled', !ready || saved || uncertain || !field('name').val());
+            next.prop('disabled', busy);
+            const rows = [];
+            if (ready) {
+                rows.push('[Interface]', 'PrivateKey = ' + field('privkey').val(), 'Address = ' + field('address').val());
+                if (field('peer_dns').val()) rows.push('DNS = ' + field('peer_dns').val());
+                if (instance.mtu) rows.push('MTU = ' + instance.mtu);
+                for (const key of ['congestion', 'fec', 'obfs']) rows.push('# wg-quic: ' + key + ' = ' + instance[key]);
+                rows.push('', '[Peer]', '# wg-quic: peer.fec-latency = balanced', 'PublicKey = ' + instance.pubkey);
+                if (field('psk').val()) rows.push('PresharedKey = ' + field('psk').val());
+                rows.push('Endpoint = ' + field('endpoint').val(), 'AllowedIPs = ' + field('tunneladdress').val());
+                if (field('keepalive').val()) rows.push('PersistentKeepalive = ' + field('keepalive').val());
+            }
+            // Preserve a completed profile while a save is in flight.
+            if (!busy) {
+                output.val(rows.join('\n'));
+                $('#qrcode').empty();
+                if (rows.length) $('#qrcode').qrcode(output.val());
+            }
+        }
+        function lock(value) {
+            busy = value;
+            form.find('input,select').prop('disabled', value || saved || uncertain);
+            $('#pskgen_cb').prop('disabled', value || saved || uncertain);
+            form.find('select.selectpicker').selectpicker('refresh');
+            update();
+        }
+        function loadInstance() {
+            if (busy) return; // Mapping and selectpicker refresh can emit change while initializing.
+            const request = ++serial;
+            const id = field('servers').val();
+            instance = null;
+            transport.empty();
+            for (const key of ['address','endpoint','peer_dns']) field(key).val('');
+            update();
+            form.find('input').prop('disabled', !!id);
+            if (!id) { message(text.choose); return; }
+            message(text.loading);
+            $.ajax({url:'/api/wireguardquic/client/get_server_info/' + encodeURIComponent(id), dataType:'json', timeout:10000})
+                .done((data) => {
+                    if (request !== serial) return;
+                    if (data.status !== 'ok' || !data.pubkey || !data.revision ||
+                        !['auto','reno','cubic','model'].includes(data.congestion) ||
+                        !['auto','off'].includes(data.fec) || !['none','salamander'].includes(data.obfs)) {
+                        message(text.loadFailed); return;
+                    }
+                    instance = data;
+                    for (const key of ['address','endpoint','peer_dns']) field(key).val(data[key]);
+                    transport.text(text.inherited + ': congestion=' + data.congestion + ', fec=' + data.fec + ', obfs=' + data.obfs);
+                    message(data.address ? '' : text.noAddress);
+                    update();
+                }).fail(() => { if (request === serial) message(text.loadFailed); })
+                .always(() => { if (request === serial) form.find('input').prop('disabled', false); });
+        }
+        $('#pskgen_cb').on('click', () => {
+            if (busy || saved || uncertain) return;
+            const request = serial;
+            $.ajax({url:'/api/wireguardquic/client/psk', dataType:'json', timeout:10000}).done((data) => {
+                if (request === serial && !busy && !saved && !uncertain && data.status === 'ok') field('psk').val(data.psk).trigger('change');
+            });
+        });
+        field('servers').on('change', loadInstance);
+        form.on('input change', 'input,select', update);
+        save.on('click', () => {
+            if (save.prop('disabled')) return;
+            clearFormValidation('frm_config_builder');
+            const payload = {configbuilder:{enabled:'1', server:field('servers').val(), revision:instance.revision,
+                name:field('name').val(), pubkey:field('pubkey').val(), psk:field('psk').val(),
+                tunneladdress:field('address').val(), keepalive:field('keepalive').val(), endpoint:field('endpoint').val()}};
+            lock(true);
+            $.ajax({url:'/api/wireguardquic/client/add_client_builder', type:'POST', data:payload, dataType:'json', timeout:15000})
+                .done((data) => {
+                    if (data.result === 'saved' && data.uuid) {
+                        saved = true;
+                        message(text.saved);
+                        $(document).trigger('settings-changed');
+                    } else if (data.result === 'failed') {
+                        const errors = data.validations || {};
+                        if (errors['configbuilder.tunneladdress']) {
+                            errors['configbuilder.address'] = errors['configbuilder.tunneladdress'];
+                            delete errors['configbuilder.tunneladdress'];
+                        }
+                        handleFormValidation('frm_config_builder', errors);
+                        message(text.saveFailed);
+                    } else { uncertain = true; message(text.unknown); }
+                }).fail(() => { uncertain = true; message(text.unknown); })
+                .always(() => lock(false));
+        });
+        function reset() {
+            serial++;
+            instance = null;
+            saved = false;
+            uncertain = false;
+            output.val('');
+            $('#qrcode').empty();
+            transport.empty();
+            lock(true);
+            message(text.loading);
+            mapDataToFormUI({'frm_config_builder':'/api/wireguardquic/client/get_client_builder'}).done((data) => {
+                if (!data.frm_config_builder?.configbuilder) { lock(false); message(text.loadFailed); return; }
+                formatTokenizersUI();
+                form.find('select.selectpicker').selectpicker('refresh');
+                field('tunneladdress').val('0.0.0.0/0,::/0');
+                field('privkey').val('');
+                field('pubkey').val('');
+                clearFormValidation('frm_config_builder');
+                $.ajax({url:'/api/wireguardquic/server/key_pair', dataType:'json', timeout:10000})
+                    .done((data) => {
+                        if (data.status === 'ok') { field('pubkey').val(data.pubkey); field('privkey').val(data.privkey); }
+                    }).always(() => { lock(false); loadInstance(); });
+            }).fail(() => { lock(false); message(text.loadFailed); });
+        }
+        next.on('click', () => {
+            if (!busy) stdDialogConfirm(text.next, text.discard, text.next, text.cancel, reset);
+        });
+        return {open() { if (!opened) { opened = true; reset(); } }};
+    }
+    return {peerTransport, applyWorkflow, configBuilder};
 })();

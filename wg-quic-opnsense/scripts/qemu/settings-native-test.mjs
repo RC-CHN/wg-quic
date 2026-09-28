@@ -29,12 +29,16 @@ try {
  for (const id of ['', 'missing', '00000000-0000-0000-0000-000000000000']) {
    assert.equal((await api('client/add_client_builder',{configbuilder:{server:id}})).result,'failed');
  }
+ const contextInfo=await api('client/get_server_info/'+server.uuid,{},true);
  const keys=await api('server/key_pair',{},true);
  const built=await api('client/add_client_builder',{configbuilder:{server:server.uuid,name:'membership-test',pubkey:keys.pubkey,tunneladdress:'10.66.0.99/32'}});
  assert.equal(built.result,'saved',JSON.stringify(built));
  try {
    const created=(await api('client/search_client')).rows.find(x=>x.uuid===built.uuid);
    assert.ok(created.servers.includes(server.uuid),'generator attaches the new peer atomically');
+   const stale=await api('client/add_client_builder',{configbuilder:{server:server.uuid,revision:contextInfo.revision}});
+   assert.equal(stale.result,'failed');
+   assert.ok(stale.validations['configbuilder.servers'].includes('changed'));
  } finally { await api('client/del_client/'+built.uuid); }
  console.log('Partial updates, failed validation and generated peer membership passed');
 
@@ -70,6 +74,30 @@ try {
  assert.equal(restarted.instances[0].code,'restarted');
  const again=await api('service/reconfigure');
  assert.equal(again.status,'ok', JSON.stringify(again));
+ await page.locator('#tab_configbuilder').click();
+ await page.locator('#builder-transport').getByText('Inherited instance transport',{exact:false}).waitFor();
+ await page.locator('[id="configbuilder.name"]').fill('browser-generated-test');
+ await page.locator('[id="configbuilder.endpoint"]').fill('override.example:443');
+ await page.locator('[id="configbuilder.peer_dns"]').fill('9.9.9.9');
+ await page.locator('[id="configbuilder.address"]').fill('10.66.0.98/32');
+ const output=page.locator('[id="configbuilder.output"]');
+ const profile=await output.inputValue();
+ assert.match(profile,/# wg-quic: obfs =/);
+ assert.ok(!profile.includes('undefined'));
+ const instanceBefore=await api('client/get_server_info/'+server.uuid,{},true);
+ await page.locator('#btn_configbuilder_save').click();
+ await page.getByText('Peer saved. Copy the configuration',{exact:false}).waitFor();
+ assert.equal(await output.inputValue(),profile);
+ const instanceAfter=await api('client/get_server_info/'+server.uuid,{},true);
+ assert.equal(instanceAfter.endpoint,instanceBefore.endpoint);
+ assert.equal(instanceAfter.peer_dns,instanceBefore.peer_dns);
+ await page.locator('#tab_peers').click();
+ await page.locator('#tab_configbuilder').click();
+ assert.equal(await output.inputValue(),profile,'switching tabs retains the generated key');
+ const generated=(await api('client/search_client')).rows.find(x=>x.name==='browser-generated-test');
+ assert.ok(generated);
+ await api('client/del_client/'+generated.uuid);
+ console.log('Native generator preserves profile, guards stale settings and leaves shared defaults intact');
  assert.deepEqual(errors,[]);
  console.log('Native OPNsense readonly transport, deep link, restart gating, stale confirmation and actual restart passed');
 }finally{await browser.close();}
