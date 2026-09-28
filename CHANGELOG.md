@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.4.0 - 2026-09-28
+
+Desktop redesign and consistent OPNsense localization.
+
+- Reorganize the desktop into a searchable tunnel list, connection overview,
+  and separate diagnostics. Unify light/dark typography, spacing and controls;
+  remove redundant slogans and decoration.
+- Guide configuration editing with local/remote sections, optional advanced
+  settings, field-level errors, draft state and visible save actions. Preserve
+  drafts on failures and require confirmation before regenerating a private key.
+- Label peer receive/send rates separately from cumulative counters, distinguish
+  missing observations from measured zero, localize handshake times, and keep
+  copy actions next to public keys without losing focus during refresh.
+- Add a shared Simplified Chinese catalog for OPNsense forms, options, validation,
+  runtime status and dashboard text. Keep user data, API machine values and
+  generated protocol directives unchanged.
+- Improve plugin dialog scrolling, table spacing and status column defaults.
+  Fix dashboard zero counters, disabled-state links, and stale messages/peers
+  remaining after the observed state changes.
+- Extend real browser and native desktop interaction checks, responsive
+  English/Chinese layout coverage, and reproducible UI demo recording. Verify
+  both OPNsense languages in a disposable guest with actual framework widgets.
+
 ## v0.3.8 - 2026-09-28
 
 OPNsense configuration reliability and independent protocol interoperability.

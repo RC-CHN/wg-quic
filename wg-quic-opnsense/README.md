@@ -66,19 +66,19 @@ ABI metadata matches the guest:
 
 ```sh
 cd /usr/plugins/net/wg-quic
-make PLUGIN_VERSION=0.3.8 lint
-make PLUGIN_VERSION=0.3.8 package
+make PLUGIN_VERSION=0.4.0 lint
+make PLUGIN_VERSION=0.4.0 package
 ```
 
 The repository build and QEMU helpers inject this value from the monorepo
 `VERSION` file automatically; it is only required when invoking the OPNsense
 plugin framework directly.
 
-Version 0.3.8 targets OPNsense 26.1/FreeBSD 14 amd64 and
+Version 0.4.0 targets OPNsense 26.1/FreeBSD 14 amd64 and
 OPNsense 26.7/FreeBSD 15 amd64. Install a matching private package with:
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.3.8-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.4.0-opnsense-26.7-amd64.pkg
 ```
 
 Remove it with `pkg delete os-wg-quic`.
