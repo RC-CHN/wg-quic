@@ -58,3 +58,8 @@ built renderer with mouse/keyboard input. File dialogs, network transitions,
 and configuration writes use an isolated fixture. No production configurations,
 credentials or actual traffic appear. The fixture and recording utilities are
 not imported by the application bundle.
+
+The final peer-card recording also shows independent send/receive rates and
+counters. The fixture advances observations and counters with elapsed time;
+measured zero, unknown status and focus retention are separately exercised by
+the renderer status smoke test. The recording uses no production tunnel.
