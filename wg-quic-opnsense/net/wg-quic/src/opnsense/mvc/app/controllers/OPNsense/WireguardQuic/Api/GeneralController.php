@@ -11,6 +11,8 @@ use OPNsense\Base\ApiMutableModelControllerBase;
 
 class GeneralController extends ApiMutableModelControllerBase
 {
+    use \OPNsense\WireguardQuic\LocalizedApi;
+
     protected static $internalModelClass = '\OPNsense\WireguardQuic\General';
     protected static $internalModelName = 'general';
 }

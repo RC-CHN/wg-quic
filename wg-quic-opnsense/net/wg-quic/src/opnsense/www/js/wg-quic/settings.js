@@ -38,7 +38,7 @@ window.WgQuicSettings = (() => {
             selected.forEach((row) => {
                 const tr = $('<tr/>');
                 tr.append($('<td/>').text(row.name + ' (' + row.interface + ')' + (row.enabled ? '' : ' — ' + text.disabled)));
-                [row.congestion, row.fec, row.obfs].forEach((value) => tr.append($('<td/>').text(value)));
+                [row.congestion, row.fec, row.obfs].forEach((value) => tr.append($('<td/>').text(text.modes?.[value] || value)));
                 const link = $('<a target="_blank" rel="noopener"/>')
                     .attr('href', '/ui/wireguardquic/general#instances&edit=' + encodeURIComponent(row.uuid))
                     .text(text.editNewTab);
@@ -216,7 +216,7 @@ window.WgQuicSettings = (() => {
                     }
                     instance = data;
                     for (const key of ['address','endpoint','peer_dns']) field(key).val(data[key]);
-                    transport.text(text.inherited + ': congestion=' + data.congestion + ', fec=' + data.fec + ', obfs=' + data.obfs);
+                    transport.text(text.inherited + ' · ' + ['congestion', 'fec', 'obfs'].map((key) => text[key] + ': ' + (text.modes?.[data[key]] || data[key])).join(' · '));
                     message(data.address ? '' : text.noAddress);
                     update();
                 }).fail(() => { if (request === serial) message(text.loadFailed); })

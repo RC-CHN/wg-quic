@@ -7,7 +7,7 @@
 
 namespace OPNsense\WireguardQuic;
 
-class LogController extends \OPNsense\Base\IndexController
+class LogController extends UiControllerBase
 {
     public function indexAction()
     {

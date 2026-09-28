@@ -15,6 +15,8 @@ use OPNsense\WireguardQuic\Server;
 
 class ServiceController extends ApiMutableServiceControllerBase
 {
+    use \OPNsense\WireguardQuic\LocalizedApi;
+
     protected static $internalServiceClass = '\OPNsense\WireguardQuic\General';
     protected static $internalServiceTemplate = 'OPNsense/WireguardQuic';
     protected static $internalServiceEnabled = 'enabled';

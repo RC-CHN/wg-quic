@@ -6,7 +6,15 @@
  #}
 
 <script>
+
 $(document).ready(function() {
+    const transportLabels = {
+        auto: {{ lang._('Automatic') | json_encode() }},
+        off: {{ lang._('Disabled') | json_encode() }},
+        none: {{ lang._('Disabled') | json_encode() }},
+        model: {{ lang._('Delivery model') | json_encode() }},
+        cubic: 'CUBIC', reno: 'Reno', salamander: 'Salamander'
+    };
     mapDataToFormUI({'frm_general_settings': '/api/wireguardquic/general/get'}).done(function() {
         formatTokenizersUI();
         $('.selectpicker').selectpicker('refresh');
@@ -53,6 +61,7 @@ $(document).ready(function() {
     });
 
     WgQuicSettings.peerTransport('{{clientGrid["edit_dialog_id"]}}', {
+        modes: transportLabels,
         title: {{ lang._('Transport settings — inherited from instances') | json_encode() }},
         scope: {{ lang._('Congestion control, FEC and obfuscation are read-only here. Edit the owning instance to change them for all of its peers.') | json_encode() }},
         unassigned: {{ lang._('This peer is not assigned to an instance. No instance transport settings apply yet.') | json_encode() }},
@@ -123,6 +132,10 @@ $(document).ready(function() {
 
     $('#control_label_configbuilder\\.psk').append($('#pskgen_cb_div').detach().show());
     const configBuilder = WgQuicSettings.configBuilder({
+        modes: transportLabels,
+        congestion: {{ lang._('Congestion control') | json_encode() }},
+        fec: {{ lang._('FEC') | json_encode() }},
+        obfs: {{ lang._('Obfuscation') | json_encode() }},
         store: {{ lang._('Store peer') | json_encode() }},
         next: {{ lang._('New peer') | json_encode() }},
         choose: {{ lang._('Choose an instance to generate a profile.') | json_encode() }},

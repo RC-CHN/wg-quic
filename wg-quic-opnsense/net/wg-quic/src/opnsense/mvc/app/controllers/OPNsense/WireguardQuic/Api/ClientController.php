@@ -17,6 +17,8 @@ use OPNsense\WireguardQuic\Server;
 
 class ClientController extends ApiMutableModelControllerBase
 {
+    use \OPNsense\WireguardQuic\LocalizedApi;
+
     protected static $internalModelName = 'client';
     protected static $internalModelClass = '\OPNsense\WireguardQuic\Client';
 

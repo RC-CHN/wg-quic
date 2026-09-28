@@ -296,3 +296,36 @@ retention of keys/output after saving and across tab switches, and cancelling
 creation of the next peer. Native model coverage verifies that partial peer
 updates and rejected updates preserve memberships, and generator creation
 attaches its peer in the same validated configuration save.
+
+### Plugin language and presentation review
+
+The plugin uses one catalog at `src/opnsense/www/js/wg-quic/locales/zh.json`.
+PHP views, static form metadata, option labels, browser validation messages and
+the dashboard use that vocabulary. The system/user language still comes from
+OPNsense; unsupported languages fall back to the existing core translations.
+Configuration values, peer names, keys and generated profile directives are never
+translated. External API clients retain the original machine responses.
+
+`check-static.sh` checks translation coverage and placeholder preservation. In a
+disposable guest, run `php translation-test.php` from `scripts/qemu` to check
+escaping, option values, user text and English fallback. After copying source
+files directly, clear only this plugin's cached Volt templates under
+`/var/lib/php/cache` before reviewing.
+Review both English and Simplified Chinese at 1440×1000 and 1024×768: peer and
+instance dialogs, full help, generated profiles, validation errors, status and
+the dashboard. Check that Save/Cancel remain visible while the body scrolls.
+
+The automated native UI check uses the existing browser test dependencies:
+
+```sh
+WG_QUIC_BROWSER_MODULES=/path/to/playwright-install \
+OPNSENSE_TEST_URL=https://127.0.0.1:12443 \
+OPNSENSE_STORAGE_STATE=/path/to/authenticated-storage.json \
+WG_QUIC_TEST_LANGUAGE=zh \
+BROWSER_PATH=/path/to/chromium \
+node scripts/qemu/i18n-native-test.mjs
+```
+
+Run again with `WG_QUIC_TEST_LANGUAGE=en` after switching the test user's language.
+This check opens forms and generates an unsaved profile; its dashboard observations
+are synthetic and do not start, stop or change a real tunnel.

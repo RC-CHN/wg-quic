@@ -7,7 +7,7 @@
 
 namespace OPNsense\WireguardQuic;
 
-class StatusController extends \OPNsense\Base\IndexController
+class StatusController extends UiControllerBase
 {
     public function indexAction()
     {

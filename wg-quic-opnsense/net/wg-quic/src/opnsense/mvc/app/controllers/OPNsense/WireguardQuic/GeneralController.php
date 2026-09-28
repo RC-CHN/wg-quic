@@ -7,7 +7,7 @@
 
 namespace OPNsense\WireguardQuic;
 
-class GeneralController extends \OPNsense\Base\IndexController
+class GeneralController extends UiControllerBase
 {
     protected function templateJSIncludes()
     {

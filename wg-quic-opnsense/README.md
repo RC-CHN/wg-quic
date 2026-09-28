@@ -37,11 +37,12 @@ endpoint hostnames, pins endpoint routes, and owns address, route, MTU, DNS,
 and cleanup policy. The plugin adds OPNsense interface registration and CARP
 behavior around that lifecycle.
 
-The status page reads wg-quic's private JSON control interface. It shows QUIC
-session state and aggregate transfer counters without exposing keys. The
-current core schema does not expose WireGuard handshake timestamps or
-per-peer byte counters. Aggregate counters are therefore shown for the
-interface and, when an instance has exactly one peer, for that peer.
+The status page reads wg-quic's private JSON control interface. It distinguishes
+QUIC session state from authenticated peer activity and displays handshake times,
+reconnect progress and transfer counters. Current cores provide per-peer
+observations; older cores retain the single-peer aggregate-counter fallback.
+The UI follows the OPNsense user/system language, with a plugin-owned Simplified
+Chinese catalog for custom forms, options, validation and dashboard text.
 
 ## Build
 

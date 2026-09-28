@@ -1,0 +1,52 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Scoped to plugin pages; inherit the selected OPNsense theme colors. */
+.wg-quic-page .page-content-main { font-size: 14px; line-height: 1.55; }
+.wg-quic-page #maintabs { margin-bottom: 0; }
+.wg-quic-page #maintabs > li > a { padding: 12px 20px; font-weight: 600; }
+.wg-quic-page .content-box { padding: 20px; }
+.wg-quic-page .bootgrid-header { margin: 0 0 16px; }
+.wg-quic-page .bootgrid-footer { margin-top: 16px; }
+.wg-quic-page .content-box .table > thead > tr > th { padding: 12px; font-weight: 600; }
+.wg-quic-page .content-box .table > tbody > tr > td { padding: 12px; vertical-align: middle; }
+.wg-quic-page .bootgrid-header .actionBar { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.wg-quic-page .bootgrid-header .actionBar > * { margin: 0; }
+.wg-quic-page .modal-dialog { width: min(940px, calc(100% - 32px)); margin: 80px auto 24px; }
+.wg-quic-page .modal-content { display: flex; flex-direction: column; max-height: calc(100vh - 104px); }
+.wg-quic-page .modal-header, .wg-quic-page .modal-footer { flex-shrink: 0; }
+.wg-quic-page .modal-title { font-size: 18px; font-weight: 600; line-height: 1.5; }
+.wg-quic-page .modal-header, .wg-quic-page .modal-footer { padding: 16px 24px; }
+.wg-quic-page .modal-body { padding: 16px 24px; min-height: 0; overflow-y: auto; }
+.wg-quic-page .table > tbody > tr > td { line-height: 1.55; }
+.wg-quic-page .modal-body form > .table-responsive > table > tbody > tr > td,
+.wg-quic-page #frm_config_builder > .table-responsive > table > tbody > tr > td { padding: 10px 8px; vertical-align: top; }
+.wg-quic-page .control-label { font-weight: 600; font-size: 14px; }
+.wg-quic-page .form-control, .wg-quic-page .bootstrap-select > .btn { min-height: 36px; font-size: 14px; }
+.wg-quic-page .btn { min-height: 36px; }
+.wg-quic-page .btn-xs { min-width: 30px; min-height: 30px; }
+.wg-quic-page .help-block, .wg-quic-page .help-block small { font-size: 13px; line-height: 1.6; }
+.wg-quic-page .alert { padding: 16px; line-height: 1.6; }
+.wg-quic-page .alert > strong { display: block; font-size: 14px; margin-bottom: 8px; }
+.wg-quic-page .alert p { margin: 8px 0; }
+.wg-quic-page #peer-transport-settings { margin: 8px 0; overflow-x: auto; }
+.wg-quic-page #peer-transport-settings table { margin: 12px 0; font-size: 13px; }
+.wg-quic-page #peer-transport-settings th, .wg-quic-page #peer-transport-settings td { padding: 8px; }
+.wg-quic-page #builder-transport { margin: 12px 0 0; line-height: 1.6; }
+.wg-quic-page #builder-notice:empty { display: none; }
+.wg-quic-page #builder-notice { margin: 0 0 12px; font-weight: 500; }
+.wg-quic-page #btn_configbuilder_save { margin-right: 8px; }
+.wg-quic-page #frm_config_builder textarea { font-family: monospace; font-size: 13px; line-height: 1.6; }
+.wg-quic-page #frm_general_settings { margin-top: 20px; padding-top: 16px; border-top: 1px solid #9996; }
+.wg-quic-page #wg-quic-apply-results { margin-top: 16px; }
+.wg-quic-page .wg-quic-status { overflow-x: auto; }
+.wg-quic-page .wg-quic-status .bootgrid-table td { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+    .wg-quic-page .content-box { padding: 12px; }
+    .wg-quic-page .modal-header, .wg-quic-page .modal-body, .wg-quic-page .modal-footer { padding: 12px; }
+    .wg-quic-page #maintabs > li > a { padding: 10px 12px; }
+}
+
+/* Support both native table and Tabulator rendering. */
+.wg-quic-page .tabulator { font-size: 14px; }
+.wg-quic-page .tabulator-row .tabulator-cell { padding: 10px 12px; line-height: 1.5; }
+.wg-quic-page .tabulator-col .tabulator-col-content { padding: 10px 12px; font-weight: 600; }
+.wg-quic-page .tabulator-header .tabulator-col-title { white-space: normal; }

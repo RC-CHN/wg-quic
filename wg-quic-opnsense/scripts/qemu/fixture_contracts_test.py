@@ -109,7 +109,7 @@ class FixtureContractsTest(unittest.TestCase):
         self.assertIn('data-column-id="last-activity-epoch"', view)
         self.assertIn('data-column-id="latest-handshake-epoch"', view)
         self.assertIn("row.endpoint", widget)
-        self.assertIn("row['last-activity-epoch']", widget)
+        self.assertIn("row['last-activity']", widget)
 
     def test_quic_session_alone_does_not_mark_peer_online(self):
         classify = STATUS_HELPER.classify_peer_status
@@ -138,7 +138,7 @@ class FixtureContractsTest(unittest.TestCase):
         self.assertIn("'next-reconnect'", controller)
         self.assertIn('data-column-id="reconnect-attempts"', view)
         self.assertIn('data-column-id="reconnect-failures"', view)
-        self.assertIn("row['next-reconnect-epoch']", view)
+        self.assertIn("row['next-reconnect']", view)
 
     def test_activity_preserves_direction_and_old_core_fallback(self):
         derive = STATUS_HELPER.derive_activity
