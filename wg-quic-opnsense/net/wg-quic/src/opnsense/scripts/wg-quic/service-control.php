@@ -252,7 +252,7 @@ try {
         case 'web-apply':
         case 'web-query':
         case 'web-restart':
-            require_once(__DIR__ . '/web-apply.php');
+            require_once(dirname(__DIR__, 2) . '/mvc/app/library/OPNsense/WireguardQuic/WebApply.php');
             // Serialize web mutations; a concurrent restart must not race an
             // apply or bypass the confirmation token's runtime comparison.
             // Close on exec: the launched supervisor must not retain this lock.
