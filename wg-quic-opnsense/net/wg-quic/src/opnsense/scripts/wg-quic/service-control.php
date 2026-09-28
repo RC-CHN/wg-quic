@@ -249,6 +249,26 @@ $servers = wireguardquic_servers($uuid);
 
 try {
     switch ($action) {
+        case 'web-apply':
+        case 'web-query':
+        case 'web-restart':
+            require_once(__DIR__ . '/web-apply.php');
+            // Serialize web mutations; a concurrent restart must not race an
+            // apply or bypass the confirmation token's runtime comparison.
+            // Close on exec: the launched supervisor must not retain this lock.
+            $lock = fopen('/var/run/wg-quic-web-apply.lock', 'ce');
+            if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+                throw new RuntimeException('Another configuration operation is in progress.');
+            }
+            // Legacy interface hooks can print progress. Keep the API envelope JSON-only.
+            ob_start();
+            try {
+                $reply = wireguardquic_web_apply($servers, $general, substr($action, 4), $argv[3] ?? '');
+            } finally {
+                ob_end_clean();
+            }
+            echo json_encode($reply) . "\n";
+            break;
         case 'start':
             if ((string)$general->enabled !== '1') {
                 throw new RuntimeException('wg-quic is disabled');
@@ -340,6 +360,11 @@ try {
     }
 } catch (Throwable $error) {
     syslog(LOG_ERR, $error->getMessage());
-    fwrite(STDERR, $error->getMessage() . "\n");
+    if (str_starts_with($action, 'web-')) {
+        echo json_encode(['status' => 'failed', 'result' => 'failed', 'message' => $error->getMessage(), 'instances' => []]) . "\n";
+        exit(0); // configd script_output must preserve the structured failure reply.
+    } else {
+        fwrite(STDERR, $error->getMessage() . "\n");
+    }
     exit(1);
 }

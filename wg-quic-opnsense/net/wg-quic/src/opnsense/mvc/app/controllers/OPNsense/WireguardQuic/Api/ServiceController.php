@@ -9,6 +9,7 @@ namespace OPNsense\WireguardQuic\Api;
 
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\Core\Config;
 use OPNsense\WireguardQuic\Client;
 use OPNsense\WireguardQuic\Server;
 
@@ -19,16 +20,60 @@ class ServiceController extends ApiMutableServiceControllerBase
     protected static $internalServiceEnabled = 'enabled';
     protected static $internalServiceName = 'wireguardquic';
 
+    private function prepareConfiguration($backend)
+    {
+        $backend->configdRun('interface invoke registration');
+        return trim($backend->configdRun('template reload ' . escapeshellarg(static::$internalServiceTemplate))) === 'OK';
+    }
+
+    private function applyReply($output)
+    {
+        $payload = json_decode(trim($output), true);
+        if (!is_array($payload) || !isset($payload['status'], $payload['instances'])) {
+            return ['status' => 'failed', 'result' => 'failed', 'instances' => [],
+                'message' => gettext('The operation result is unavailable. Check instance status before trying again.')];
+        }
+        return $payload;
+    }
+
     public function reconfigureAction()
     {
         if (!$this->request->isPost()) {
-            return ['result' => 'failed'];
+            return ['status' => 'failed', 'result' => 'failed'];
         }
+        Config::getInstance()->lock();
         $backend = new Backend();
-        $backend->configdRun('interface invoke registration');
-        $backend->configdRun('template reload ' . escapeshellarg(static::$internalServiceTemplate));
-        $backend->configdpRun('wireguardquic configure');
-        return ['result' => 'ok'];
+        if (!$this->prepareConfiguration($backend)) {
+            return ['status' => 'failed', 'result' => 'failed', 'instances' => [],
+                'message' => gettext('Configuration generation failed. The saved settings have not been applied.')];
+        }
+        return $this->applyReply($backend->configdRun('wireguardquic web_apply'));
+    }
+
+    public function queryApplyAction($uuid)
+    {
+        $requestId = $this->request->getPost('request_id');
+        if (!$this->request->isPost() || !preg_match('/^[0-9a-f-]{36}$/i', $uuid) ||
+            !is_string($requestId) || !preg_match('/^[0-9a-f]{32}$/', $requestId)) {
+            return ['status' => 'failed', 'result' => 'failed', 'instances' => []];
+        }
+        return $this->applyReply((new Backend())->configdpRun('wireguardquic web_query', [$uuid, $requestId]));
+    }
+
+    public function restartInstanceAction($uuid)
+    {
+        $token = $this->request->getPost('restart_token');
+        if (!$this->request->isPost() || !preg_match('/^[0-9a-f-]{36}$/i', $uuid) ||
+            !is_string($token) || !preg_match('/^[0-9a-f]{64}$/', $token)) {
+            return ['status' => 'failed', 'result' => 'failed', 'instances' => []];
+        }
+        Config::getInstance()->lock();
+        $backend = new Backend();
+        if (!$this->prepareConfiguration($backend)) {
+            return ['status' => 'failed', 'result' => 'failed', 'instances' => [],
+                'message' => gettext('Configuration generation failed. The instance was not restarted.')];
+        }
+        return $this->applyReply($backend->configdpRun('wireguardquic web_restart', [$uuid, $token]));
     }
 
     public function showAction()

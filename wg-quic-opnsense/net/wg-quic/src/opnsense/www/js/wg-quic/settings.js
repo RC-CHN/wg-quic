@@ -71,5 +71,88 @@ window.WgQuicSettings = (() => {
         modal.on('hidden.bs.modal', () => { serial++; });
         $(window).on('focus', () => { if (modal.hasClass('in')) refresh(); });
     }
-    return {peerTransport};
+    function applyWorkflow(text) {
+        const button = $('#reconfigureAct').text(text.apply);
+        const panel = $('<div id="wg-quic-apply-results" aria-live="polite"/>').insertAfter(button.closest('section'));
+        let busy = false;
+        let revision = 0;
+        let reports = new Map();
+        function setBusy(value) {
+            busy = value;
+            button.prop('disabled', value).text(value ? text.applying : text.apply);
+            panel.find('button').prop('disabled', value);
+        }
+        function render(data, replace) {
+            if (replace) reports = new Map();
+            (data.instances || []).forEach((row) => reports.set(row.uuid, row));
+            panel.empty();
+            if (data.message) panel.append($('<div class="alert alert-warning"/>').text(data.message));
+            if (!reports.size && data.status !== 'ok' && !data.message) {
+                panel.append($('<div class="alert alert-warning"/>').text(text.unknown));
+            }
+            reports.forEach((row) => {
+                const ok = row.state === 'applied' && !row.cleanup_pending;
+                const card = $('<div class="alert"/>').addClass(ok ? 'alert-success' : 'alert-warning');
+                card.append($('<strong/>').text(row.name + ' (' + row.interface + ')'),
+                    $('<p/>').text(text[row.state] || text.unknown));
+                if (row.cleanup_pending) card.append($('<p/>').text(text.cleanup));
+                if (row.message) card.append($('<p/>').text(row.message));
+                if (row.restart_reasons?.length) card.append($('<p/>').text(row.restart_reasons.join('; ')));
+                if (row.state === 'restart_required' && row.restart_token) {
+                    card.append($('<button type="button" class="btn btn-warning"/>').text(text.restart + ' ' + row.interface).on('click', () => {
+                        if (busy) return;
+                        stdDialogConfirm(text.restart, text.restartWarning.replace('{instance}', row.name + ' (' + row.interface + ')').replace('{count}', row.peer_count), text.restart, text.cancel, () => {
+                            run('/api/wireguardquic/service/restart_instance/' + encodeURIComponent(row.uuid), {restart_token: row.restart_token}, false);
+                        });
+                    }));
+                } else if (row.state === 'unknown' && row.request_id) {
+                    card.append($('<button type="button" class="btn btn-default"/>').text(text.query).on('click', () => {
+                        run('/api/wireguardquic/service/query_apply/' + encodeURIComponent(row.uuid), {request_id: row.request_id}, false);
+                    }));
+                }
+                panel.append(card);
+            });
+            const pending = [...reports.values()].some((row) => row.state !== 'applied' || row.cleanup_pending);
+            $('#change_message_base_form').toggle(pending || data.status !== 'ok');
+        }
+        function run(url, payload, replace) {
+            if (busy) return;
+            setBusy(true);
+            const submittedRevision = revision;
+            $.ajax({url, type: 'POST', data: payload, dataType: 'json', timeout: 130000})
+                .done((data) => {
+                    if (submittedRevision !== revision) return;
+                    if (typeof data?.status !== 'string' || !Array.isArray(data.instances)) {
+                        render({status:'failed', instances:[], message:text.unknown}, true);
+                    } else render(data, replace);
+                }).fail(() => {
+                    if (submittedRevision !== revision) return;
+                    // Do not automatically retry a mutation after a lost reply.
+                    render({status:'failed', instances:[], message:text.unknown}, true);
+                }).always(() => setBusy(false));
+        }
+        button.on('click', () => {
+            if (busy) return;
+            setBusy(true);
+            saveFormToEndpoint('/api/wireguardquic/general/set', 'frm_general_settings', (data) => {
+                setBusy(false);
+                if (data?.result !== 'saved') {
+                    render({status:'failed', instances:[], message:text.saveFailed}, false);
+                    return;
+                }
+                run('/api/wireguardquic/service/reconfigure', {}, true);
+            }, true, () => {
+                setBusy(false);
+                render({status:'failed', instances:[], message:text.saveFailed}, false);
+            });
+        });
+        $(document).on('settings-changed', () => {
+            // Any saved edit invalidates an earlier restart confirmation.
+            revision++;
+            reports = new Map();
+            panel.empty();
+            $('#change_message_base_form').show();
+        });
+    }
+    return {peerTransport, applyWorkflow};
 })();

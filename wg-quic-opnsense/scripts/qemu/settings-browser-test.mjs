@@ -27,7 +27,7 @@ try {
         await route.fulfill({status: fail ? 500 : 200, json: {status: 'ok', rows}});
     });
     await page.goto('http://fixture.test/');
-    for (const script of ['jquery-3.5.1.min.js', 'bootstrap.min.js', 'bootstrap-select.js', 'opnsense.js']) {
+    for (const script of ['jquery-3.5.1.min.js', 'bootstrap.min.js', 'bootstrap-select.js', 'bootstrap-dialog.min.js', 'opnsense.js', 'opnsense_ui.js']) {
         await page.addScriptTag({path: path.join(core, 'src/opnsense/www/js', script)});
     }
     await page.addScriptTag({path: path.join(root, 'net/wg-quic/src/opnsense/www/js/wg-quic/settings.js')});
@@ -73,6 +73,43 @@ try {
     await page.waitForTimeout(100);
     assert.match(await panel.innerText(), /cubic/);
     assert.equal(await page.locator('[id="client.name"]').inputValue(), 'draft');
+    // Saving, applying and restarting are separate, observable user actions.
+    await page.evaluate(() => {
+        $('body').append('<form id="frm_general_settings"><input id="general.enabled" value="1"></form><section><button id="reconfigureAct"></button><div id="change_message_base_form"></div></section>');
+        WgQuicSettings.applyWorkflow(Object.fromEntries(['apply','applying','applied','restart_required','failed','unknown','cleanup','restart','restartWarning','cancel','query','saveFailed'].map((key) => [key, key])));
+    });
+    const requests = [];
+    let saveOK = true;
+    let applyState = 'restart_required';
+    const report = (state) => ({uuid:'a', name:'A', interface:'quic0', peer_count:2, state, restart_token:'token', request_id:'original-request'});
+    await page.route('**/api/wireguardquic/general/set', (route) => route.fulfill({json: saveOK ? {result:'saved'} : {result:'failed',validations:{'general.enabled':'invalid'}}}));
+    await page.route('**/api/wireguardquic/service/**', async (route) => {
+        requests.push({url:route.request().url(),body:route.request().postData()});
+        const state = route.request().url().endsWith('/reconfigure') ? applyState : 'applied';
+        await route.fulfill({json:{status:state === 'applied' ? 'ok' : 'attention',instances:[report(state)]}});
+    });
+    await page.locator('#reconfigureAct').click();
+    const restart = page.getByRole('button', {name:'restart quic0',exact:true});
+    await restart.waitFor();
+    assert.equal(requests.length, 1);
+    await restart.click();
+    await page.getByRole('button', {name:'cancel',exact:true}).click();
+    assert.equal(requests.length, 1, 'cancel must never restart');
+    await restart.click();
+    await page.locator('.bootstrap-dialog').getByRole('button', {name:'restart',exact:true}).click();
+    await page.locator('#wg-quic-apply-results').getByText('applied',{exact:true}).waitFor();
+    assert.match(requests[1].url, /restart_instance\/a$/);
+    assert.equal(requests[1].body,'restart_token=token');
+    applyState = 'unknown';
+    await page.locator('#reconfigureAct').click();
+    await page.getByRole('button',{name:'query',exact:true}).click();
+    await page.locator('#wg-quic-apply-results').getByText('applied',{exact:true}).waitFor();
+    assert.match(requests[3].url,/query_apply\/a$/);
+    assert.equal(requests[3].body,'request_id=original-request');
+    saveOK = false;
+    await page.locator('#reconfigureAct').click();
+    await page.locator('#wg-quic-apply-results').getByText('saveFailed',{exact:true}).waitFor();
+    assert.equal(requests.length,4,'failed saves must not apply');
     assert.deepEqual(errors, []);
     console.log('OPNsense inherited transport browser interactions passed');
 } finally {

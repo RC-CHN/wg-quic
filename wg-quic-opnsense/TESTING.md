@@ -265,3 +265,27 @@ OPNSENSE_CORE_SRC=/path/to/opnsense-core \
 BROWSER_PATH=/path/to/chromium \
 node wg-quic-opnsense/scripts/qemu/settings-browser-test.mjs
 ```
+
+### Saved configuration and restart confirmation
+
+`settings-browser-test.mjs` also covers save validation, explicit restart
+confirmation/cancellation and querying the original uncertain operation ID.
+`settings-native-test.mjs` exercises native models, configd and an actual instance
+restart. It requires a disposable guest with at least one enabled instance and
+one peer, and an authenticated Playwright storage state. It changes that
+fixture's congestion mode. Never run it against a deployed firewall.
+
+```sh
+WG_QUIC_DISPOSABLE_VM=1 \
+OPNSENSE_TEST_URL=https://127.0.0.1:12443 \
+OPNSENSE_STORAGE_STATE=/tmp/opnsense-storage.json \
+WG_QUIC_BROWSER_MODULES=/tmp/wg-quic-opnsense-browser \
+BROWSER_PATH=/path/to/chromium \
+node scripts/qemu/settings-native-test.mjs
+```
+
+Verified against a disposable OPNsense 26.7 guest: peer settings are read-only,
+the instance link opens the correct editor, apply reports `restart_required`,
+a changed configuration rejects an old confirmation, and a fresh confirmation
+restarts successfully. A subsequent apply succeeds without restarting. The
+operation lock is close-on-exec so a launched supervisor cannot retain it.

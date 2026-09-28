@@ -82,16 +82,19 @@ $(document).ready(function() {
         ))
     );
 
-    $('#reconfigureAct').SimpleActionButton({
-        onPreAction: function() {
-            const deferred = new $.Deferred();
-            saveFormToEndpoint('/api/wireguardquic/general/set', 'frm_general_settings', function() {
-                deferred.resolve();
-            }, true, function() {
-                deferred.reject();
-            });
-            return deferred;
-        }
+    WgQuicSettings.applyWorkflow({
+        apply: {{ lang._('Apply saved changes') | json_encode() }},
+        applying: {{ lang._('Applying…') | json_encode() }},
+        applied: {{ lang._('Saved settings applied.') | json_encode() }},
+        restart_required: {{ lang._('Settings are saved but are not active yet. This instance needs a restart.') | json_encode() }},
+        failed: {{ lang._('Application failed. Review the error before trying again.') | json_encode() }},
+        unknown: {{ lang._('The result could not be confirmed. Check the instance status or query the original operation; do not assume the change failed.') | json_encode() }},
+        cleanup: {{ lang._('The change was applied but resource cleanup is still pending.') | json_encode() }},
+        restart: {{ lang._('Restart instance') | json_encode() }},
+        restartWarning: {{ lang._('Restart {instance}? This interrupts every connection on this instance ({count} configured peers). Other instances will not be restarted. Remote profiles must be updated separately when obfuscation changes.') | json_encode() }},
+        cancel: {{ lang._('Cancel') | json_encode() }},
+        query: {{ lang._('Check operation result') | json_encode() }},
+        saveFailed: {{ lang._('Settings could not be saved. Nothing further was applied.') | json_encode() }}
     });
 
     $('#control_label_server\\.pubkey').append($('#keygen_div').detach().show());
