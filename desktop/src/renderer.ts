@@ -94,7 +94,14 @@ function showToast(message: string, kind: 'ok' | 'error' = 'ok'): void {
   if (toastTimer) {
     clearTimeout(toastTimer);
   }
-  toast.textContent = message;
+  const copy = document.createElement('span');
+  copy.textContent = message;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '×';
+  close.setAttribute('aria-label', t('Dismiss notification'));
+  close.addEventListener('click', () => { clearTimeout(toastTimer); toast.classList.add('hidden'); });
+  toast.replaceChildren(copy, close);
   toast.className = `toast ${kind}`;
   toastTimer = setTimeout(() => {
     toast.classList.add('hidden');
@@ -1139,7 +1146,17 @@ byId('form-peer-select').addEventListener('change', (event) => {
 byId('form-generate-key').addEventListener('click', () =>
   void generateKeyIntoForm(),
 );
-byId('tunnel-form-fields').addEventListener('input', updateEditorGuidance);
+byId('tunnel-form-fields').addEventListener('input', () => {
+  updateEditorGuidance();
+  if (!formDraft || formSourceMode || !formErrors.length) return;
+  const invalid = validateTunnelDraft(readFormIntoDraft(), formMode === 'new');
+  const remaining = formErrors.filter((error) => {
+    const source = Object.keys(errorFields).find((message) => error === message || error === t(message));
+    return !source || invalid.includes(source);
+  });
+  if (remaining.length) showFormErrors(remaining, false);
+  else { formErrors = []; clearFieldErrors(); byId('form-errors').classList.add('hidden'); }
+});
 byId('tunnel-form-fields').addEventListener('change', updateEditorGuidance);
 byId('tunnel-form-fields').addEventListener('submit', (event) => {
   event.preventDefault();

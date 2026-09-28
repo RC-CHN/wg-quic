@@ -2,6 +2,7 @@
 // Exercise the built UI in a real Chromium DOM with a fixed native boundary.
 // The packaged smoke separately runs the same interaction checks in WebKit /
 // WebView with the actual snapshot and key-generation commands.
+import { runLayoutSmoke } from './smoke-layout.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -101,6 +102,7 @@ try {
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
     writeFileSync(process.env.WG_QUIC_SMOKE_SCREENSHOT, Buffer.from(data, 'base64'));
   }
+  await runLayoutSmoke(call);
   console.log(result.message);
 } finally {
   child.kill();

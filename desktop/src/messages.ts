@@ -68,6 +68,7 @@ export const chinese: Record<string, string> = {
   "{0} configured": "{0} 个对端",
   'Generate a new private key? After saving, the other peer must use your new public key to reconnect.': '生成新的私钥？保存后，对端需要改用你的新公钥才能重新连接。',
   'Replace tunnel identity?': '更换隧道身份？', 'Generate new key': '生成新密钥', 'Keep existing key': '保留现有密钥',
+  'Dismiss notification': '关闭提示',
   'An operation is in progress. Wait for it to finish before quitting.': '操作正在进行中，请完成后再退出。',
   '{0} tunnel': '{0} 个隧道', '{0} tunnels': '{0} 个隧道', 'Tunnel {0} activated': '隧道 {0} 已启用', 'Tunnel {0} deactivated': '隧道 {0} 已停用',
   'Waiting': '等待连接',

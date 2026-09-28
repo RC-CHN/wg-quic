@@ -58,6 +58,8 @@ export async function runEditorInteractionSmoke(actions: {
     assert((document.getElementById('form-advanced') as HTMLDetailsElement).open, 'invalid advanced field remains collapsed');
     assert(input('form-listen-port').getAttribute('aria-invalid') === 'true', 'invalid input not exposed to assistive technology');
     input('form-listen-port').value = '';
+    input('form-listen-port').dispatchEvent(new Event('input', { bubbles: true }));
+    assert(!input('form-listen-port').hasAttribute('aria-invalid'), 'corrected input retains a stale error');
     window.wgQuic.writeTunnel = async () => { throw new Error('Synthetic save failure'); };
     await actions.saveForm();
     await actions.refresh();

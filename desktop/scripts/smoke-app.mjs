@@ -59,7 +59,7 @@ try {
       child.kill();
       reject(
         new Error(
-          `packaged desktop app did not exit within ${integrationSmoke ? 180 : 20} seconds`,
+          `packaged desktop app did not exit within ${integrationSmoke ? 180 : 20} seconds\n${output.slice(-8192)}`,
         ),
       );
     }, integrationSmoke ? 180_000 : 20_000);
