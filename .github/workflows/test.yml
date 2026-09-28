@@ -8,6 +8,26 @@ permissions:
   contents: read
 
 jobs:
+  protocol-interop:
+    name: Independent Rust protocol interoperability
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install cryptography==46.0.5
+      - run: python tests/protocol/check_vectors.py
+      - run: go test ./internal/transport/fec ./third_party/wireguard-go/device -run StandaloneProtocol -count=1
+      - run: make test-protocol-interop
+
   go:
     runs-on: ubuntu-latest
     steps:

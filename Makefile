@@ -81,3 +81,11 @@ benchmark-bandwidth:
 
 benchmark-protocol:
 	./tests/benchmark/run.sh matrix protocol
+
+.PHONY: test-protocol-interop
+test-protocol-interop:
+	cargo fmt --manifest-path tests/protocol/rust-interop/Cargo.toml --check
+	cargo clippy --manifest-path tests/protocol/rust-interop/Cargo.toml --locked --target-dir build/protocol-rust --all-targets -- -D warnings
+	cargo test --manifest-path tests/protocol/rust-interop/Cargo.toml --locked --target-dir build/protocol-rust
+	cargo build --manifest-path tests/protocol/rust-interop/Cargo.toml --locked --target-dir build/protocol-rust
+	WG_QUIC_RUST_INTEROP="$(CURDIR)/build/protocol-rust/debug/wg-quic-independent-interop" go test ./tests/protocol -run TestIndependentRustInterop -count=1 -v
