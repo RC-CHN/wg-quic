@@ -19,6 +19,25 @@ try {
  const servers=await api('server/search_server');const server=servers.rows[0];
  const peers=await api('client/search_client');const peer=peers.rows[0];
  assert.ok(server.uuid && peer.uuid);
+ const membership = async () => (await api('client/search_client')).rows.find(x=>x.uuid===peer.uuid).servers;
+ const originalMembership = await membership();
+ assert.ok(originalMembership);
+ assert.equal((await api('client/set_client/'+peer.uuid,{client:{name:peer.name}})).result,'saved');
+ assert.deepEqual(await membership(),originalMembership,'partial updates retain instance membership');
+ assert.equal((await api('client/set_client/'+peer.uuid,{client:{pubkey:'invalid!',servers:''}})).result,'failed');
+ assert.deepEqual(await membership(),originalMembership,'failed updates retain instance membership');
+ for (const id of ['', 'missing', '00000000-0000-0000-0000-000000000000']) {
+   assert.equal((await api('client/add_client_builder',{configbuilder:{server:id}})).result,'failed');
+ }
+ const keys=await api('server/key_pair',{},true);
+ const built=await api('client/add_client_builder',{configbuilder:{server:server.uuid,name:'membership-test',pubkey:keys.pubkey,tunneladdress:'10.66.0.99/32'}});
+ assert.equal(built.result,'saved',JSON.stringify(built));
+ try {
+   const created=(await api('client/search_client')).rows.find(x=>x.uuid===built.uuid);
+   assert.ok(created.servers.includes(server.uuid),'generator attaches the new peer atomically');
+ } finally { await api('client/del_client/'+built.uuid); }
+ console.log('Partial updates, failed validation and generated peer membership passed');
+
  const rejected=await api('client/set_client/'+peer.uuid,{client:{fec:'off'}});
  assert.equal(rejected.result,'failed');
  await page.locator('button.command-edit:visible').first().click();

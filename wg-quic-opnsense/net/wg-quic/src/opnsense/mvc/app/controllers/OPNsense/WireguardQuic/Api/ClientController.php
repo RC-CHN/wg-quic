@@ -99,30 +99,41 @@ class ClientController extends ApiMutableModelControllerBase
             }
         }
         $addedUuid = null;
-        if (!empty($this->request->getPost('client')) && $this->request->isPost()) {
-            $servers = array_filter(explode(',', $this->request->getPost('client')['servers'] ?? ''));
-            Config::getInstance()->lock();
-            $model = new Server();
-            if (empty($uuid)) {
-                $uuid = $model->servers->generateUUID();
-                $addedUuid = $uuid;
-            }
-            foreach ($model->servers->server->iterateItems() as $key => $node) {
-                $peers = array_filter(explode(',', (string)$node->peers));
-                if (in_array($uuid, $peers) && !in_array($key, $servers)) {
-                    $node->peers = implode(',', array_diff($peers, [$uuid]));
-                } elseif (!in_array($uuid, $peers) && in_array($key, $servers)) {
-                    $node->peers = implode(',', array_merge($peers, [$uuid]));
-                }
-            }
-            $model->serializeToConfig(false, true);
+        if ($this->request->isPost() && is_array($client) && empty($uuid)) {
+            $uuid = $this->getModel()->clients->generateUUID();
+            $addedUuid = $uuid;
         }
-
         $result = $this->setBase('client', 'clients.client', $uuid);
-        if (!empty($addedUuid) && ($result['result'] ?? '') === 'saved') {
+        if ($addedUuid !== null && ($result['result'] ?? '') === 'saved') {
             $result['uuid'] = $addedUuid;
         }
         return $result;
+    }
+
+    protected function setBaseHook($node)
+    {
+        // The framework calls this only after validation, under the config
+        // lock, immediately before the single durable save of both models.
+        $input = $this->request->getPost('client');
+        $builder = $this->request->getPost('configbuilder');
+        if (is_array($builder)) {
+            $servers = [$builder['server']];
+        } elseif (is_array($input) && array_key_exists('servers', $input)) {
+            $servers = array_filter(explode(',', (string)$input['servers']));
+        } else {
+            return; // A partial update must preserve existing memberships.
+        }
+        $uuid = $node->getAttribute('uuid');
+        $model = new Server();
+        foreach ($model->servers->server->iterateItems() as $key => $server) {
+            $peers = array_filter(explode(',', (string)$server->peers));
+            $peers = array_values(array_diff($peers, [$uuid]));
+            if (in_array($key, $servers, true)) {
+                $peers[] = $uuid;
+            }
+            $server->peers = implode(',', $peers);
+        }
+        $model->serializeToConfig(false, true);
     }
 
     public function toggleClientAction($uuid)
@@ -137,22 +148,24 @@ class ClientController extends ApiMutableModelControllerBase
 
     public function addClientBuilderAction()
     {
-        $uuid = null;
-        if ($this->request->isPost() && !empty($this->request->getPost('configbuilder'))) {
-            Config::getInstance()->lock();
-            $model = new Server();
-            $uuid = $this->getModel()->clients->generateUUID();
-            $server = $this->request->getPost('configbuilder')['server'] ?? '';
-            foreach ($model->servers->server->iterateItems() as $key => $node) {
-                if ($key === $server) {
-                    $peers = array_filter(explode(',', (string)$node->peers));
-                    $node->peers = implode(',', array_merge($peers, [$uuid]));
-                    break;
-                }
-            }
-            $model->serializeToConfig(false, true);
+        $input = $this->request->getPost('configbuilder');
+        if (!$this->request->isPost() || !is_array($input)) {
+            return ['result' => 'failed'];
         }
-        return $this->setBase('configbuilder', 'clients.client', $uuid);
+        Config::getInstance()->lock();
+        $serverId = $input['server'] ?? '';
+        if (!is_string($serverId) || !preg_match('/^[0-9a-f-]{36}$/i', $serverId) ||
+            (new Server())->getNodeByReference('servers.server.' . $serverId) === null) {
+            return ['result' => 'failed', 'validations' => [
+                'configbuilder.servers' => gettext('Select an existing instance before generating a peer.'),
+            ]];
+        }
+        $uuid = $this->getModel()->clients->generateUUID();
+        $result = $this->setBase('configbuilder', 'clients.client', $uuid);
+        if (($result['result'] ?? '') === 'saved') {
+            $result['uuid'] = $uuid;
+        }
+        return $result;
     }
 
     public function getServerInfoAction($uuid = null)
