@@ -30,19 +30,20 @@ env PYTHONPYCACHEPREFIX=/tmp/wg-quic-pycache \
 
 "${project_dir}/scripts/qemu/run_host_interop_test.sh"
 
-find "${plugin_dir}" -name '*.js' -type f -exec sh -c '
-    for source_file do
-        node --check --input-type=module < "${source_file}"
-    done
-' sh {} +
-
-find "${plugin_dir}" -name '*.volt' -type f -exec sh -c '
-    for source_file do
-        sed -n "/<script>/,/<\\/script>/p" "${source_file}" |
-            sed "1d;\$d;s/{{[^}]*}}/TRANSLATED/g" |
-            node --check
-    done
-' sh {} +
+# Fail the check if any template's rendered JavaScript is invalid. Unlike
+# find -exec, subprocess.run(check=True) propagates a child syntax failure.
+python3 - "${plugin_dir}" <<'PYCODE'
+from pathlib import Path
+import re
+import subprocess
+import sys
+for source in Path(sys.argv[1]).rglob('*.js'):
+    subprocess.run(['node', '--check', '--input-type=module'], input=source.read_text(), text=True, check=True)
+for source in Path(sys.argv[1]).rglob('*.volt'):
+    for script in re.findall(r'<script>(.*?)</script>', source.read_text(), re.S):
+        rendered = re.sub(r'{{.*?}}', 'TRANSLATED', script, flags=re.S)
+        subprocess.run(['node', '--check'], input=rendered, text=True, check=True)
+PYCODE
 
 shellcheck "${project_dir}/scripts/build-wg-quic.sh"
 shellcheck "${project_dir}/scripts/build-package-freebsd.sh"
