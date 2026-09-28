@@ -117,6 +117,7 @@ export interface ApplyResult {
 export interface DesktopAPI {
   collectDiagnostics(name: string, peer: string): Promise<{canceled: boolean; path?: string; complete?: boolean; detail?: string}>;
   confirmDiscard(): Promise<boolean>;
+  confirmRegenerate(): Promise<boolean>;
   confirmRestart(name: string): Promise<boolean>;
   apply(name: string, requestId?: string): Promise<ApplyResult>;
   snapshot(selectedName?: string, force?: boolean): Promise<DesktopSnapshot>;

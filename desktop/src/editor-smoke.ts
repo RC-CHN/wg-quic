@@ -21,6 +21,7 @@ export async function runEditorInteractionSmoke(actions: {
   window.wgQuic.confirmDiscard = async () => discard;
   try {
     await actions.startNewTunnel();
+    assert(!actions.formIsDirty(), 'generated initial keys incorrectly trigger a discard prompt');
     const generated = input('form-private-key').value;
     assert(generated.length > 0, 'new tunnel needs a generated key');
     assert(input('form-public-key').value === (await window.wgQuic.derivePublicKey(generated)).trim(), 'own public key does not match the generated private key');
@@ -51,6 +52,12 @@ export async function runEditorInteractionSmoke(actions: {
     assert(!await actions.canQuit(), 'quit ignored keep editing');
 
     input('form-peer-public-key').value = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    input('form-listen-port').value = '70000';
+    await actions.saveForm();
+    assert(document.activeElement === input('form-listen-port'), 'error did not focus its field');
+    assert((document.getElementById('form-advanced') as HTMLDetailsElement).open, 'invalid advanced field remains collapsed');
+    assert(input('form-listen-port').getAttribute('aria-invalid') === 'true', 'invalid input not exposed to assistive technology');
+    input('form-listen-port').value = '';
     window.wgQuic.writeTunnel = async () => { throw new Error('Synthetic save failure'); };
     await actions.saveForm();
     await actions.refresh();

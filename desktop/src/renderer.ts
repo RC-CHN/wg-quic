@@ -5,6 +5,7 @@ import { ConfigurationApplications } from './config-application';
 import { ObservationClock } from './observation-clock';
 import { renderPeers } from './peer-view';
 import { copyText } from './clipboard';
+import { errorFields, routesAllTraffic } from './editor-guidance';
 import {
   completeDesktopSmoke,
   desktopSmokeSettings,
@@ -415,6 +416,44 @@ async function restartTunnel(name: string): Promise<void> {
 
 // === Tunnel form (new/edit) ===
 
+function preserveSelectValue(id: string, value: string): void {
+  const select = byId<HTMLSelectElement>(id);
+  select.querySelectorAll('[data-preserved]').forEach((option) => option.remove());
+  if (!Array.from(select.options).some((option) => option.value === value)) {
+    const option = new Option(value || t('Not specified'), value);
+    option.dataset.preserved = 'true';
+    select.add(option);
+  }
+  select.value = value;
+}
+
+function updateEditorGuidance(): void {
+  if (!formDraft) return;
+  setText('form-draft-state', formBusy ? t('Saving…') : formIsDirty() ? t('Unsaved changes') : formMode === 'new' ? t('New configuration') : t('No changes'));
+  byId('form-draft-state').classList.toggle('dirty', formIsDirty());
+  setText('form-route-hint', routesAllTraffic(byId<HTMLInputElement>('form-allowed-ips').value)
+    ? t('All IPv4 and IPv6 traffic will use this peer.') : t('Only traffic to these networks uses this peer.'));
+  setText('form-fec-hint', byId<HTMLSelectElement>('form-fec').value === 'off'
+    ? t('This tunnel will not send FEC repair packets.')
+    : t('Automatic FEC adapts to packet loss. Both peers must use compatible transport settings.'));
+}
+
+function revealField(id: string): void {
+  const field = byId(id);
+  let parent: HTMLElement | null = field.parentElement;
+  while (parent) {
+    if (parent instanceof HTMLDetailsElement) parent.open = true;
+    parent = parent.parentElement;
+  }
+  field.scrollIntoView({ block: 'center' });
+  field.focus({ preventScroll: true });
+}
+
+function clearFieldErrors(): void {
+  tunnelForm.querySelectorAll('[aria-invalid]').forEach((field) => { field.removeAttribute('aria-invalid'); field.removeAttribute('aria-errormessage'); });
+  tunnelForm.querySelectorAll('.field-error').forEach((field) => field.remove());
+}
+
 function fillFormFromDraft(draft: TunnelDraft): void {
   byId<HTMLInputElement>('form-name').value = draft.name;
   byId<HTMLInputElement>('form-addresses').value = draft.addresses;
@@ -427,9 +466,9 @@ function fillFormFromDraft(draft: TunnelDraft): void {
   byId<HTMLInputElement>('form-preshared-key').value = draft.presharedKey;
   byId<HTMLInputElement>('form-dns').value = draft.dns;
   byId<HTMLInputElement>('form-mtu').value = draft.mtu;
-  byId<HTMLSelectElement>('form-congestion').value = draft.congestion;
-  byId<HTMLSelectElement>('form-fec').value = draft.fec;
-  byId<HTMLSelectElement>('form-obfs').value = draft.obfs;
+  preserveSelectValue('form-congestion', draft.congestion);
+  preserveSelectValue('form-fec', draft.fec);
+  preserveSelectValue('form-obfs', draft.obfs);
 }
 
 function readFormIntoDraft(): TunnelDraft {
@@ -446,7 +485,7 @@ function readFormIntoDraft(): TunnelDraft {
     presharedKey: byId<HTMLInputElement>('form-preshared-key').value,
     dns: byId<HTMLInputElement>('form-dns').value,
     mtu: byId<HTMLInputElement>('form-mtu').value,
-    carrier: 'quic',
+    carrier: formDraft?.carrier || 'quic',
     congestion: byId<HTMLSelectElement>('form-congestion').value,
     fec: byId<HTMLSelectElement>('form-fec').value,
     obfs: byId<HTMLSelectElement>('form-obfs').value,
@@ -481,6 +520,8 @@ function renderForm(): void {
   byId<HTMLInputElement>('form-name').disabled = formMode === 'edit';
   byId('form-errors').classList.add('hidden');
   formErrors = [];
+  clearFieldErrors();
+  updateEditorGuidance();
   void updatePublicKey();
 }
 
@@ -537,6 +578,7 @@ function toggleFormSource(): void {
   formDraft.name = name;
   formSourceMode = !formSourceMode;
   renderForm();
+  revealField(formSourceMode ? 'form-source' : 'form-addresses');
 }
 
 function selectFormPeer(index: number): void {
@@ -547,18 +589,39 @@ function selectFormPeer(index: number): void {
   renderForm();
 }
 
-function showFormErrors(errors: string[]): void {
+function showFormErrors(errors: string[], focus = true): void {
   formErrors = errors;
+  clearFieldErrors();
   const box = byId('form-errors');
-  box.innerHTML = '';
+  box.replaceChildren();
+  const heading = document.createElement('strong');
+  heading.textContent = t('Review these fields before saving');
   const list = document.createElement('ul');
+  let firstField: string | undefined;
   for (const error of errors) {
     const item = document.createElement('li');
-    item.textContent = t(error);
-    list.appendChild(item);
+    const fieldId = Object.entries(errorFields).find(([message]) => error === message || error === t(message))?.[1];
+    if (fieldId && !formSourceMode) {
+      firstField ||= fieldId;
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.textContent = t(error);
+      link.addEventListener('click', () => revealField(fieldId));
+      item.append(link);
+      const field = byId(fieldId);
+      const hint = document.createElement('span');
+      hint.className = 'field-error';
+      hint.id = `${fieldId}-error`;
+      hint.textContent = t(error);
+      field.closest('.form-field')!.append(hint);
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-errormessage', hint.id);
+    } else item.textContent = t(error);
+    list.append(item);
   }
-  box.appendChild(list);
+  box.append(heading, list);
   box.classList.remove('hidden');
+  if (focus) revealField(firstField || 'form-errors');
 }
 
 async function startNewTunnel(): Promise<void> {
@@ -573,12 +636,16 @@ async function startNewTunnel(): Promise<void> {
   if (current) {
     render(current);
   }
+  byId<HTMLInputElement>('form-name').focus();
   try {
     const keys = await window.wgQuic.generateKeys();
     const field = byId<HTMLInputElement>('form-private-key');
     if (formDraft && formRevision === revision && !formSourceMode && !field.value) {
       field.value = keys.private_key;
       setPublicKey(keys.public_key);
+      // Only the generated default is clean; keep any edits made during IPC dirty.
+      formOriginal = buildConf({ ...emptyTunnelDraft(''), privateKey: keys.private_key });
+      updateEditorGuidance();
     }
   } catch (error) {
     showToast(t("Generate keys failed: {0}", errorMessage(error)), 'error');
@@ -601,6 +668,7 @@ async function startEditTunnel(name: string): Promise<void> {
     if (current) {
       render(current);
     }
+    revealField('form-addresses');
   } catch (error) {
     showToast(t("Read tunnel failed: {0}", errorMessage(error)), 'error');
   }
@@ -610,6 +678,7 @@ async function cancelForm(): Promise<void> {
   if (!await canLeaveForm()) return;
   dismissForm();
   if (current) render(current);
+  (selectedName ? byId('edit-tunnel') : byId('new-tunnel')).focus();
 }
 
 function dismissForm(): void {
@@ -629,12 +698,15 @@ function clearFormSecrets(): void {
 async function generateKeyIntoForm(): Promise<void> {
   const revision = formRevision;
   const previous = byId<HTMLInputElement>('form-private-key').value;
+  if (previous && !await window.wgQuic.confirmRegenerate()) return;
+  if (!formDraft || revision !== formRevision || formBusy) return;
   try {
     const keys = await window.wgQuic.generateKeys();
     const field = byId<HTMLInputElement>('form-private-key');
     if (formDraft && revision === formRevision && !formBusy && !formSourceMode && field.value === previous) {
       field.value = keys.private_key;
       setPublicKey(keys.public_key);
+      updateEditorGuidance();
     }
   } catch (error) {
     showToast(t("Generate keys failed: {0}", errorMessage(error)), 'error');
@@ -660,6 +732,10 @@ async function saveForm(): Promise<void> {
   const saveButton = byId<HTMLButtonElement>('form-save');
   saveButton.disabled = true;
   formBusy = true;
+  saveButton.textContent = t('Saving…');
+  saveButton.setAttribute('aria-busy', 'true');
+  byId<HTMLButtonElement>('form-source-toggle').disabled = true;
+  updateEditorGuidance();
   byId<HTMLFieldSetElement>('form-controls').disabled = true;
   byId<HTMLButtonElement>('form-cancel').disabled = true;
   try {
@@ -687,6 +763,10 @@ async function saveForm(): Promise<void> {
   } finally {
     saveButton.disabled = false;
     formBusy = false;
+    saveButton.textContent = t('Save & validate');
+    saveButton.setAttribute('aria-busy', 'false');
+    byId<HTMLButtonElement>('form-source-toggle').disabled = false;
+    updateEditorGuidance();
     byId<HTMLFieldSetElement>('form-controls').disabled = false;
     byId<HTMLButtonElement>('form-cancel').disabled = false;
   }
@@ -996,7 +1076,8 @@ byId('language-select').addEventListener('change', () => {
     setText('form-title', formMode === 'new' ? t('Create tunnel') : t('Edit {0}', formDraft.name));
     setText('form-source-toggle', formSourceMode ? t('Use form') : t('Edit source'));
     for (const option of Array.from(byId<HTMLSelectElement>('form-peer-select').options)) option.textContent = t('Peer {0}', Number(option.value) + 1);
-    if (formErrors.length) showFormErrors(formErrors);
+    if (formErrors.length) showFormErrors(formErrors, false);
+    updateEditorGuidance();
   }
   if (current) render(current);
 });
@@ -1058,6 +1139,8 @@ byId('form-peer-select').addEventListener('change', (event) => {
 byId('form-generate-key').addEventListener('click', () =>
   void generateKeyIntoForm(),
 );
+byId('tunnel-form-fields').addEventListener('input', updateEditorGuidance);
+byId('tunnel-form-fields').addEventListener('change', updateEditorGuidance);
 byId('tunnel-form-fields').addEventListener('submit', (event) => {
   event.preventDefault();
   void saveForm();
@@ -1070,6 +1153,7 @@ byId('open-directory').addEventListener('click', async () => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && formDraft) { event.preventDefault(); void saveForm(); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'o') {
     event.preventDefault();
     void importTunnel();

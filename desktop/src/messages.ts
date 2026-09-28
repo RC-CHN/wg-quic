@@ -1,6 +1,16 @@
 // English source messages remain the fallback. Values supplied by the user
 // (names, paths, keys and native diagnostic details) are never translated.
 export const chinese: Record<string, string> = {
+  "Not specified": "未指定",
+  "Saving…": "正在保存…",
+  "New configuration": "新配置",
+  "No changes": "尚无修改",
+  "All IPv4 and IPv6 traffic will use this peer.": "所有 IPv4 和 IPv6 流量都将经过此对端。",
+  "This tunnel will not send FEC repair packets.": "本隧道将不发送 FEC 纠错数据。",
+  "Automatic FEC adapts to packet loss. Both peers must use compatible transport settings.": "自动纠错会根据丢包调整；两端需要兼容的传输设置。",
+  "Review these fields before saving": "请检查以下内容后再保存",
+  "Save configuration (Ctrl+S)": "保存配置（Ctrl+S）",
+  "Endpoint must include a host and a port from 1 to 65535.": "端点需包含主机和端口，端口范围为 1–65535。",
   "Private connections, clearly.": "连接与状态，一目了然。",
   "Tunnels": "隧道",
   "Search tunnels": "搜索隧道",
@@ -56,6 +66,8 @@ export const chinese: Record<string, string> = {
   "Saving does not start or interrupt a connection.": "保存不会自动连接或中断当前连接。",
   "Ctrl+O import · Ctrl+R refresh": "Ctrl+O 导入 · Ctrl+R 刷新",
   "{0} configured": "{0} 个对端",
+  'Generate a new private key? After saving, the other peer must use your new public key to reconnect.': '生成新的私钥？保存后，对端需要改用你的新公钥才能重新连接。',
+  'Replace tunnel identity?': '更换隧道身份？', 'Generate new key': '生成新密钥', 'Keep existing key': '保留现有密钥',
   'An operation is in progress. Wait for it to finish before quitting.': '操作正在进行中，请完成后再退出。',
   '{0} tunnel': '{0} 个隧道', '{0} tunnels': '{0} 个隧道', 'Tunnel {0} activated': '隧道 {0} 已启用', 'Tunnel {0} deactivated': '隧道 {0} 已停用',
   'Waiting': '等待连接',

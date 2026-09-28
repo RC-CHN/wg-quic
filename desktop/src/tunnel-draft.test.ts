@@ -198,3 +198,18 @@ test('switching peers commits the current projection without losing prior edits'
   assert.equal(parseConf(final).keepalive, '20');
   assert.equal(parseConf(final, 1).keepalive, '30');
 });
+
+test('endpoint errors are caught before saving without requiring outgoing endpoints', () => {
+  const draft = emptyTunnelDraft('office');
+  draft.privateKey = PRIVATE;
+  draft.addresses = '10.0.0.2/32';
+  draft.peerPublicKey = PEER;
+  for (const endpoint of ['', 'vpn.example:443', '[2001:db8::1]:51820', '192.0.2.1:1234']) {
+    draft.endpoint = endpoint;
+    assert.deepEqual(validateTunnelDraft(draft, true), [], endpoint);
+  }
+  for (const endpoint of ['vpn.example', 'vpn.example:0', 'vpn.example:65536', 'https://vpn.example:443', '2001:db8::1:443']) {
+    draft.endpoint = endpoint;
+    assert.ok(validateTunnelDraft(draft, true).some((error) => error.startsWith('Endpoint must')), endpoint);
+  }
+});

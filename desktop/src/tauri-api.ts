@@ -44,6 +44,9 @@ const api: DesktopAPI = {
     title: t('Restart tunnel?'), kind: 'warning', okLabel: t('Restart'), cancelLabel: t('Keep running'),
   }),
   apply: (name, requestId) => invoke<ApplyResult>('apply_tunnel', { name, requestId }),
+  confirmRegenerate: () => ask(t('Generate a new private key? After saving, the other peer must use your new public key to reconnect.'), {
+    title: t('Replace tunnel identity?'), kind: 'warning', okLabel: t('Generate new key'), cancelLabel: t('Keep existing key'),
+  }),
   confirmDiscard: () => ask(t('Discard unsaved changes to this configuration?'), {
     title: t('Unsaved changes'), kind: 'warning', okLabel: t('Discard'), cancelLabel: t('Keep editing'),
   }),

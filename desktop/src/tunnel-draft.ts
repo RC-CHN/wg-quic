@@ -242,6 +242,11 @@ export function validateTunnelDraft(draft: TunnelDraft, isNew: boolean): string[
   if (!KEY_PATTERN.test(draft.peerPublicKey.trim())) {
     errors.push('Peer public key must be a base64 WireGuard key.');
   }
+  const endpoint = draft.endpoint.trim();
+  const endpointParts = /^(?:\[[^\]\s]+\]|[^:\s/\\?#]+):(\d+)$/.exec(endpoint);
+  if (endpoint && (!endpointParts || Number(endpointParts[1]) < 1 || Number(endpointParts[1]) > 65535)) {
+    errors.push('Endpoint must include a host and a port from 1 to 65535.');
+  }
   if (draft.presharedKey.trim() && !KEY_PATTERN.test(draft.presharedKey.trim())) {
     errors.push('Preshared key must be a base64 WireGuard key.');
   }

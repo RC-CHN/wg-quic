@@ -225,3 +225,10 @@ footer { height: 28px; flex-shrink: 0; display: flex; justify-content: space-bet
   .spinning { animation: refresh-pulse 1s ease-in-out infinite; }
   @keyframes refresh-pulse { 50% { opacity: .35; } }
 }
+.draft-state { display: inline-block; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.draft-state.dirty { color: var(--amber); }
+.tunnel-form .detail-summary { margin-top: 3px; }
+.field-error { color: var(--red); font-size: 12px; }
+[aria-invalid="true"] { border-color: var(--red); }
+.form-errors strong { display: block; margin-bottom: 8px; }
+.form-errors button { padding: 3px 0; border: 0; background: transparent; text-align: left; text-decoration: underline; color: inherit; font-size: 13px; }
