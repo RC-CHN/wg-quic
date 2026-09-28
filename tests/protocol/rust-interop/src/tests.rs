@@ -1,6 +1,6 @@
 use super::*;
 fn document() -> Value {
-    let text = include_str!("../../../../docs/WG-QUIC-PROTOCOL.md");
+    let text = include_str!("../../../../docs/WG-QUIC-PROTOCOL.md").replace("\r\n", "\n");
     serde_json::from_str(
         text.split_once("```json\n")
             .unwrap()

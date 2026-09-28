@@ -19,6 +19,7 @@ func TestStandaloneProtocolFECVectors(t *testing.T) {
 			Close, Feedback              string
 		}
 	}
+	document = bytes.ReplaceAll(document, []byte("\r\n"), []byte("\n"))
 	block := bytes.SplitN(document, []byte("```json\n"), 2)
 	if len(block) != 2 {
 		t.Fatal("missing protocol vectors")

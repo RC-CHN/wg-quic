@@ -35,6 +35,17 @@ jobs:
             REQUESTED_VERSION=$GITHUB_REF_NAME
           fi
           ./scripts/release-version.sh "$REQUESTED_VERSION"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Verify standalone protocol and independent Rust interoperability
+        run: |
+          python -m pip install cryptography==46.0.5
+          python tests/protocol/check_vectors.py
+          make test-protocol-interop
       - run: ./scripts/check-no-reference-deps.sh
       - name: In-repository quic-go tests
         working-directory: third_party/quic-go
