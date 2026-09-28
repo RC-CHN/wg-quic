@@ -48,8 +48,39 @@ $(document).ready(function() {
         set: '/api/wireguardquic/server/set_server/',
         add: '/api/wireguardquic/server/add_server/',
         del: '/api/wireguardquic/server/del_server/',
-        toggle: '/api/wireguardquic/server/toggle_server/'
+        toggle: '/api/wireguardquic/server/toggle_server/',
+        options: {triggerEditFor: /^[0-9a-f-]{36}$/i.test(getUrlHash('edit') || '') ? getUrlHash('edit') : null}
     });
+
+    WgQuicSettings.peerTransport('{{clientGrid["edit_dialog_id"]}}', {
+        title: {{ lang._('Transport settings — inherited from instances') | json_encode() }},
+        scope: {{ lang._('Congestion control, FEC and obfuscation are read-only here. Edit the owning instance to change them for all of its peers.') | json_encode() }},
+        unassigned: {{ lang._('This peer is not assigned to an instance. No instance transport settings apply yet.') | json_encode() }},
+        unassignedPolicy: {{ lang._('This preference is saved with the peer and takes effect when it is assigned to an instance with FEC enabled.') | json_encode() }},
+        unavailable: {{ lang._('Instance settings could not be loaded. Their values are unknown; defaults are not assumed.') | json_encode() }},
+        unknownPolicy: {{ lang._('Instance FEC state is unknown. The peer preference remains editable.') | json_encode() }},
+        instance: {{ lang._('Instance') | json_encode() }},
+        congestion: {{ lang._('Congestion control') | json_encode() }},
+        fec: {{ lang._('FEC') | json_encode() }},
+        obfs: {{ lang._('Obfuscation') | json_encode() }},
+        edit: {{ lang._('Edit') | json_encode() }},
+        disabled: {{ lang._('disabled') | json_encode() }},
+        editNewTab: {{ lang._('Edit instance (new tab)') | json_encode() }},
+        savedSettings: {{ lang._('These are saved settings, not proof of what is currently running. Apply changes on the configuration page; transport changes require restarting the affected instance.') | json_encode() }},
+        fecOff: {{ lang._('FEC is disabled on every selected instance. This preference is kept but currently inactive.') | json_encode() }},
+        fecMixed: {{ lang._('This preference only applies to selected instances with FEC enabled.') | json_encode() }},
+        fecActive: {{ lang._('This peer-level preference applies where instance FEC is enabled.') | json_encode() }},
+        loading: {{ lang._('Loading instance settings…') | json_encode() }},
+        retry: {{ lang._('Retry') | json_encode() }}
+    });
+
+    $(document.getElementById('server.congestion')).closest('tr').before(
+        $('<tr/>').append($('<td colspan="3"/>').append(
+            $('<div class="alert alert-info" id="instance-transport-scope"/>').text(
+                {{ lang._('These transport settings apply to every peer on this instance. Saving does not restart connections. Applying a transport change requires a separate restart confirmation and interrupts all peers on this instance; remote profiles are not updated automatically.') | json_encode() }}
+            )
+        ))
+    );
 
     $('#reconfigureAct').SimpleActionButton({
         onPreAction: function() {

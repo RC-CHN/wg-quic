@@ -249,3 +249,19 @@ Verified package artifacts:
 19b5c8c3a937baf9eb191845200836ac9058e338d2a272ee1e8cb300caa95d9e  os-wg-quic-0.1.0-opnsense-26.1-amd64.pkg
 b5effd05d69785c460acb4969a8e65de76c158293bc11e1a44321393ce6a4577  os-wg-quic-0.1.0-opnsense-26.7-amd64.pkg
 ```
+
+## Inherited transport settings
+
+The peer dialog's transport section is a read-only projection of every selected
+instance. Its browser regression test uses the actual OPNsense jQuery/form
+helpers and Chromium, covering unassigned and multiple instances, disabled FEC
+with retained peer preferences, unavailable metadata, retries, stale responses,
+and the separate instance-edit link. It never contacts a firewall.
+
+```sh
+npm install --prefix /tmp/wg-quic-browser playwright-core@1.58.2
+WG_QUIC_BROWSER_MODULES=/tmp/wg-quic-browser \
+OPNSENSE_CORE_SRC=/path/to/opnsense-core \
+BROWSER_PATH=/path/to/chromium \
+node wg-quic-opnsense/scripts/qemu/settings-browser-test.mjs
+```

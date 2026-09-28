@@ -63,8 +63,7 @@
         <id>server.congestion</id>
         <label>Congestion control</label>
         <type>dropdown</type>
-        <advanced>true</advanced>
-        <help>Automatic uses the wg-quic delivery model. Reno and CUBIC are intended for controlled comparisons.</help>
+        <help>Shared by all peers on this instance. Automatic uses the wg-quic delivery model. Changing this setting requires an instance restart.</help>
         <grid_view>
             <visible>false</visible>
         </grid_view>
@@ -73,7 +72,7 @@
         <id>server.fec</id>
         <label>Forward error correction</label>
         <type>dropdown</type>
-        <help>Automatic dynamically adjusts FEC protection from measured path conditions.</help>
+        <help>Shared by all peers on this instance. Automatic adjusts FEC protection from measured path conditions. When disabled, peer FEC latency preferences are retained but inactive. Changing this setting requires an instance restart.</help>
         <grid_view>
             <visible>false</visible>
         </grid_view>
@@ -82,7 +81,7 @@
         <id>server.obfs</id>
         <label>Obfuscation</label>
         <type>dropdown</type>
-        <help>Salamander is the recommended wg-quic outer-packet profile. Both peers must use matching settings.</help>
+        <help>Shared by all peers on this instance. Remote peers must use matching obfuscation settings. Changing this setting requires an instance restart and updating remote profiles separately.</help>
         <grid_view>
             <visible>false</visible>
         </grid_view>

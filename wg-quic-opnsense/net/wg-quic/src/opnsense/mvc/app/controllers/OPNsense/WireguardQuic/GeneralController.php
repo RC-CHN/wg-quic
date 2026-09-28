@@ -14,6 +14,7 @@ class GeneralController extends \OPNsense\Base\IndexController
         $result = parent::templateJSIncludes();
         $result[] = '/ui/js/jquery.qrcode.js';
         $result[] = '/ui/js/qrcode.js';
+        $result[] = '/ui/js/wg-quic/settings.js';
         return $result;
     }
 

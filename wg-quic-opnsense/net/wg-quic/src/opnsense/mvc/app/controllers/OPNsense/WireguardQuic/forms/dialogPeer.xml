@@ -73,8 +73,7 @@
         <id>client.fec_policy</id>
         <label>FEC latency policy</label>
         <type>dropdown</type>
-        <advanced>true</advanced>
-        <help>Choose whether adaptive FEC should favor latency, balanced behavior, or throughput for this peer.</help>
+        <help>Peer-level preference for latency, balanced behavior, or throughput. It only takes effect on instances with FEC enabled. Disabling instance FEC preserves this preference.</help>
         <grid_view>
             <visible>false</visible>
         </grid_view>

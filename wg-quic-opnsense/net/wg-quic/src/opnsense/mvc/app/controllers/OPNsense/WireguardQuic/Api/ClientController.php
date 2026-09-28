@@ -39,6 +39,11 @@ class ClientController extends ApiMutableModelControllerBase
             $results['rows'][] = [
                 'uuid' => $key,
                 'name' => (string)$node->name,
+                'interface' => (string)$node->interface,
+                'enabled' => (string)$node->enabled === '1',
+                'congestion' => (string)$node->congestion,
+                'fec' => (string)$node->fec,
+                'obfs' => (string)$node->obfs,
             ];
         }
         return $results;
@@ -81,6 +86,18 @@ class ClientController extends ApiMutableModelControllerBase
 
     public function setClientAction($uuid)
     {
+        // These values are owned by the instance, including when a peer is
+        // attached to several instances. Never accept peer-level overrides.
+        $client = $this->request->getPost('client');
+        if (is_array($client)) {
+            foreach (['congestion', 'fec', 'obfs'] as $field) {
+                if (array_key_exists($field, $client)) {
+                    return ['result' => 'failed', 'validations' => [
+                        'client.servers' => gettext('Transport settings belong to the instance. Edit the instance instead.'),
+                    ]];
+                }
+            }
+        }
         $addedUuid = null;
         if (!empty($this->request->getPost('client')) && $this->request->isPost()) {
             $servers = array_filter(explode(',', $this->request->getPost('client')['servers'] ?? ''));
