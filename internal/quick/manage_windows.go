@@ -19,20 +19,20 @@ import (
 
 const windowsServicePrefix = "wg-quic-quick@"
 
-type windowsServiceStartupDiagnostics struct {
+type windowsServiceFailureDiagnostics struct {
 	operation  windowsRuntimeLifecycleOperations
 	executable string
 	detail     string
 }
 
-func (d *windowsServiceStartupDiagnostics) collect() error {
+func (d *windowsServiceFailureDiagnostics) collect() error {
 	if d == nil || d.detail != "" || d.operation.diagnose == nil {
 		return nil
 	}
 	detail, err := d.operation.diagnose(d.executable)
 	if err != nil {
 		return fmt.Errorf(
-			"read Windows service startup diagnostics: %w",
+			"read Windows service diagnostics: %w",
 			err,
 		)
 	}
@@ -40,7 +40,7 @@ func (d *windowsServiceStartupDiagnostics) collect() error {
 	return nil
 }
 
-func (d *windowsServiceStartupDiagnostics) attach(primary error) error {
+func (d *windowsServiceFailureDiagnostics) attach(primary error) error {
 	if d == nil || d.detail == "" {
 		return primary
 	}
@@ -202,7 +202,7 @@ func startWindowsServiceManaged(
 		)
 	}
 	if err := service.start(); err != nil {
-		diagnostics := &windowsServiceStartupDiagnostics{
+		diagnostics := &windowsServiceFailureDiagnostics{
 			operation:  runtimeOperations,
 			executable: stage.executable,
 		}
@@ -226,7 +226,7 @@ func startWindowsServiceManaged(
 	if err := waitWindowsLifecycleServiceState(
 		ctx, service, serviceName, svc.Running,
 	); err != nil {
-		diagnostics := &windowsServiceStartupDiagnostics{
+		diagnostics := &windowsServiceFailureDiagnostics{
 			operation:  runtimeOperations,
 			executable: stage.executable,
 		}
@@ -273,7 +273,7 @@ func stopWindowsServiceManaged(
 	name string,
 	brokerSafe bool,
 	runtimeOperations windowsRuntimeLifecycleOperations,
-) error {
+) (returnErr error) {
 	serviceName := windowsServiceName(name)
 	service, err := manager.openService(serviceName)
 	if err != nil {
@@ -299,6 +299,18 @@ func stopWindowsServiceManaged(
 		}
 	}
 	runtimeExecutable := runtimeOperations.capture(service)
+	// A failed shutdown retains its runtime and its failure record. Preserve
+	// the actual cleanup error, not just SCM's final "shutdown complete" checkpoint.
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		diagnostics := &windowsServiceFailureDiagnostics{
+			operation: runtimeOperations, executable: runtimeExecutable,
+		}
+		diagnosticErr := diagnostics.collect()
+		returnErr = errors.Join(diagnostics.attach(returnErr), diagnosticErr)
+	}()
 	status, err := service.status()
 	if err != nil {
 		return err

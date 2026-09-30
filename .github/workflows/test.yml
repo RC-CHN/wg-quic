@@ -80,6 +80,11 @@ jobs:
           go build -o wg-quic-quick.exe ./cmd/wg-quic-quick
           .\wg-quic.exe version
           .\wg-quic-quick.exe version
+      - name: Windows network lifecycle with multiple routes
+        shell: pwsh
+        run: |
+          Copy-Item third_party/wintun/amd64/wintun.dll .
+          ./tests/windows/privileged-lifecycle.ps1 -BinDirectory . -RouteCount 16
       - name: Cross-build Windows arm64 CLIs
         shell: pwsh
         run: |

@@ -392,12 +392,31 @@ func shutdownQuickRuntime(
 	progress func(string),
 	runLogger runLog,
 ) error {
+	return shutdownQuickRuntimeWithTimeouts(
+		host, name, cfg, process, supervisor, networkCleanup,
+		hostCleanupArmed, progress, runLogger,
+		quickShutdownTimeout-coreStopTimeout, coreStopTimeout,
+	)
+}
+
+func shutdownQuickRuntimeWithTimeouts(
+	host platform.Host,
+	name string,
+	cfg *config.Config,
+	process coreProcess,
+	supervisor *endpoint.Supervisor,
+	networkCleanup *platform.Cleanup,
+	hostCleanupArmed bool,
+	progress func(string),
+	runLogger runLog,
+	cleanupTimeout, processTimeout time.Duration,
+) error {
 	if process == nil {
 		return nil
 	}
 	shutdownCtx, cancel := context.WithTimeout(
 		context.Background(),
-		quickShutdownTimeout,
+		cleanupTimeout,
 	)
 	defer cancel()
 	report := func(stage string) {
@@ -435,7 +454,10 @@ func shutdownQuickRuntime(
 		)
 	}
 	report(shutdownStageCore)
-	coreCtx, cancelCore := context.WithTimeout(shutdownCtx, coreStopTimeout)
+	// Network cleanup must not consume the process-exit budget. The two
+	// phases still fit the existing overall shutdown bound (13s + 7s).
+	cancel()
+	coreCtx, cancelCore := context.WithTimeout(context.Background(), processTimeout)
 	if err := stopCoreProcess(coreCtx, process); err != nil {
 		runLogger.logger.Printf("stop wg-quic core: %v", err)
 		errs = append(errs, err)

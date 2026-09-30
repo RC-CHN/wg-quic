@@ -86,22 +86,23 @@ func (m *fakeRuntimeLifecycleManager) listServices() ([]string, error) {
 }
 
 type fakeRuntimeLifecycleService struct {
-	manager       *fakeRuntimeLifecycleManager
-	name          string
-	configuration mgr.Config
-	statuses      []svc.Status
-	statusErr     error
-	startErr      error
-	controlErr    error
-	controlErrors []error
-	deleteErr     error
-	closeErr      error
-	startCalls    int
-	stopCalls     int
-	deleteCalls   int
-	closeCalls    int
-	deleted       bool
-	retainDeleted bool
+	manager         *fakeRuntimeLifecycleManager
+	name            string
+	configuration   mgr.Config
+	statuses        []svc.Status
+	statusErr       error
+	startErr        error
+	controlErr      error
+	controlErrors   []error
+	controlStatuses []svc.Status
+	deleteErr       error
+	closeErr        error
+	startCalls      int
+	stopCalls       int
+	deleteCalls     int
+	closeCalls      int
+	deleted         bool
+	retainDeleted   bool
 }
 
 func (s *fakeRuntimeLifecycleService) status() (svc.Status, error) {
@@ -139,6 +140,9 @@ func (s *fakeRuntimeLifecycleService) control(
 		}
 		if controlErr == nil {
 			s.statuses = []svc.Status{{State: svc.Stopped}}
+			if len(s.controlStatuses) != 0 {
+				s.statuses = s.controlStatuses
+			}
 		}
 	}
 	return svc.Status{}, controlErr
@@ -705,5 +709,42 @@ func TestWindowsRuntimeSweepSecuresInterfacesBeforeRuntime(t *testing.T) {
 		len(components[1]) != 1 ||
 		components[1][0].name != windowsServiceRuntimeDirectory {
 		t.Fatalf("secure ProgramData initialization order = %#v", components)
+	}
+}
+
+func TestWindowsStopPreservesCleanupFailureDiagnostics(t *testing.T) {
+	for _, alreadyStopped := range []bool{false, true} {
+		t.Run(fmt.Sprint(alreadyStopped), func(t *testing.T) {
+			manager := newFakeRuntimeLifecycleManager()
+			const runtime = `C:\ProgramData\wg-quic\runtime\run-stop-failed\wg-quic-quick.exe`
+			failed := svc.Status{State: svc.Stopped, Win32ExitCode: 1}
+			initial := svc.Status{State: svc.Running}
+			if alreadyStopped {
+				initial = failed
+			}
+			service := &fakeRuntimeLifecycleService{
+				manager: manager, name: windowsServiceName("office"),
+				configuration:   mgr.Config{BinaryPathName: runtime},
+				statuses:        []svc.Status{initial},
+				controlStatuses: []svc.Status{failed},
+			}
+			manager.services[service.name] = service
+			var cleaned []string
+			operations := fakeRuntimeOperations(runtime, &cleaned)
+			operations.diagnose = func(executable string) (string, error) {
+				if executable != runtime {
+					t.Fatalf("unexpected runtime: %q", executable)
+				}
+				return "platform network cleanup: fixture deadline exceeded", nil
+			}
+			err := stopWindowsServiceManaged(context.Background(), manager, "office", false, operations)
+			if err == nil || !strings.Contains(err.Error(), "shutdown failure") ||
+				!strings.Contains(err.Error(), "platform network cleanup: fixture deadline exceeded") {
+				t.Fatalf("shutdown lost its original cleanup failure: %v", err)
+			}
+			if service.deleteCalls != 0 || len(cleaned) != 0 {
+				t.Fatal("failed shutdown removed recovery evidence")
+			}
+		})
 	}
 }
