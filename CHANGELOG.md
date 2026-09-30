@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v0.4.1 - 2026-09-30
+
+Faster Windows tunnel startup and shutdown, with actionable failure diagnostics.
+
+- Batch Windows address, route, MTU and DNS setup, rollback and repair into one
+  PowerShell process per operation, reusing adapter discovery and module setup.
+  Preserve rollback of completed steps and continue cleanup after step failures.
+- Reserve core-process exit time within the existing 20-second shutdown budget,
+  so slow network cleanup cannot consume the core's entire exit allowance.
+- Include saved service failure details when stopping a failed Windows service,
+  instead of reporting only the final cleanup checkpoint. Retain recovery state
+  after failed shutdowns.
+- Exercise real PowerShell execution, partial failures, cancellation and native
+  Windows lifecycle with 16 routes. Windows Server 2025 CI measured first startup
+  at 5.22 seconds, subsequent startup at 3.57 seconds and normal shutdown at
+  3.03 seconds; these are CI measurements, not a Windows 11 performance guarantee.
+
 ## v0.4.0 - 2026-09-28
 
 Desktop redesign and consistent OPNsense localization.
