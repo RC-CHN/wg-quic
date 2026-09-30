@@ -57,15 +57,15 @@ func repairWindowsAdapter(
 		if planErr != nil {
 			errs = append(errs, planErr)
 		} else {
+			var scripts []string
 			for index := len(operations) - 1; index >= 0; index-- {
 				if operations[index].undo == "" {
 					continue
 				}
-				if err := runWindowsPowerShell(
-					ctx, operations[index].undo,
-				); err != nil {
-					errs = append(errs, err)
-				}
+				scripts = append(scripts, operations[index].undo)
+			}
+			if _, err := runWindowsNetworkBatch(ctx, name, scripts, true); err != nil {
+				errs = append(errs, err)
 			}
 		}
 	}

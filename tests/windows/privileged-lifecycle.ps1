@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $BinDirectory,
 
-    [string] $TunnelName = ""
+    [string] $TunnelName = "",
+
+    [ValidateRange(1, 64)]
+    [int] $RouteCount = 1
 )
 
 Set-StrictMode -Version Latest
@@ -18,7 +21,12 @@ function Invoke-Native {
         [string[]] $Arguments
     )
 
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     $output = & $FilePath @Arguments 2>&1
+    if ($Arguments[0] -in @("up", "down")) {
+        Write-Host ("Windows lifecycle {0}: {1} ms ({2} routes)" -f `
+            $Arguments[0], $timer.ElapsedMilliseconds, $RouteCount)
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE`n$($output | Out-String)"
     }
@@ -125,6 +133,9 @@ $octet = 20 + ($PID % 200)
 $localAddress = "198.18.$octet.1"
 $peerAddress = "198.18.$octet.2"
 $peerPrefix = "$peerAddress/32"
+$peerPrefixes = @(2..(1 + $RouteCount) | ForEach-Object { "198.18.$octet.$_/32" })
+if ($RouteCount -eq 1) { $peerPrefixes = @($peerPrefix) }
+$allowedIPs = $peerPrefixes -join ", "
 $endpointAddress = "192.0.2.$octet"
 $endpointPrefix = "$endpointAddress/32"
 $dnsServer = "192.0.2.53"
@@ -160,7 +171,7 @@ DNS = $dnsServer, $dnsSuffix
 
 [Peer]
 PublicKey = $peerPublicKey
-AllowedIPs = $peerPrefix
+AllowedIPs = $allowedIPs
 Endpoint = ${endpointAddress}:$endpointPort
 PersistentKeepalive = 1
 "@
@@ -278,9 +289,9 @@ PersistentKeepalive = 1
         @{
             Description = "AllowedIPs route"
             Condition = {
-                $null -ne (Get-NetRoute -InterfaceIndex $adapter.ifIndex `
-                    -AddressFamily IPv4 -DestinationPrefix $peerPrefix `
-                    -ErrorAction SilentlyContinue)
+                @(Get-NetRoute -InterfaceIndex $adapter.ifIndex `
+                    -AddressFamily IPv4 -DestinationPrefix $peerPrefixes `
+                    -ErrorAction SilentlyContinue).Count -eq $RouteCount
             }
         }
         @{
@@ -430,7 +441,7 @@ PersistentKeepalive = 1
             Description = "AllowedIPs route cleanup"
             Condition = {
                 $null -eq (Get-NetRoute -AddressFamily IPv4 `
-                    -DestinationPrefix $peerPrefix -ErrorAction SilentlyContinue)
+                    -DestinationPrefix $peerPrefixes -ErrorAction SilentlyContinue)
             }
         }
         @{
@@ -531,7 +542,7 @@ finally {
         }
     }
 
-    Get-NetRoute -AddressFamily IPv4 -DestinationPrefix $peerPrefix -ErrorAction SilentlyContinue |
+    Get-NetRoute -AddressFamily IPv4 -DestinationPrefix $peerPrefixes -ErrorAction SilentlyContinue |
         Where-Object {
             $adapter = Get-NetAdapter -Name $TunnelName -ErrorAction SilentlyContinue
             $null -ne $adapter -and $_.InterfaceIndex -eq $adapter.ifIndex
