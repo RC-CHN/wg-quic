@@ -172,7 +172,7 @@ func (m *modelSender) OnCongestionEvent(
 
 	// A zero-byte event is ECN. Treat it as an explicit congestion signal.
 	if lostBytes == 0 {
-		m.reduceModel(0.75)
+		m.respondToCongestion(m.clock.Now(), packetNumber, 0.75)
 		return
 	}
 	if m.hasStandingQueue(m.clock.Now(), modelQueueThreshold) {
@@ -455,14 +455,19 @@ func (m *modelSender) respondToPersistentQueue(now monotime.Time, packetNumber p
 	m.respondToQueue(now, packetNumber, 0.90)
 }
 
-// Acknowledgements and losses from the flight already outstanding when we
-// reduced the model cannot describe the effect of that reduction. Respond at
-// most once to that flight, even if delayed loss detection crosses an RTT.
 func (m *modelSender) respondToQueue(now monotime.Time, packetNumber protocol.PacketNumber, factor float64) {
-	if m.queueResponseEnd != protocol.InvalidPacketNumber && packetNumber <= m.queueResponseEnd {
+	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < m.modelRTT() {
 		return
 	}
-	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < m.modelRTT() {
+	m.respondToCongestion(now, packetNumber, factor)
+}
+
+// Feedback from the flight already outstanding when we reduced the model
+// cannot describe the effect of that reduction. Loss, ACK queue pressure and
+// explicit CE marks therefore share one recovery boundary. ECN bypasses the
+// queue predicate and its RTT timer, since new-flight CE feedback is explicit.
+func (m *modelSender) respondToCongestion(now monotime.Time, packetNumber protocol.PacketNumber, factor float64) {
+	if m.queueResponseEnd != protocol.InvalidPacketNumber && packetNumber <= m.queueResponseEnd {
 		return
 	}
 	m.lastQueueResponse = now

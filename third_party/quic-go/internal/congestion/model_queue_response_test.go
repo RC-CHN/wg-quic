@@ -79,10 +79,37 @@ func TestModelNewFlightCanStillRespondToPersistentCongestion(t *testing.T) {
 	require.Less(t, m.bandwidthEstimate, second)
 }
 
-func TestModelExplicitECNStillRespondsWithinQueueRecovery(t *testing.T) {
-	m, _ := queuedModelFlight()
-	m.OnCongestionEvent(1, 1200, 80_000)
+func TestModelECNAndQueuedLossShareRecovery(t *testing.T) {
+	for _, ecnFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "loss-first", true: "ecn-first"}[ecnFirst], func(t *testing.T) {
+			m, _ := queuedModelFlight()
+			firstBytes, secondBytes := protocol.ByteCount(1200), protocol.ByteCount(0)
+			if ecnFirst {
+				firstBytes, secondBytes = secondBytes, firstBytes
+			}
+			m.OnCongestionEvent(1, firstBytes, 80_000)
+			first := m.bandwidthEstimate
+			m.OnCongestionEvent(2, secondBytes, 80_000)
+			require.Equal(t, first, m.bandwidthEstimate)
+			require.Equal(t, uint64(1), m.connStats.PacketsLost.Load())
+		})
+	}
+}
+
+func TestModelNewFlightECNBypassesRTTQueueCalibration(t *testing.T) {
+	m, clock, rtt, _ := newTestModelSender()
+	m.queueSignalResume = clock.Now().Add(time.Hour)
+	m.OnPacketSent(clock.Now(), 20_000, 1, 1200, true)
 	before := m.bandwidthEstimate
-	m.OnCongestionEvent(2, 0, 80_000)
-	require.Less(t, m.bandwidthEstimate, before)
+	m.OnCongestionEvent(1, 0, 20_000)
+	require.Less(t, m.bandwidthEstimate, before, "explicit ECN does not need a queue predicate")
+	first := m.bandwidthEstimate
+	clock.Advance(time.Millisecond)
+	require.Less(t, time.Millisecond, m.modelRTT())
+	m.OnPacketSent(clock.Now(), 20_000, 2, 1200, true)
+	// The ACK handler updates raw RTT before delivering CE, but the model
+	// observes that path change only in the later OnPacketAcked callback.
+	rtt.UpdateRTT(time.Millisecond, 0)
+	m.OnCongestionEvent(2, 0, 20_000)
+	require.Less(t, m.bandwidthEstimate, first, "new-flight CE is evidence even before a stale RTT timer")
 }
