@@ -1,0 +1,301 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "source": {
+    "source_commit": "eafe3f755cab2e735b787b1d14c90d4f0faa6b8a",
+    "source_mode": "immutable git archive, -buildvcs=false",
+    "archive_sha256": "989d668708760b5a9709bd676c5589d064eaa5846e0031b81b550d32c49062ba",
+    "version": "0.4.1-stability-eafe3f7",
+    "go": "go version go1.26.3 linux/amd64",
+    "sha256": {
+      "wg-quic.exe": "24f2e62d3717ddab9503e14e195cad89d468c7dc47e35736c55c9d7abd4db786",
+      "wg-quic-quick.exe": "201855ce6c62de99ecd74dc72f4fec44a98c1b82928f66aa8ad040daf84fa526"
+    }
+  },
+  "runs": {
+    "auto": {
+      "configuration": {
+        "dns": false,
+        "mtu": 1280,
+        "peer_allowed_prefix_count": 1
+      },
+      "environment": {
+        "build": "19044",
+        "version": "10.0.19044",
+        "caption": "Microsoft Windows 10 Enterprise LTSC Evaluation",
+        "core_version": "wg-quic 0.4.1-stability-eafe3f7",
+        "quick_version": "wg-quic-quick 0.4.1-stability-eafe3f7",
+        "broker_executable": "",
+        "desktop_broker": false
+      },
+      "cycles": [
+        {
+          "cycle": 1,
+          "up_ms": 14017,
+          "first_ping_ms": 78,
+          "ping_attempts": 1,
+          "route_check_ms": 3940,
+          "down_ms": 561,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 2,
+          "up_ms": 12410,
+          "first_ping_ms": 93,
+          "ping_attempts": 1,
+          "route_check_ms": 49,
+          "down_ms": 425,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 3,
+          "up_ms": 9834,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 40,
+          "down_ms": 481,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 4,
+          "up_ms": 8811,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 49,
+          "down_ms": 393,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 5,
+          "up_ms": 10157,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 50,
+          "down_ms": 466,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 6,
+          "up_ms": 10075,
+          "first_ping_ms": 7,
+          "ping_attempts": 1,
+          "route_check_ms": 52,
+          "down_ms": 485,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 7,
+          "up_ms": 9999,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 54,
+          "down_ms": 451,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 8,
+          "up_ms": 9133,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 48,
+          "down_ms": 454,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 9,
+          "up_ms": 10258,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 49,
+          "down_ms": 403,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 10,
+          "up_ms": 10702,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 50,
+          "down_ms": 436,
+          "success": true,
+          "error": ""
+        }
+      ],
+      "success_count": 10,
+      "timings_ms": {
+        "up_ms": {
+          "median": 10116.0,
+          "min": 8811,
+          "max": 14017
+        },
+        "first_ping_ms": {
+          "median": 5.0,
+          "min": 4,
+          "max": 93
+        },
+        "down_ms": {
+          "median": 452.5,
+          "min": 393,
+          "max": 561
+        }
+      },
+      "raw_cycles_sha256": "1097e7d43b1438b18d827dd9702d16133fa05bf1c637c80e0d99f5f210dfa716"
+    },
+    "policy": {
+      "configuration": {
+        "dns": true,
+        "mtu": 1420,
+        "peer_allowed_prefix_count": 2
+      },
+      "environment": {
+        "build": "19044",
+        "version": "10.0.19044",
+        "caption": "Microsoft Windows 10 Enterprise LTSC Evaluation",
+        "core_version": "wg-quic 0.4.1-stability-eafe3f7",
+        "quick_version": "wg-quic-quick 0.4.1-stability-eafe3f7",
+        "broker_executable": "",
+        "desktop_broker": false
+      },
+      "cycles": [
+        {
+          "cycle": 1,
+          "up_ms": 11055,
+          "first_ping_ms": 8,
+          "ping_attempts": 1,
+          "route_check_ms": 53,
+          "down_ms": 6363,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 2,
+          "up_ms": 11690,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 53,
+          "down_ms": 6757,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 3,
+          "up_ms": 10848,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 29,
+          "down_ms": 4977,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 4,
+          "up_ms": 11085,
+          "first_ping_ms": 130,
+          "ping_attempts": 2,
+          "route_check_ms": 52,
+          "down_ms": 6703,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 5,
+          "up_ms": 12049,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 46,
+          "down_ms": 6650,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 6,
+          "up_ms": 12396,
+          "first_ping_ms": 7,
+          "ping_attempts": 1,
+          "route_check_ms": 50,
+          "down_ms": 6455,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 7,
+          "up_ms": 12342,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 57,
+          "down_ms": 5860,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 8,
+          "up_ms": 11958,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 48,
+          "down_ms": 6735,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 9,
+          "up_ms": 11512,
+          "first_ping_ms": 5,
+          "ping_attempts": 1,
+          "route_check_ms": 51,
+          "down_ms": 6568,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 10,
+          "up_ms": 10561,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 46,
+          "down_ms": 6130,
+          "success": true,
+          "error": ""
+        }
+      ],
+      "success_count": 10,
+      "timings_ms": {
+        "up_ms": {
+          "median": 11601.0,
+          "min": 10561,
+          "max": 12396
+        },
+        "first_ping_ms": {
+          "median": 5.0,
+          "min": 4,
+          "max": 130
+        },
+        "down_ms": {
+          "median": 6511.5,
+          "min": 4977,
+          "max": 6757
+        }
+      },
+      "raw_cycles_sha256": "aa294f6aab000a399f7f3ec5f685c6e897e8b7279b1e30e878b167634eb6809a"
+    }
+  },
+  "native_cleanup_integration": {
+    "code": 0,
+    "out": "=== RUN   TestWindowsNetworkRollbackNativeIntegration\n    network_cleanup_windows_test.go:247: dual-stack native cleanup completed in 376.4\u00b5s while both adapters remain open\n--- PASS: TestWindowsNetworkRollbackNativeIntegration (25.38s)\nPASS\n",
+    "err": "2026/10/03 12:23:30 Using existing driver 0.14\n2026/10/03 12:23:30 Creating adapter\n2026/10/03 12:23:42 Using existing driver 0.14\n2026/10/03 12:23:42 Creating adapter\n"
+  },
+  "limits": [
+    "Ten cycles per configuration, not a multi-day reliability claim.",
+    "This source still uses PowerShell for startup and DNS cleanup.",
+    "Before/after wall times across different guest servicing loads are not controlled performance ratios."
+  ]
+}
