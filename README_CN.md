@@ -13,10 +13,10 @@ WireGuard 的接口和配置模型，但将外层 WireGuard UDP 传输替换为 
 > `wg-quick` 风格配置文件，但标准 WireGuard 端点不能连接 `wg-quic` 端点。
 
 当前公开版本为
-[`v0.4.2`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.4.2)。
+[`v0.4.3`](https://github.com/RC-CHN/wg-quic/releases/tag/v0.4.3)。
 
-`v0.4.2` 改进自动 FEC 与拥塞恢复，限制长期运行时的状态积累，
-并使用 Windows 原生 API 配置和清理网络，缩短启停耗时。现有自动配置无需增加调节项。
+`v0.4.3` 减少负载下的本机发送积压，改进带宽骤降后的自动恢复，
+并在桌面诊断中分别展示本机排队时间和 QUIC 往返延迟。现有自动配置无需增加调节项。
 详情见[更新日志](CHANGELOG.md)、[稳定性验证报告](docs/STABILITY-VALIDATION.md)、
 [桌面设计说明](docs/desktop/DESIGN.md)和[独立协议规范](docs/WG-QUIC-PROTOCOL.md)。
 
@@ -60,7 +60,7 @@ sudo wg-quic-quick down wg0
 
 ### 运行时 peer 与 DDNS 管理
 
-`v0.4.2` 已在上述平台服务适配器上支持在线 peer reconciliation 和自动 DDNS。
+`v0.4.3` 已在上述平台服务适配器上支持在线 peer reconciliation 和自动 DDNS。
 
 首先检查运行中的 supervisor。Unix 上的 quick 管理 socket 权限为 `0600`，读取
 完整状态需要 root：
@@ -239,7 +239,7 @@ DDNS 只推进 `endpoint_generation`，不改变 `desired_generation`，也不�
 | FreeBSD/OPNsense | Unix socket 与增量 `route` 操作 | root-only、带校验和的外层 endpoint 路由账本；peer 路由随 TUN 消失 | rc.d/configd 与每条 FreeBSD release train 分开验收 |
 | Windows amd64/arm64 | ACL 保护的 named pipe、typed core 事务和 IP Helper peer 路由 | endpoint 账本，加按 compartment/interface LUID 标识的每隧道 before/after/phase 日志 | x64 安装态 SCM/MSI 生命周期；arm64 在通过原生服务 fixture 前仅为 build/unit |
 
-`v0.4.2` 已经包含这四类适配器。Release notes 必须针对准确的 OS/架构使用
+`v0.4.3` 已经包含这四类适配器。Release notes 必须针对准确的 OS/架构使用
 `build-supported`、`unit-verified`、`runtime-verified` 或
 `integration-verified`；仅交叉编译绝不能提升支持等级。
 
@@ -314,11 +314,11 @@ sudo wg-quic-quick check wg0
 以下以 amd64 为例：
 
 ```sh
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.4.2/wg-quic-v0.4.2-linux-amd64.tar.gz
-curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.4.2/SHA256SUMS
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.4.3/wg-quic-v0.4.3-linux-amd64.tar.gz
+curl -LO https://github.com/RC-CHN/wg-quic/releases/download/v0.4.3/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf wg-quic-v0.4.2-linux-amd64.tar.gz
-cd wg-quic-v0.4.2-linux-amd64
+tar -xzf wg-quic-v0.4.3-linux-amd64.tar.gz
+cd wg-quic-v0.4.3-linux-amd64
 
 sudo install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 sudo install -m 0644 wg-quic@.service /etc/systemd/system/
@@ -338,7 +338,7 @@ sudo wg-quic-quick down wg0
 Linux amd64 桌面用户也可以安装 Deb：
 
 ```sh
-sudo apt install ./wg-quic-desktop-v0.4.2-linux-amd64.deb
+sudo apt install ./wg-quic-desktop-v0.4.3-linux-amd64.deb
 ```
 
 桌面端会以 `0600` 权限把配置导入 `/etc/wg-quic/`，仅对固定特权操作调用
@@ -370,7 +370,7 @@ sudo rc-service wg-quic.wg0 reload
 ## Windows
 
 x64 Windows 推荐从 [Releases](https://github.com/RC-CHN/wg-quic/releases)
-安装 `wg-quic-desktop-v0.4.2-windows-x64.msi`。该 per-machine MSI 只在安装时
+安装 `wg-quic-desktop-v0.4.3-windows-x64.msi`。该 per-machine MSI 只在安装时
 请求一次提升权限，将 UI 安装到 Program Files，并注册受限的
 `wg-quic-manager` LocalSystem 服务。在桌面应用中使用 **Import** 导入配置，
 然后从隧道列表启动或停止。
@@ -409,8 +409,8 @@ Copy-Item .\wg0.conf "$env:ProgramData\wg-quic\interfaces\wg0.conf"
 下载 amd64 或 arm64 FreeBSD 压缩包，安装两个程序和 rc.d 脚本：
 
 ```sh
-tar -xzf wg-quic-v0.4.2-freebsd-amd64.tar.gz
-cd wg-quic-v0.4.2-freebsd-amd64
+tar -xzf wg-quic-v0.4.3-freebsd-amd64.tar.gz
+cd wg-quic-v0.4.3-freebsd-amd64
 install -m 0755 wg-quic wg-quic-quick /usr/local/bin/
 install -m 0755 wg_quic /usr/local/etc/rc.d/wg_quic
 install -d -m 0700 /usr/local/etc/wg-quic
@@ -439,13 +439,13 @@ FreeBSD 已实现全部四种 hooks：`PreUp`、`PostUp`、`PreDown`、`PostDown
 
 必须使用与 OPNsense 版本完全匹配的软件包：
 
-- `os-wg-quic-0.4.2-opnsense-26.1-amd64.pkg`
-- `os-wg-quic-0.4.2-opnsense-26.7-amd64.pkg`
+- `os-wg-quic-0.4.3-opnsense-26.1-amd64.pkg`
+- `os-wg-quic-0.4.3-opnsense-26.7-amd64.pkg`
 
 将软件包复制到防火墙后，通过控制台或 SSH 安装。OPNsense 26.7 示例：
 
 ```sh
-pkg add -f /tmp/os-wg-quic-0.4.2-opnsense-26.7-amd64.pkg
+pkg add -f /tmp/os-wg-quic-0.4.3-opnsense-26.7-amd64.pkg
 ```
 
 然后打开 `VPN > wg-quic`：
@@ -490,7 +490,7 @@ Web UI 没有提供任意 `PreUp/PostUp/PreDown/PostDown` 输入字段，手工�
 当前固件完全匹配。在路由器上安装对应 APK：
 
 ```sh
-apk add --allow-untrusted ./wg-quic-0.4.2-r1-openwrt-25.12.5-armsr-armv8.apk
+apk add --allow-untrusted ./wg-quic-0.4.3-r1-openwrt-25.12.5-armsr-armv8.apk
 ```
 
 软件包依赖 `kmod-tun` 和 `ip-full`，安装两个可执行程序并注册 procd 多实例
@@ -615,9 +615,9 @@ Release workflow 会自动读取它；可选的 workflow 输入只用于断言�
 本地构建并验证六个便携 CLI 压缩包：
 
 ```sh
-make release-artifacts VERSION=0.4.2
+make release-artifacts VERSION=0.4.3
 ./scripts/check-release-archive.sh \
-  dist/wg-quic-v0.4.2-linux-amd64.tar.gz linux amd64 0.4.2
+  dist/wg-quic-v0.4.3-linux-amd64.tar.gz linux amd64 0.4.3
 ```
 
 OpenWrt 和 OPNsense 包还必须匹配具体固件版本和打包框架；CPU 架构相同并不足以

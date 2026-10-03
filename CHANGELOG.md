@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## v0.4.3 - 2026-10-04
+
+Reduce latency under load and recover from sudden path-capacity changes with
+existing automatic settings. No configuration or wire-format change is needed.
+
+- Budget the bind and QUIC send queues by estimated service time, preserve
+  startup discovery headroom, and discard expired complete WireGuard datagrams
+  before fragmentation and FEC encoding.
+- Reserve bounded send capacity for handshakes, keepalives and FEC feedback.
+  Preserve QUIC pacing and congestion limits, cancel blocked sends on shutdown,
+  and send handshakes once while retaining keepalive redundancy.
+- Drain large capacity drops without raising a learned slow pacing rate or
+  treating an old queued packet flight as a new propagation-RTT baseline.
+- Show local queued bytes, current transport queue wait, peak data queue wait
+  and expired packets separately from QUIC RTT in desktop diagnostics, with
+  English and Simplified Chinese labels and older-core compatibility.
+- Validate loaded Linux TUN traffic, native Windows 11 Wintun traffic across
+  100-to-1-to-100 Mbps capacity changes, repeated startup/shutdown, and independent
+  Go/Rust protocol interoperability. These finite lab tests do not establish
+  long-duration stability or eliminate upstream queues caused by other traffic.
+
+Known limitation: an independent UDP flow saturating an upstream FIFO still
+causes high RTT; the more conservative controller can yield additional
+throughput in that case. Already-sent packets can also cause transient high RTT
+while a suddenly slower path drains.
+
 ## v0.4.2 - 2026-10-03
 
 Adaptive transport stability and native Windows network setup and cleanup.
