@@ -2158,7 +2158,7 @@ func (s *session) sendLoop() {
 	}
 	resetTimer := func() {
 		stopTimer()
-		timer.Reset(s.fecFlushDeadline)
+		timer.Reset(s.fecEncoder.FlushDelay(s.fecFlushDeadline))
 		timerActive = true
 	}
 	applyFECPolicy := func(policy string) bool {
@@ -2203,12 +2203,15 @@ func (s *session) sendLoop() {
 			pastStartup := s.state.cfg.CongestionMode != "model" || stats.CongestionModelState != 0
 			qconn.SetGSOBatchingEnabled(parity == 0 && lossPPM == 0 && pastStartup)
 		}
+		previousFlushDelay := s.fecEncoder.FlushDelay(s.fecFlushDeadline)
 		packets, err := s.fecEncoder.Add(frame)
 		if err != nil || !sendPackets(packets) {
 			return false
 		}
 		if s.fecEncoder.Pending() {
-			if !timerActive {
+			if !timerActive || s.fecEncoder.FlushDelay(s.fecFlushDeadline) != previousFlushDelay {
+				// Reconfiguring interleave closes every old group. Start the
+				// new lane window from its first source, not the old deadline.
 				resetTimer()
 			}
 		} else {

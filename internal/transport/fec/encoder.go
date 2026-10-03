@@ -225,6 +225,18 @@ func (e *Encoder) Pending() bool {
 	return false
 }
 
+// FlushDelay preserves each lane's source window when bursts enable
+// interleaving. Flushing every lane on the original deadline splits short
+// groups into still smaller groups, increasing redundancy without spreading
+// repair packets over time. Data frames remain immediate; only pending
+// parity/close packets wait, bounded by MaxInterleave times the base delay.
+// The configured interleave is already included in the profile's base delay;
+// only adaptive increases extend it further.
+// Like Add and Flush, this is called by the session's send goroutine.
+func (e *Encoder) FlushDelay(base time.Duration) time.Duration {
+	return base * time.Duration(e.interleave) / time.Duration(e.minInterleave)
+}
+
 func (e *Encoder) Flush() ([][]byte, error) {
 	return e.flushAll()
 }
