@@ -1689,7 +1689,13 @@ func (b *Bind) runSession(sess *session) {
 		defer timer.Stop()
 	}
 	sendDone := make(chan struct{})
-	go func() { defer close(sendDone); sess.sendLoop() }()
+	go func() {
+		defer close(sendDone)
+		// A local send failure need not close the QUIC receive half. Retire
+		// both workers so a live transport cannot hide a dead send queue.
+		defer sess.cancel()
+		sess.sendLoop()
+	}()
 	sess.receiveLoop()
 	sess.cancel()
 	<-sendDone
@@ -2101,6 +2107,11 @@ func (s *session) sendLoop() {
 		packetBytes := len(packet)
 		kind, fecPacket := fec.PacketKind(packet)
 		if err := qconn.SendDatagramOwned(packet); err != nil {
+			if s.ctx.Err() == nil {
+				reason, class, message := quiccarrier.ClassifyConnectionError(err)
+				s.setCloseCause(reason, class, errors.New(message))
+				s.endpoint.owner.debugf("QUIC send stopped: session=%d remote=%s error=%v", s.id, s.endpoint.addr, err)
+			}
 			return false
 		}
 		s.endpoint.owner.stats.wireTxPackets.Add(1)
