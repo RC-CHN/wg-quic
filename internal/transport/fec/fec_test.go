@@ -234,7 +234,7 @@ func TestDecoderFastExpiresStaleGroups(t *testing.T) {
 		})); err != nil {
 			t.Fatal(err)
 		}
-		result, err := decoder.Handle(now, marshalPacket(packet{
+		result, err := decoder.Handle(now.Add(completionGrace+time.Nanosecond), marshalPacket(packet{
 			kind: KindData, epoch: 1, groupID: 5, index: 0, payload: []byte{0, 1, 'b'},
 		}))
 		if err != nil {
@@ -266,7 +266,7 @@ func TestDecoderFastExpiresStaleGroups(t *testing.T) {
 		})); err != nil {
 			t.Fatal(err)
 		}
-		result, err := decoder.Handle(now, marshalPacket(packet{
+		result, err := decoder.Handle(now.Add(completionGrace+time.Nanosecond), marshalPacket(packet{
 			kind: KindData, epoch: 1, groupID: 5, index: 0, payload: []byte{0, 1, 'b'},
 		}))
 		if err != nil {
@@ -456,13 +456,13 @@ func TestControllerAdaptsInterleave(t *testing.T) {
 func TestDecoderBoundsIncompleteAndCompletedGroups(t *testing.T) {
 	decoder := NewDecoder()
 	now := time.Now()
-	// fastExpire reclaims groups lagging the newest by MaxInterleave, so
-	// monotonically increasing group IDs never accumulate past that window.
+	// Stale groups lagging the newest by MaxInterleave are reclaimed after
+	// reordering grace, so spaced-out increasing IDs remain bounded.
 	for i := 0; i < maxReceiveGroups; i++ {
 		packet := marshalPacket(packet{
 			kind: KindData, epoch: 1, groupID: uint64(i + 1), payload: []byte{0, 1, byte(i)},
 		})
-		if _, err := decoder.Handle(now, packet); err != nil {
+		if _, err := decoder.Handle(now.Add(time.Duration(i)*(completionGrace+time.Nanosecond)), packet); err != nil {
 			t.Fatalf("group %d: %v", i, err)
 		}
 	}
