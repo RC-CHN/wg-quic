@@ -17,6 +17,8 @@ services:
       WGQ_BENCH_PEER_ADDRESS: 10.88.0.2/32
       WGQ_BENCH_MTU: ${WGQ_BENCH_MTU:-1280}
       WGQ_BENCH_DISABLE_OFFLOADS: ${WGQ_BENCH_DISABLE_OFFLOADS:-0}
+      # Device offloads alone do not stop UDP_SEGMENT batches reaching netem.
+      QUIC_GO_DISABLE_GSO: "${WGQ_BENCH_DISABLE_OFFLOADS:-0}"
     networks:
       outer:
         ipv4_address: 172.30.0.2
@@ -39,6 +41,7 @@ services:
       WGQ_BENCH_PEER_ADDRESS: 10.88.0.1/32
       WGQ_BENCH_MTU: ${WGQ_BENCH_MTU:-1280}
       WGQ_BENCH_DISABLE_OFFLOADS: ${WGQ_BENCH_DISABLE_OFFLOADS:-0}
+      QUIC_GO_DISABLE_GSO: "${WGQ_BENCH_DISABLE_OFFLOADS:-0}"
     networks:
       outer:
         ipv4_address: 172.30.0.3

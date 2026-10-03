@@ -17,10 +17,6 @@ type windowsHost struct {
 	platformenv.Paths
 }
 
-type windowsNetworkState struct {
-	undo []string
-}
-
 func Current() Host {
 	return windowsHost{}
 }
@@ -50,30 +46,22 @@ func (windowsHost) ConfigureNetwork(ctx context.Context, name string, cfg *confi
 	if err != nil {
 		return nil, err
 	}
-	state := &windowsNetworkState{}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	luid, err := windowsInterfaceLUID(name)
+	if err != nil {
+		return nil, err
+	}
+	system := windowsNativeNetworkSystem{}
+	state := &windowsNetworkState{
+		name: name, interfaceLUID: luid,
+		compartmentID: system.CurrentCompartmentID(),
+	}
 	cleanup := func(cleanupCtx context.Context) error {
-		scripts := make([]string, 0, len(state.undo))
-		for i := len(state.undo) - 1; i >= 0; i-- {
-			scripts = append(scripts, state.undo[i])
-		}
-		_, err := runWindowsNetworkBatch(cleanupCtx, name, scripts, true)
-		return err
+		return state.rollback(cleanupCtx, system)
 	}
-	scripts := make([]string, len(operations))
-	for i, operation := range operations {
-		scripts[i] = operation.apply
-	}
-	completed, applyErr := runWindowsNetworkBatch(ctx, name, scripts, false)
-	for _, i := range completed {
-		if operations[i].undo != "" {
-			state.undo = append(state.undo, operations[i].undo)
-		}
-	}
-	if applyErr != nil {
-		return cleanup, applyErr
-	}
-
-	return cleanup, nil
+	return cleanup, state.apply(ctx, operations, system)
 }
 
 func (windowsHost) RunHook(ctx context.Context, hook, name string) error {

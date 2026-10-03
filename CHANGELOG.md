@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## v0.4.2 - 2026-10-03
+
+Adaptive transport stability and native Windows network setup and cleanup.
+Existing automatic settings require no additional configuration.
+
+- Bound Reed–Solomon recovery-cache growth during long lossy sessions, and
+  expire abandoned fragment assemblies without blocking completion of packets
+  already being reassembled.
+- Reconnect automatically when a QUIC session's send worker fails. Release
+  queued datagrams on closure and close owned UDP sockets when listener setup
+  fails.
+- Preserve endpoint route ownership across cleanup failures and concurrent
+  peer edits; prune obsolete DNS candidate history and keep status readable
+  while endpoint refresh waits on the network. Pause further migrations when
+  failed cleanup accumulates, then resume as retired routes are released.
+- Recover safely when a peer-set preparation fails midway or rolls back
+  before commit; preserve restored generations for subsequent DNS updates.
+- Allow reordered FEC groups to complete before declaring their source frames
+  lost, and keep bounded connection-event history without copying the whole
+  history for each event.
+- Adapt burst interleaving to repeated losses in short groups, preserve
+  configured interleave minima, and grow the parity window with additional
+  lanes without delaying source frames. Expire stale bandwidth peaks from
+  the congestion controller's rolling sample window. Prevent loss, ACK queue
+  pressure and ECN reports from repeatedly reducing bandwidth for the same
+  outstanding packet flight.
+- Discard replacement links when their closed-session history is evicted,
+  bounding diagnostics during repeated reconnections.
+- Disable duplicate-address probing on the owned Windows tunnel interface
+  before assigning addresses, so startup does not report success while its
+  addresses are still unusable.
+- Resolve Windows tunnel adapter identity through native IP Helper. Cancel
+  queued desktop management operations promptly while preserving serialized
+  mutations and independent status access.
+- Remove owned Windows tunnel addresses and routes through native IP Helper
+  APIs during shutdown, retaining interface identity and partial-apply rollback
+  without loading PowerShell for address or route cleanup. Reset tunnel DNS
+  through the native API on supported Windows while preserving existing DNS
+  reset semantics and the fallback for older Windows.
+- Configure Windows tunnel MTU, address readiness, temporary addresses and
+  active routes through native APIs at startup. Preserve per-operation rollback
+  ownership. Apply DNS through the native interface API, preserving server
+  order, unspecified address families, DNS suffix and search-list policy, with
+  compatibility fallback only when the API is unavailable.
+- Add reproducible real-peer Windows lifecycle, checked bidirectional traffic,
+  burst-recovery, and long-running benchmark fixtures.
+
 ## v0.4.1 - 2026-09-30
 
 Faster Windows tunnel startup and shutdown, with actionable failure diagnostics.

@@ -1,0 +1,153 @@
+{
+  "decision": "Rejected for production. Retain the existing automatic controller and steady pacing gain 1.1. This file records an isolated diagnostic, not an available setting or shipped feature.",
+  "source": {
+    "source_commit": "487450a84435f6fab5a0db37bd0c0c24b7455309",
+    "source_mode": "immutable archive plus isolated prototype.patch; never installed in production",
+    "variant": "prototype",
+    "patch_sha256": "177cbb91bf46c1e771e2653f02a29d14b35afb851fda53db0d35b2ed6c2e3ada",
+    "overlay_sha256": {
+      "model_sender.go": "2d4242229c1f5c0fa8409cb42d13bde730afa474813869bed387a3dc5d492234",
+      "model_pressure_probe.go": "b32ba1dc4e896196d42e357b255aac75ded8c844b98cb64795caa32e18f06ea6",
+      "model_pressure_probe_test.go": "bfc3bf474ee540110d0ef2e615fff1050b40740f36eae379729480f5e273bb17"
+    },
+    "image": "wg-quic-qos:auto-probe-487450a",
+    "binary_sha256": {
+      "wg-quic": "6789b2d17a414dd99b7e65f4041c3c46b69e643f8aaa87642674d404bf1185b9",
+      "wg-quic-quick": "ee0244fc89f6b49e4a7e7f0f6602c47b447c780c04deb2f8a5fff1ef6ef386df"
+    },
+    "image_id": "sha256:348d07baa9f751524319463e2940c733f738bfbbf17689ca712c2fc4da55d37e"
+  },
+  "baseline_source": "manifest.json#/sources/burst-candidate",
+  "trial_count": 12,
+  "additional_observation_trial": {
+    "count": 1,
+    "purpose": "Collect the existing controller event stream throughout another prototype policer run; throughput excluded from comparisons because observation adds CPU work.",
+    "trial_exit_code": 0,
+    "elapsed_s": 45.177849306026474,
+    "streams": {
+      "752ecb4409bdd0167ef9c0a2da210751": {
+        "first_available": 277,
+        "last_sequence": 2324,
+        "events_dropped_total": 276
+      },
+      "f342cf15cf7f6b10ab3ddea0934d41db": {
+        "first_available": 1,
+        "last_sequence": 488,
+        "events_dropped_total": 0
+      }
+    },
+    "event_count": 2536,
+    "pressure_events": [],
+    "gaps": [],
+    "failed_queries_during_recreation": 5,
+    "note": "Separate diagnostic trial; event collection adds CPU work and its throughput is not used as comparative evidence.",
+    "fresh_trial_stream": "f342cf15cf7f6b10ab3ddea0934d41db",
+    "fresh_trial_stream_events": 488,
+    "fresh_trial_stream_complete": true
+  },
+  "conditions": {
+    "inherit": "manifest.json common_conditions",
+    "cpu_affinity": [
+      36,
+      37
+    ],
+    "policer_repeats_per_variant": 2,
+    "other_repeats_per_variant": 1,
+    "short_random_rtt_ms": 2,
+    "duration_s": "30, except 45-second bandwidth steps",
+    "QUIC_GO_DISABLE_GSO": "1"
+  },
+  "experimental_state_machine": [
+    "Collect only in steady probe, outside RTT calibration/candidates, without spurious-loss increases or long send inactivity. Do not equate low bytes-in-flight with low application demand.",
+    "Require at least 1second, 2000 acknowledged packets, 16 lost packets, and loss in two distinct 250ms intervals. These are experimental sample gates, not a statistically reliable policer classification.",
+    "Temporarily set effective gain 1.0 and cap the target at entry pacing divided by 1.1, preventing a rising estimate from canceling the intervention. Ignore the first max(100 ms, 2 RTT) when evaluating it.",
+    "Explore for at most 2seconds after settling. Require enough samples, ACKed byte rate at least 95% of baseline, and normalized loss at most 60% of baseline before a temporary hold lasting at most 3seconds. Always remove the cap at its deadline, even without ACK callbacks, then allow at least 1second without the cap.",
+    "Clear on idle, path/queue ambiguity or increased spurious loss. The experiment does not identify an ISP policy and never runs in Startup."
+  ],
+  "unit_validation": {
+    "command": "go test -race ./internal/congestion ./internal/ackhandler in the isolated patched quic-go module",
+    "result": "pass",
+    "coverage": [
+      "hard cap survives an inflated bandwidth estimate",
+      "deadline removes cap without ACK callbacks",
+      "Startup/RTT grace/queue/one ACK batch/sparse loss do not arm",
+      "idle/reordering/path change release",
+      "low flight relative to cwnd is not mistaken for no demand"
+    ]
+  },
+  "rejection_reasons": [
+    "No lasting intervention was observed in the comparative policer telemetry. Throughput differences cannot be attributed to the experiment merely because their means differ.",
+    "The low-queue predicate uses max(latest RTT,smoothed RTT) on every ACK. Every invalid observation postpones eligibility by one second, followed by another full evidence window. Isolated timing noise at a high ACK rate can indefinitely starve exploration. Loosening this after seeing the result would require a new, separately validated design.",
+    "Comparing target pacing against its entry value is not independent evidence of lower actual wire send rate: the entry cap guarantees that inequality. Causal evaluation needs send-time or wire-byte measurements over matched windows.",
+    "A zero-byte congestion event represents ECN but does not directly cancel this experiment's evidence. Explicit congestion handling must be included before reconsidering such a policy.",
+    "Selecting a baseline because loss is high biases a subsequent before/after comparison toward apparent improvement. Small packet windows, ACK batching, changing FEC redundancy and application demand add confounding factors; a short random-loss dip must not cause an indefinite cap."
+  ],
+  "next_research_boundary": [
+    "Aggregate queue and loss evidence over completed packet rounds or RTT windows, separating path calibration from healthy observations; do not require every individual RTT sample to be noiseless.",
+    "Measure actual send and ACK-delivery spans, retain a hard probe deadline, add ECN invalidation, and use an independent confirmation or reversal phase. Keep periodic upward capacity discovery and reset on path changes.",
+    "Repeat short/high RTT, ACK aggregation, random and burst loss, different bucket sizes, bandwidth step up/down, and sparse demand before considering production. A fixed global gain decrease is not justified by the current small matrix."
+  ],
+  "bandwidth_steps": [
+    {
+      "variant": "baseline",
+      "repeat": 1,
+      "phases": {
+        "initial50": {
+          "rx_goodput_mbit": 42.46733255625049,
+          "samples": 10,
+          "pacing_mbit_mean": 58.08716625,
+          "queue_delay_ms_mean": 18.62125,
+          "cwnd_bytes_mean": 270771.75,
+          "loss_counter_end": 0
+        },
+        "reduced10": {
+          "rx_goodput_mbit": 7.549746480000069,
+          "samples": 10,
+          "pacing_mbit_mean": 11.435150625,
+          "queue_delay_ms_mean": 20.277124999999998,
+          "cwnd_bytes_mean": 49288.75,
+          "loss_counter_end": 0
+        },
+        "restored50": {
+          "rx_goodput_mbit": 42.78172102575544,
+          "samples": 10,
+          "pacing_mbit_mean": 51.16084,
+          "queue_delay_ms_mean": 18.174142857142858,
+          "cwnd_bytes_mean": 234445.85714285713,
+          "loss_counter_end": 0
+        }
+      }
+    },
+    {
+      "variant": "prototype",
+      "repeat": 1,
+      "phases": {
+        "initial50": {
+          "rx_goodput_mbit": 42.468913127914,
+          "samples": 10,
+          "pacing_mbit_mean": 67.44162225,
+          "queue_delay_ms_mean": 17.387875,
+          "cwnd_bytes_mean": 292206.875,
+          "loss_counter_end": 0
+        },
+        "reduced10": {
+          "rx_goodput_mbit": 8.493465701250003,
+          "samples": 10,
+          "pacing_mbit_mean": 12.480385,
+          "queue_delay_ms_mean": 20.831125,
+          "cwnd_bytes_mean": 54265.0,
+          "loss_counter_end": 0
+        },
+        "restored50": {
+          "rx_goodput_mbit": 42.67717929105897,
+          "samples": 10,
+          "pacing_mbit_mean": 63.06241371428571,
+          "queue_delay_ms_mean": 19.756285714285713,
+          "cwnd_bytes_mean": 269801.14285714284,
+          "loss_counter_end": 0
+        }
+      }
+    }
+  ],
+  "raw_artifact_location": "dist/stability-2026-10-03/qos-auto-probe (local ignored artifacts)"
+}

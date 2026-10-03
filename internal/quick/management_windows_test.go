@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -667,7 +666,7 @@ PreUp = whoami
 		}
 		return nil, cfg, nil
 	}
-	var mutations sync.Mutex
+	var mutations windowsManagementMutationGate
 	_, err = runWindowsManagementOperation(
 		context.Background(),
 		windowsManagementRequest{Action: "up", Name: "hooked"},
@@ -690,7 +689,7 @@ func TestWindowsManagementCheckUsesSecureStoredConfigOpen(t *testing.T) {
 		}
 		return nil, nil, want
 	}
-	var mutations sync.Mutex
+	var mutations windowsManagementMutationGate
 	_, err := runWindowsManagementOperation(
 		context.Background(),
 		windowsManagementRequest{Action: "check", Name: "office"},
@@ -711,7 +710,7 @@ func TestWindowsManagementReadUsesSecureStoredConfigReader(t *testing.T) {
 		}
 		return configuration, nil
 	}
-	var mutations sync.Mutex
+	var mutations windowsManagementMutationGate
 	got, err := runWindowsManagementOperation(
 		context.Background(),
 		windowsManagementRequest{Action: "read", Name: "office"},

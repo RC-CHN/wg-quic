@@ -45,10 +45,14 @@ experiment.
 
 Loss, duplication, reordering, and protocol-policy trials automatically disable
 TSO/GSO/GRO plus UDP segmentation/GRO forwarding on the container outer
-interfaces. Without this, one large virtual segment can count as one netem
-packet and a configured 5% loss rate can become only a fraction of a percent on
-the wire. Clean trials leave offloads enabled. Override the decision only for
-a deliberate control with `DISABLE_OFFLOADS=0|1`.
+interfaces, and disable quic-go's socket-level UDP GSO with
+`QUIC_GO_DISABLE_GSO`. Disabling device offloads alone can still let
+`UDP_SEGMENT` batches reach the qdisc. One batch can then count as one netem
+packet, so the loss pattern differs between FEC modes that use different GSO
+policies; a policer can also reject an oversized batch. Check the recorded
+`tc` packet and drop counters when interpreting loss trials. Clean trials leave
+offloads enabled. Override the decision only for a deliberate control with
+`DISABLE_OFFLOADS=0|1`.
 
 ## Synthetic link profiles
 
@@ -102,12 +106,18 @@ writes `intervals.csv` and samples controller state into `controller.csv`
 (0.5-second cadence by default), making rate collapse, protection changes, and
 recovery visible instead of only as one run-wide average.
 
-Iperf reports quarter-second intervals by default
-(`IPERF_INTERVAL_SECONDS=0.25`). `summary.csv` derives the first nonzero
-delivery interval, longest and total zero-throughput stall, and stall count.
+Iperf's client reports quarter-second intervals by default
+(`IPERF_INTERVAL_SECONDS=0.25`). The existing summary fields `first_delivery_s`,
+`longest_stall_s`, `total_stall_s`, and `stall_count` use those client intervals.
+For a TCP sender these describe application writes into the local socket,
+not bytes delivered to the receiver: buffered data may continue arriving while
+the sender reports zero writes. Analyze `iperf-server.json` or the client's
+`server_output_json` for receive-side delivery gaps, and report its actual
+interval duration (the server may report one-second intervals).
 Set `STALL_BPS_THRESHOLD` to treat very-low-throughput intervals as stalls.
-These values have interval resolution; `first_delivery_s` is an upper bound,
-not a packet-level latency measurement.
+These values have interval resolution; the legacy `first_delivery_s` field is
+an upper bound on the first client-observed write interval, not a packet-level
+latency measurement.
 
 `events.csv` puts fixture lifecycle events and controller samples on the same
 monotonic trial-relative timeline. For occasional TCP diagnosis, set
@@ -295,8 +305,8 @@ Stop any retained fixture:
 - local queue drops, peak ArmorBind/QUIC DATAGRAM send queue depth, and
   quic-go application DATAGRAM receive queue drops/high-water marks on both
   endpoints;
-- actual measured workload duration, first-delivery bound, and
-  zero/low-throughput stall measurements;
+- actual measured workload duration, first-write bound, and
+  zero/low-throughput application-write stalls at the sender;
 - Go allocation bytes/objects and per-second rates, peak live heap objects, GC
   cycles, and GC pause CPU consumed during the measured workload;
 - core process CPU seconds and final RSS;

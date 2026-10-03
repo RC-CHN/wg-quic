@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "formal_trial_count": 64,
+  "diagnostic_trial_count": 12,
+  "sources": {
+    "v041": {
+      "source_commit": "bd405b6e61b50846cd891e627d102bca52af85f7",
+      "source_version": "v0.4.1",
+      "binary_version": "0.1.0-dev (baseline benchmark build has no release ldflags)",
+      "image": "wg-quic-windows-soak:20261003-baseline",
+      "image_id": "sha256:a47276453fa5a68c4f688135999d1f7097c244055b5b8f195e1d36fbdc2a8276",
+      "core_sha256": "c3ef02809a84b0df339a7859bd9facc3c8ea7cc71c3732c1462dd04f5d875dcd",
+      "quick_sha256": "25e1da7933df804bfa1f02a02e781aaf1a5b0a094505a184311d0d4611153d4a"
+    },
+    "stable": {
+      "source_commit": "a797059ac4945c8d114dafc57183b4140f506f85",
+      "source_mode": "immutable git archive (all uncommitted work excluded)",
+      "fixed_image": "wg-quic-qos:fixed-a797059",
+      "sha256": {
+        "wg-quic": "14c5e376ebfc47e7913065cfd11c0eba7ffa7057cfbf91edcf95ca4af35a0f97",
+        "wg-quic-quick": "70ac030f9832916d4b11f81c825a090dbab6d559182b65b8af5c8657634a28ef"
+      },
+      "image_id": "sha256:826870c1aef9677482dd60f6fc2650bcc4cda4941cd1e4cdc06bcd9e75a50d98"
+    },
+    "window": {
+      "source_commit": "a797059ac4945c8d114dafc57183b4140f506f85",
+      "source_mode": "immutable archive plus the exact window-fix.patch overlay; no other workspace changes",
+      "patch_sha256": "2b51ed2d88a9e6596e2d6dad65b8e7b40f1d89c63d7c32448df9cb5c9587eadd",
+      "overlay_sha256": {
+        "third_party/quic-go/internal/congestion/model_sender.go": "ed5fb40c1ca558d0dd8a46a901302fe3b6a35037023992cb65d59f7177fcb900",
+        "third_party/quic-go/internal/congestion/model_sender_test.go": "dd8931d8528bf37f5df576904a5efbd95c0c72c5aca8e43d8ec0617d00ccf830"
+      },
+      "image": "wg-quic-qos:window-fix-a797059",
+      "overlay_committed_as": "f88e362",
+      "sha256": {
+        "wg-quic": "ff7bf8acc3da6645f96bff3c3fce70627d540fec542b5599e5923b47427218ae",
+        "wg-quic-quick": "f108ffdafe4e73286b0d4d3b9811e69b6735b13ec9ccc8a0263a354dfad93f37"
+      },
+      "image_id": "sha256:02c0c6b7f2713a6bfca20cfa7438b3b5c0a94d4250df278b9f53d072f2fe2862"
+    },
+    "burst-parent": {
+      "variant": "parent",
+      "source_commit": "b199e2fb0df8e59f96f2914c26ff3b1b188c3b8f",
+      "source_mode": "immutable git archive; no working tree changes",
+      "archive_sha256": "30c791d56d5816a86ce3b94bb36c421d1c2edce42d1ee3a59ac63fd3825ff44c",
+      "image": "wg-quic-qos:burst-parent-b199e2f",
+      "binary_sha256": {
+        "wg-quic": "16a8f6292b0c36ff0c6ce1167307ecbe8c8c4d4a19ac069f06c3f84c10806b9a",
+        "wg-quic-quick": "982c5f4fc2f6aa6fdeafc19afb30f1ff7215af44dbe0d77523dcdc5397a2357f"
+      },
+      "image_id": "sha256:58c6ca5cd4a2579028736d1c8aaf84b3e6add478dda9513007d418d08fadd0a8"
+    },
+    "burst-candidate": {
+      "variant": "candidate",
+      "source_commit": "487450a84435f6fab5a0db37bd0c0c24b7455309",
+      "source_mode": "immutable git archive; no working tree changes",
+      "archive_sha256": "368cfb26f3f71c76e7fc88f73ad31a439ecfea06f9b711b8b7a799e8bc294a79",
+      "image": "wg-quic-qos:burst-candidate-487450a",
+      "binary_sha256": {
+        "wg-quic": "4d7a498d0edf3bf0f82c0c59b30b42309d3865a2fe4c279323fcf8e849ccdc2f",
+        "wg-quic-quick": "dcb0bf042f30790d3d59f0d3b92ac2ebf9155f15a406b6bafcb6573b892ff946"
+      },
+      "image_id": "sha256:8a5f45f82063d1f4dd4dfda430a6dffbee6e66b330e8387bc12fe3a9a5c44db9"
+    },
+    "gain100": {
+      "source_commit": "487450a84435f6fab5a0db37bd0c0c24b7455309",
+      "source_mode": "immutable archive plus only pacing-gain.patch",
+      "variant": "gain100",
+      "steady_pacing_gain": 1.0,
+      "patch_sha256": "2a04378e8fc52b520b4dced9f4bac3374f41d7b7fb13836b29f4f8616ed2e861",
+      "source_file_sha256": "2d6a90662bafd416b2132c41ac46f645e2248e589eb0abeed056d686929c7da1",
+      "image": "wg-quic-qos:pacing-gain100-487450a",
+      "binary_sha256": {
+        "wg-quic": "8590789192d9b91c8b56fc0e50347add2a9b25f334dc6863678f257e0552f918",
+        "wg-quic-quick": "ffcaed2fb083eac75892ce6b53b57c4a41bcecde8c32ba19a14743a3d288207d"
+      },
+      "image_id": "sha256:25362d8f7cd9f98f670c84f3b9000cc1aca6ae8974eafbb2ec989bda90a1cb7b"
+    },
+    "gain090": {
+      "source_commit": "487450a84435f6fab5a0db37bd0c0c24b7455309",
+      "source_mode": "immutable archive plus only pacing-gain.patch",
+      "variant": "gain090",
+      "steady_pacing_gain": 0.9,
+      "patch_sha256": "bf45b633966cebfd0be6a18860bf0157256786fab151f39a6fdbd008b2992430",
+      "source_file_sha256": "d141faf1eebbbd212fa64535418b4ba9c069aa7ee43c70363b7e74fa65a7150a",
+      "image": "wg-quic-qos:pacing-gain090-487450a",
+      "binary_sha256": {
+        "wg-quic": "a1bb5b86582e0eabb908eec2dc1e0b61e17c083a8594628f60950ff41bf1c8ef",
+        "wg-quic-quick": "192f57ded1213de0f057b2c99f665777626208080fa8cabb7dcdaa7d457e639c"
+      },
+      "image_id": "sha256:6711ae5e3d4eb42544829927e0bbe418a74a5b374064d3074efa036145ae6d3c"
+    }
+  },
+  "experiments": {
+    "qos-baseline": {
+      "purpose": "v0.4.1 FEC off versus auto",
+      "cpus": [
+        20,
+        21
+      ],
+      "expected_trials": 16,
+      "fixture_sha256": {
+        "run.sh": "0b2e82a42ce8aec44321ab80af8aad59b968f1ea7ede4ffcadd588bc39edb913",
+        "compose.yaml": "db872992fa61059c106efe90ad40c689636f0de7e03b14dcee7635427ecd99f5",
+        "a.conf.in": "4167044b62cefbc920e2c2e3c4de73c3bc69bff9206ba207b2ca31cb584b049f",
+        "b.conf.in": "c400ca5e4e49092a4f68e2f2b7986e10df2b2b9dbc2e3e0adbd815a295b6879b",
+        "a.uapi.in": "a72064b152765d25999aaee0afe15f1d5615e5ae4775615bf6613bc1c3f66b07",
+        "b.uapi.in": "5e7300b92de403ea3d41bc60194bf221141db9e252ba7e5ce21c25babc8c53a1"
+      }
+    },
+    "qos-fixed": {
+      "purpose": "stable fixes FEC off versus auto",
+      "cpus": [
+        20,
+        21
+      ],
+      "expected_trials": 16,
+      "fixture_sha256": {
+        "run.sh": "269cd782f236fd39b2857bf75aafcd2d08ef7032c489fd8867bb99fc07ebfa8b",
+        "compose.yaml": "1d39806cd431710e87dcb4459ce8abfd8308ef9d294cc8a7e6f795535070cc1d",
+        "a.conf.in": "4167044b62cefbc920e2c2e3c4de73c3bc69bff9206ba207b2ca31cb584b049f",
+        "b.conf.in": "c400ca5e4e49092a4f68e2f2b7986e10df2b2b9dbc2e3e0adbd815a295b6879b",
+        "a.uapi.in": "a72064b152765d25999aaee0afe15f1d5615e5ae4775615bf6613bc1c3f66b07",
+        "b.uapi.in": "5e7300b92de403ea3d41bc60194bf221141db9e252ba7e5ce21c25babc8c53a1"
+      }
+    },
+    "qos-window-fix": {
+      "purpose": "only bandwidth-window expiry fix",
+      "cpus": [
+        24,
+        25
+      ],
+      "expected_trials": 16,
+      "fixture_sha256": {
+        "run.sh": "cd40bd85a29fca592814af81b71380a2b2235f8edb529f3b7d485b54bb8d2dbc",
+        "compose.yaml": "2a5cc1ee71643a34c5cd7e1e74756771c5a2ab1a5007f37a38570342c8762da3",
+        "a.conf.in": "2fe0baf59add2b9fcbf838a699cd30802327a32051e8726b6720534f65294dd1",
+        "b.conf.in": "ace7e6844ec03791a5013a919721727dcba4c10ac88907b1ba1a56afac5f5695",
+        "a.uapi.in": "d917c4c08dc4a8d032fcdccdfe1e1fc3f16ead7df92f38f5cbd14db6e000d357",
+        "b.uapi.in": "f68e01e89df26eebfd93190e36cd5a40892800b188f4219c4c730baa13fbf3cf"
+      }
+    },
+    "qos-burst-fix": {
+      "purpose": "only automatic burst interleaving fix",
+      "cpus": [
+        28,
+        29
+      ],
+      "expected_trials": 16,
+      "fixture_sha256": {
+        "run.sh": "3cdf16ca46382a57b4ffa5199089cc2d145551365978a783689f3d9e563241b6",
+        "compose.yaml": "e336e6c5f3c1fba982b3b54f2cde261521daa8981ed1774dbf8528fdc8689a12",
+        "a.conf.in": "84133b4051e7c751e91b68d779924efeb4075aa20aa42c734cc4bfe3cc7a0c1b",
+        "b.conf.in": "50734a56442208ddf6dac20bda14d49ebff967f072c529212341c420755b557c",
+        "a.uapi.in": "a2d665302ef689885cee90f157ba642323e2691e3bd72050409d0ae0f2d5a0d0",
+        "b.uapi.in": "21236edfbcb538ba4d2b77ab2459dd17a02cf6f901700b9a707375c55287b38a"
+      }
+    },
+    "qos-pacing-gain": {
+      "purpose": "diagnostic only: fixed steady pacing gains, not a production change",
+      "cpus": [
+        32,
+        33
+      ],
+      "expected_trials": 12,
+      "fixture_sha256": {
+        "run.sh": "0f8fabe97e27db99fba62984d2153a6a74b2d6016191ba9894eb3306825567f7",
+        "compose.yaml": "e59e806f7e25bb3a819ab99ceae9cfa0e2fdf10b8afe6127a165605723cad517",
+        "a.conf.in": "b24e4084785bca6dfc63be0163a57fe6cb59664b8713a883394ee9fc16648d72",
+        "b.conf.in": "5436819c7d4573960f4691d807803cba0354064cabb83fc93b1aa881f72e3f6b",
+        "a.uapi.in": "e3007b9370279c8be4b80dcec86cf49e8757d8d3cd3269aa7ec43b9bdc9c5bc1",
+        "b.uapi.in": "4abf825872c1803ebf91e430e0507d2bd5c006828d37e69fc5711af2ff9189df"
+      }
+    }
+  },
+  "common_conditions": {
+    "transport": "QUIC datagrams, congestion auto, Salamander obfuscation",
+    "workload": "one TCP stream inside WireGuard over a real TUN interface",
+    "duration_s": "30, except 45-second step cases",
+    "cpu_quota_each": 1,
+    "GOMAXPROCS": 1,
+    "memory_limit": "512 MiB",
+    "GOMEMLIMIT": "192 MiB",
+    "mtu": 1280,
+    "netem_queue_packets": 1000,
+    "telemetry_interval_s": 1,
+    "iperf_client_interval_s": 0.25,
+    "device_gso_gro_disabled": true,
+    "QUIC_GO_DISABLE_GSO": "1",
+    "repeat_order": "alternate variants on the second repetition; fresh containers for every trial",
+    "network_namespace": "separate container bridge per concurrently running experiment"
+  },
+  "link_models": {
+    "clean": {
+      "rate_mbit_each_direction": 50,
+      "delay_ms_each_direction": 10
+    },
+    "random": {
+      "rate_mbit_each_direction": 50,
+      "delay_ms_each_direction": 10,
+      "independent_loss_pct_each_direction": 2
+    },
+    "burst": {
+      "rate_mbit_each_direction": 50,
+      "delay_ms_each_direction": 10,
+      "stationary_loss_pct": 2,
+      "mean_burst_packets": 8,
+      "netem_arguments": "loss state 0.2551% 12.5000%"
+    },
+    "policer": {
+      "rate_mbit_each_direction": 50,
+      "bucket_bytes": 32768,
+      "delay_ms_each_direction": 10,
+      "netem_rate_limit": null,
+      "match": "outer IPv4 UDP",
+      "tc_action": "police rate 50mbit burst 32k conform-exceed drop/pass"
+    },
+    "step": {
+      "rate_mbit_at_seconds": {
+        "0": 50,
+        "15": 10,
+        "30": 50
+      },
+      "delay_ms_each_direction": 10,
+      "loss_pct": 0
+    }
+  },
+  "fixture_changes": [
+    "Ettool alone did not disable QUIC UDP_SEGMENT batching. Initial off/auto loss comparisons had unequal actual packet loss and were discarded. All rows here disable socket GSO as well as device offloads; repository fix a797059.",
+    "An experiment-local hook applies clsact egress u32 UDP tc police at 50mbit with a 32 KiB bucket on both endpoints, independently of the 10ms netem delay. This is genuine token-bucket policing, not a rate-limited queue.",
+    "Experiment-local step10 and step50 schedule profiles preserve 10ms delay while changing both direction rates at 15/30 seconds.",
+    "The old fixture truncated separate iperf-server.json at 400 lines. Receiver totals and phase intervals here come from complete server_output_json in iperf-client.json. Repository fix 93b5f35 preserves complete standalone JSON; verified with a 711-line completed result. Pacing diagnostics use the fixed capture.",
+    "All image variants use fixed git archives. The window and pacing diagnostics overlay only the recorded single-change patch, not arbitrary working-tree state. Fixed diagnostic builds use -buildvcs=false to avoid an exported tree inheriting a parent checkout's revision.",
+    "Discarded setup failures: FEC fixture had mismatched copied endpoint addresses before its first timed trial; pacing fixture initially requested a subnet already occupied by another test and Docker rejected it. Both were corrected before measurement; no failed setup is counted as a trial."
+  ],
+  "metric_definitions": {
+    "goodput_mbit": "receiver application TCP bytes per second from iperf sum_received, decimal Mbit/s",
+    "parity_over_wire_datagrams_pct": "sent FEC parity shards divided by all wire datagrams, not bytes; partial-group parity/data is reported separately and must not be mistaken for total overhead",
+    "fec_unrecovered": "receiver FEC source frames still missing; off-mode zero means no FEC measurement, not zero link loss",
+    "steady_pacing_mbit_mean": "mean controller pacing target after the first 5 seconds; not the average actual wire transmit rate",
+    "longest_sender_write_stall_s": "longest contiguous zero-byte sender application-write interval in the 250 ms iperf client series; this is not a receiver delivery gap or a tunnel disconnection",
+    "qdisc_dropped_a": "forward endpoint netem counter; inspect separately from clsact policer counter",
+    "send_queue_drops": "bounded local send-queue overflow, distinct from network impairment and from QUIC receive-queue overflow"
+  },
+  "uncertainty": [
+    "Most comparisons have n=2, and diagnostic random/clean/step have n=1. No confidence intervals or universal percentage improvement are claimed.",
+    "Kernel random-loss sequences were not seeded or replayed. Actual drop counts and workload packet counts differ between trials, especially for bursts. Compare useful delivery, measured drop counters and denominators; absolute FEC residual counts alone are misleading.",
+    "Short synthetic path tests do not establish multi-day stability, real ISP policy identification, or behavior on all RTTs and bucket sizes.",
+    "Pacing diagnostics are not production policy. A lower fixed gain can induce a higher estimated bandwidth, so the actual pacing target need not decrease monotonically. Bandwidth increases must be tested separately from policing."
+  ],
+  "raw_artifact_location": "dist/stability-2026-10-03 (local ignored artifacts; intentionally not committed)"
+}

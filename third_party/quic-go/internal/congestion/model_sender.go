@@ -57,6 +57,7 @@ type modelSender struct {
 	bandwidthSampleCount int
 
 	lastQueueResponse monotime.Time
+	queueResponseEnd  protocol.PacketNumber
 	rttSeeded         bool
 
 	propagationRTT     time.Duration
@@ -102,6 +103,7 @@ func NewModelSender(
 		state:             modelStateStartup,
 		largestSent:       protocol.InvalidPacketNumber,
 		roundEnd:          protocol.InvalidPacketNumber,
+		queueResponseEnd:  protocol.InvalidPacketNumber,
 		rttSeeded:         rttStats.HasMeasurement(),
 	}
 	if rttStats.HasMeasurement() {
@@ -153,12 +155,12 @@ func (m *modelSender) OnPacketAcked(
 	m.updateFECSignal()
 	m.observeDelivery(ackedBytes, priorInFlight, eventTime)
 	m.updateRound(packetNumber, priorInFlight >= m.congestionWindow/2)
-	m.respondToPersistentQueue(eventTime)
+	m.respondToPersistentQueue(eventTime, packetNumber)
 	m.updateCongestionWindow(ackedBytes, priorInFlight)
 }
 
 func (m *modelSender) OnCongestionEvent(
-	_ protocol.PacketNumber,
+	packetNumber protocol.PacketNumber,
 	lostBytes protocol.ByteCount,
 	_ protocol.ByteCount,
 ) {
@@ -170,11 +172,11 @@ func (m *modelSender) OnCongestionEvent(
 
 	// A zero-byte event is ECN. Treat it as an explicit congestion signal.
 	if lostBytes == 0 {
-		m.reduceModel(0.75)
+		m.respondToCongestion(m.clock.Now(), packetNumber, 0.75)
 		return
 	}
 	if m.hasStandingQueue(m.clock.Now(), modelQueueThreshold) {
-		m.reduceModel(0.85)
+		m.respondToQueue(m.clock.Now(), packetNumber, 0.85)
 	}
 }
 
@@ -412,7 +414,10 @@ func (m *modelSender) recordBandwidthSample(sample Bandwidth) {
 	m.bandwidthSamples[m.bandwidthSampleIndex] = sample
 	m.bandwidthSampleIndex = (m.bandwidthSampleIndex + 1) % len(m.bandwidthSamples)
 	m.bandwidthSampleCount = min(m.bandwidthSampleCount+1, len(m.bandwidthSamples))
-	estimate := m.bandwidthEstimate
+	// Only the samples still in the window may contribute. Seeding this with
+	// the previous estimate retains a historical peak forever, even after
+	// every new capacity-limited sample measures a slower path.
+	var estimate Bandwidth
 	for i := 0; i < m.bandwidthSampleCount; i++ {
 		estimate = max(estimate, m.bandwidthSamples[i])
 	}
@@ -443,16 +448,31 @@ func (m *modelSender) updateRound(acked protocol.PacketNumber, capacityLimited b
 	}
 }
 
-func (m *modelSender) respondToPersistentQueue(now monotime.Time) {
+func (m *modelSender) respondToPersistentQueue(now monotime.Time, packetNumber protocol.PacketNumber) {
 	if !m.hasStandingQueue(now, modelSevereQueueThreshold) {
 		return
 	}
-	interval := m.modelRTT()
-	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < interval {
+	m.respondToQueue(now, packetNumber, 0.90)
+}
+
+func (m *modelSender) respondToQueue(now monotime.Time, packetNumber protocol.PacketNumber, factor float64) {
+	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < m.modelRTT() {
+		return
+	}
+	m.respondToCongestion(now, packetNumber, factor)
+}
+
+// Feedback from the flight already outstanding when we reduced the model
+// cannot describe the effect of that reduction. Loss, ACK queue pressure and
+// explicit CE marks therefore share one recovery boundary. ECN bypasses the
+// queue predicate and its RTT timer, since new-flight CE feedback is explicit.
+func (m *modelSender) respondToCongestion(now monotime.Time, packetNumber protocol.PacketNumber, factor float64) {
+	if m.queueResponseEnd != protocol.InvalidPacketNumber && packetNumber <= m.queueResponseEnd {
 		return
 	}
 	m.lastQueueResponse = now
-	m.reduceModel(0.90)
+	m.queueResponseEnd = max(m.largestSent, packetNumber)
+	m.reduceModel(factor)
 }
 
 func (m *modelSender) seedFromFirstRTT() {

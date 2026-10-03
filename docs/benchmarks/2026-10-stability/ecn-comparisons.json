@@ -1,0 +1,96 @@
+[
+  {
+    "batch": "ecn-results",
+    "profile": "marks",
+    "baseline_variant": "flight-fix",
+    "candidate_variant": "ecn-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        42.36486239243831,
+        41.95062448749022
+      ],
+      "mean_goodput_mbps": 42.157743439964264,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        315.75,
+        313.543
+      ],
+      "core_cpu_percent": [
+        41.5957840175383,
+        43.52168068220246
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        42.5430960027133,
+        42.56749801243226
+      ],
+      "mean_goodput_mbps": 42.555297007572776,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        312.522,
+        335.946
+      ],
+      "core_cpu_percent": [
+        42.826272331426026,
+        42.42973150289114
+      ]
+    },
+    "mean_goodput_change_pct": 0.9430143436748528
+  },
+  {
+    "batch": "ecn-results",
+    "profile": "clean",
+    "baseline_variant": "flight-fix",
+    "candidate_variant": "ecn-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        42.3611367937632,
+        42.618623906804274
+      ],
+      "mean_goodput_mbps": 42.48988035028374,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        324.916,
+        350.444
+      ],
+      "core_cpu_percent": [
+        44.167512962718746,
+        45.83643760000677
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        42.60625823725462,
+        42.50832877158402
+      ],
+      "mean_goodput_mbps": 42.55729350441932,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        451.598,
+        302.923
+      ],
+      "core_cpu_percent": [
+        43.11210124943101,
+        41.95863017716182
+      ]
+    },
+    "mean_goodput_change_pct": 0.15865696391665907
+  }
+]

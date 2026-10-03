@@ -123,6 +123,8 @@ func Open(port uint16, cfg Config) (*Carrier, error) {
 	listener, err := transport.Listen(tlsConfig, quicConfig(cfg))
 	if err != nil {
 		transport.Close()
+		// Transport does not own this socket, including when setup fails.
+		rawConn.Close()
 		return nil, err
 	}
 	return &Carrier{

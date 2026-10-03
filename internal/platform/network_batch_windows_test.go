@@ -5,6 +5,8 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,5 +66,53 @@ func TestWindowsPowerShellBatchCancellation(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("cancelled PowerShell retained the output pipe")
+	}
+}
+
+func TestWindowsNetworkBatchUsesNativeAdapterIndex(t *testing.T) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback == 0 {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		// Check the selected adapter without changing any network state. The
+		// legacy prefix must be removed before the body reaches PowerShell.
+		script := windowsPowerShellBase(iface.Name) +
+			"if ($ifIndex -ne " + fmt.Sprint(iface.Index) + ") { throw 'wrong interface index' }"
+		completed, err := runWindowsNetworkBatch(ctx, iface.Name, []string{script}, false)
+		if err != nil || !reflect.DeepEqual(completed, []int{0}) {
+			t.Fatalf("native interface selection completed=%v err=%v", completed, err)
+		}
+		return
+	}
+	t.Fatal("Windows loopback interface is missing")
+}
+
+func TestWindowsNetworkBatchMissingAdapterDoesNotRunScripts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unexpected.txt")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	completed, err := runWindowsNetworkBatch(ctx, "wg-quic-nonexistent-"+filepath.Base(t.TempDir()), []string{
+		"[IO.File]::WriteAllText(" + powerShellQuote(path) + ",'unexpected')",
+	}, false)
+	if err == nil || len(completed) != 0 {
+		t.Fatalf("missing adapter completed=%v err=%v", completed, err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("script ran without its adapter: %v", err)
+	}
+}
+
+func TestWindowsNetworkBatchCancellationPrecedesAdapterLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	completed, err := runWindowsNetworkBatch(ctx, "invalid\x00adapter", []string{"throw 'unexpected'"}, false)
+	if !errors.Is(err, context.Canceled) || len(completed) != 0 {
+		t.Fatalf("canceled adapter lookup completed=%v err=%v", completed, err)
 	}
 }

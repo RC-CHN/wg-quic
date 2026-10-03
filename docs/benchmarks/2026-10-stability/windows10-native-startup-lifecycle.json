@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "source": {
+    "source_commit": "6d48e0a2dab96eb016f251de643a6ca854008171",
+    "source_mode": "immutable git archive, -buildvcs=false",
+    "archive_sha256": "91d6715e839be4ae170023980eaeff9131341d4bdc8d46b5aa4c4230a14965c5",
+    "version": "0.4.1-stability-6d48e0a",
+    "go": "go version go1.26.3 linux/amd64",
+    "sha256": {
+      "wg-quic.exe": "fc6ce4c4e3ad482b77f3972af95d4f423743d8234be27f3cb5d676d655eca98a",
+      "wg-quic-quick.exe": "32b78e851ca9f1b7890cdba147ea3dc9b7c526748aca9974f1d302bed4ea07c2"
+    }
+  },
+  "operating_system": "Windows 10 Enterprise LTSC 2021 Evaluation 21H2, 19044.7725",
+  "configuration": {
+    "dns": true,
+    "mtu": 1420,
+    "peer_allowed_prefix_count": 2,
+    "congestion": "model",
+    "fec": "auto",
+    "obfs": "salamander"
+  },
+  "environment": {
+    "quick_sha256": "32B78E851CA9F1B7890CDBA147EA3DC9B7C526748ACA9974F1D302BED4EA07C2",
+    "build": "19044",
+    "quick_version": "wg-quic-quick 0.4.1-stability-6d48e0a",
+    "version": "10.0.19044",
+    "desktop_broker": false,
+    "core_version": "wg-quic 0.4.1-stability-6d48e0a",
+    "broker_executable": "",
+    "caption": "Microsoft Windows 10 Enterprise LTSC Evaluation",
+    "broker_sha256": null,
+    "core_sha256": "FC6CE4C4E3AD482B77F3972AF95D4F423743D8234BE27F3CB5D676D655ECA98A"
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "up_ms": 7636,
+      "first_ping_ms": 44,
+      "ping_attempts": 1,
+      "route_check_ms": 1582,
+      "down_ms": 531,
+      "success": true,
+      "error": ""
+    },
+    {
+      "cycle": 2,
+      "up_ms": 6943,
+      "first_ping_ms": 4,
+      "ping_attempts": 1,
+      "route_check_ms": 26,
+      "down_ms": 446,
+      "success": true,
+      "error": ""
+    },
+    {
+      "cycle": 3,
+      "up_ms": 5698,
+      "first_ping_ms": 7,
+      "ping_attempts": 1,
+      "route_check_ms": 37,
+      "down_ms": 844,
+      "success": true,
+      "error": ""
+    },
+    {
+      "cycle": 4,
+      "up_ms": 5947,
+      "first_ping_ms": 2,
+      "ping_attempts": 1,
+      "route_check_ms": 37,
+      "down_ms": 388,
+      "success": true,
+      "error": ""
+    },
+    {
+      "cycle": 5,
+      "up_ms": 5967,
+      "first_ping_ms": 17,
+      "ping_attempts": 1,
+      "route_check_ms": 88,
+      "down_ms": 377,
+      "success": true,
+      "error": ""
+    }
+  ],
+  "summary": {
+    "up_ms": {
+      "median": 5967,
+      "min": 5698,
+      "max": 7636
+    },
+    "first_ping_ms": {
+      "median": 7,
+      "min": 2,
+      "max": 44
+    },
+    "route_check_ms": {
+      "median": 37,
+      "min": 26,
+      "max": 1582
+    },
+    "down_ms": {
+      "median": 446,
+      "min": 377,
+      "max": 844
+    }
+  },
+  "raw_sha256": {
+    "cycles.json": "7cf59844bf67c04903fecb07bb247e36a8c2e319adacf769c220d3a23f411c7d",
+    "environment.json": "ab9411ebd596961a17749bbca6e4309f9ec3ff708b4d1fbad7df57cf5372317d"
+  },
+  "limits": [
+    "Five local QEMU cycles; includes first startup, without selecting only warm rounds.",
+    "Direct CLI under the guest SYSTEM agent; Win11 desktop broker and limited-token testing are archived separately.",
+    "Native startup and native DNS reset are both present; DNS apply retains the prior PowerShell path.",
+    "All five first pings succeeded immediately; timings describe this virtual machine, not a hardware-independent guarantee."
+  ]
+}

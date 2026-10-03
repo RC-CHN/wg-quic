@@ -454,7 +454,7 @@ func serveWindowsManagement(
 
 	var handlers sync.WaitGroup
 	connections := make(chan struct{}, windowsManagementMaxConnections)
-	var mutations sync.Mutex
+	var mutations windowsManagementMutationGate
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -494,7 +494,7 @@ func serveWindowsManagement(
 func handleWindowsManagementConnection(
 	ctx context.Context,
 	connection net.Conn,
-	mutations *sync.Mutex,
+	mutations *windowsManagementMutationGate,
 ) error {
 	_ = connection.SetDeadline(
 		time.Now().Add(windowsManagementHandshakeTimeout),
@@ -727,10 +727,32 @@ func validateWindowsManagementRequest(
 	return nil
 }
 
+// windowsManagementMutationGate serializes changes without retaining canceled
+// requests in the broker's limited pool of connection handlers. Its zero value
+// is ready for use.
+type windowsManagementMutationGate struct {
+	once sync.Once
+	slot chan struct{}
+}
+
+func (g *windowsManagementMutationGate) lock(ctx context.Context) error {
+	g.once.Do(func() { g.slot = make(chan struct{}, 1) })
+	select {
+	case g.slot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (g *windowsManagementMutationGate) unlock() {
+	<-g.slot
+}
+
 func runWindowsManagementOperation(
 	ctx context.Context,
 	request windowsManagementRequest,
-	mutations *sync.Mutex,
+	mutations *windowsManagementMutationGate,
 ) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -742,8 +764,10 @@ func runWindowsManagementOperation(
 		request.Action == "reconcile" ||
 		request.Action == "import" ||
 		request.Action == "delete" {
-		mutations.Lock()
-		defer mutations.Unlock()
+		if err := mutations.lock(ctx); err != nil {
+			return "", err
+		}
+		defer mutations.unlock()
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err

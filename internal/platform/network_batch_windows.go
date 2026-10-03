@@ -20,12 +20,37 @@ func runWindowsNetworkBatch(ctx context.Context, name string, scripts []string, 
 	if len(scripts) == 0 {
 		return nil, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	luid, err := windowsInterfaceLUID(name)
+	if err != nil {
+		return nil, err
+	}
+	return runWindowsNetworkBatchOnInterface(ctx, name, luid, scripts, keepGoing)
+}
+
+func runWindowsNetworkBatchOnInterface(ctx context.Context, name string, luid uint64, scripts []string, keepGoing bool) ([]int, error) {
+	if len(scripts) == 0 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	index, err := windowsInterfaceIndexFromLUID(luid)
+	if err != nil {
+		return nil, err
+	}
 	base := windowsPowerShellBase(name)
 	commands := make([]string, len(scripts))
 	for i, script := range scripts {
 		commands[i] = strings.TrimPrefix(script, base)
 	}
-	return runWindowsPowerShellBatch(ctx, base, commands, keepGoing)
+	// Resolve the adapter through IP Helper before starting PowerShell. Loading
+	// NetAdapter and its CIM provider just to obtain this index adds seconds to
+	// both startup and shutdown under normal Windows background load.
+	setup := "$ifIndex=" + strconv.FormatUint(uint64(index), 10) + ";"
+	return runWindowsPowerShellBatch(ctx, setup, commands, keepGoing)
 }
 
 func runWindowsPowerShellBatch(ctx context.Context, setup string, scripts []string, keepGoing bool) ([]int, error) {

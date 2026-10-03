@@ -1,0 +1,1659 @@
+[
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "clean",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.421479364587064,
+        42.44753870776303
+      ],
+      "mean": 42.434509036175044
+    },
+    "wire_mbit": {
+      "samples": [
+        46.447414516518734,
+        46.46659817506844
+      ],
+      "mean": 46.45700634579359
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        68.2517682,
+        64.75399055
+      ],
+      "mean": 66.50287937499999
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 184,
+    "longest_sender_write_stall_s_max": 0.25196000933647156
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.54652659081126,
+        42.586606860820474
+      ],
+      "mean": 42.56656672581587
+    },
+    "wire_mbit": {
+      "samples": [
+        46.60423273211113,
+        46.63693920733
+      ],
+      "mean": 46.620585969720565
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.056669638674383814,
+        0.059656859783725
+      ],
+      "mean": 0.05816324922905441
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        62.83030580952381,
+        64.30173733333334
+      ],
+      "mean": 63.56602157142857
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 188,
+    "longest_sender_write_stall_s_max": 0.25059300661087036
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "random",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        3.073624984107198,
+        3.003761866524271
+      ],
+      "mean": 3.0386934253157345
+    },
+    "wire_mbit": {
+      "samples": [
+        3.414880419012364,
+        3.371031852370763
+      ],
+      "mean": 3.3929561356915636
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        18.985366,
+        23.930293
+      ],
+      "mean": 21.4578295
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 488,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 397,
+    "longest_sender_write_stall_s_max": 0.9999990165233612
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        31.63595969221029,
+        31.16436174132806
+      ],
+      "mean": 31.400160716769175
+    },
+    "wire_mbit": {
+      "samples": [
+        47.15422173412922,
+        47.15400443763002
+      ],
+      "mean": 47.15411308587962
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        21.442497694638387,
+        21.763078225202644
+      ],
+      "mean": 21.602787959920516
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        61.04832695,
+        59.7453908
+      ],
+      "mean": 60.39685887500001
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 7059,
+    "fec_recovered_sum": 3978,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 92,
+    "longest_sender_write_stall_s_max": 0.2528510093688965
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "burst",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        6.950528900937955,
+        7.614248180924393
+      ],
+      "mean": 7.282388540931174
+    },
+    "wire_mbit": {
+      "samples": [
+        7.748172204829242,
+        8.434272848750147
+      ],
+      "mean": 8.091222526789695
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        81.88957257142857,
+        49.23827
+      ],
+      "mean": 65.56392128571429
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 1185,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 921,
+    "longest_sender_write_stall_s_max": 7.0001600831747055
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "burst",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        9.116009386002656,
+        9.360517831303781
+      ],
+      "mean": 9.238263608653218
+    },
+    "wire_mbit": {
+      "samples": [
+        14.209595544240193,
+        14.605215452878387
+      ],
+      "mean": 14.407405498559289
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        21.912154253680775,
+        22.199041104134487
+      ],
+      "mean": 22.05559767890763
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        45.17854057142857,
+        75.692144
+      ],
+      "mean": 60.435342285714285
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 2335,
+    "fec_recovered_sum": 186,
+    "fec_unrecovered_sum": 605,
+    "tcp_retransmits_sum": 963,
+    "longest_sender_write_stall_s_max": 0.2520599961280823
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "policer",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        19.349671729717333,
+        19.524858608540423
+      ],
+      "mean": 19.437265169128878
+    },
+    "wire_mbit": {
+      "samples": [
+        21.06734826128586,
+        21.280171272634394
+      ],
+      "mean": 21.173759766960128
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        71.263324,
+        72.865408
+      ],
+      "mean": 72.064366
+    },
+    "policer_dropped_a_sum": 226,
+    "qdisc_dropped_a_sum": 226,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 226,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-baseline",
+    "source": "v041",
+    "profile": "policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        17.77840643443352,
+        16.27645771530873
+      ],
+      "mean": 17.027432074871125
+    },
+    "wire_mbit": {
+      "samples": [
+        25.23164480306772,
+        22.979476470079966
+      ],
+      "mean": 24.10556063657384
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        20.24095738250977,
+        19.59524195569182
+      ],
+      "mean": 19.918099669100794
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        79.599643,
+        92.095357
+      ],
+      "mean": 85.8475
+    },
+    "policer_dropped_a_sum": 2052,
+    "qdisc_dropped_a_sum": 2052,
+    "fec_recovered_sum": 891,
+    "fec_unrecovered_sum": 422,
+    "tcp_retransmits_sum": 558,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "clean",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.58343662943642,
+        42.54996127320218
+      ],
+      "mean": 42.566698951319296
+    },
+    "wire_mbit": {
+      "samples": [
+        46.62481380410296,
+        46.57047410728283
+      ],
+      "mean": 46.597643955692895
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        68.8179144,
+        68.9724429
+      ],
+      "mean": 68.89517865
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 204,
+    "longest_sender_write_stall_s_max": 0.4999630004167557
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.5199025936709,
+        42.545157656488364
+      ],
+      "mean": 42.53253012507963
+    },
+    "wire_mbit": {
+      "samples": [
+        46.58657376958359,
+        46.61546038649544
+      ],
+      "mean": 46.60101707803952
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.05821293839256689,
+        0.059672180678298964
+      ],
+      "mean": 0.058942559535432926
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        65.28231425,
+        64.5865667
+      ],
+      "mean": 64.934440475
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 225,
+    "longest_sender_write_stall_s_max": 0.251796007156372
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "random",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        2.9688567523059537,
+        2.829141322901648
+      ],
+      "mean": 2.898999037603801
+    },
+    "wire_mbit": {
+      "samples": [
+        3.310634010704464,
+        3.1625109526202264
+      ],
+      "mean": 3.2365724816623453
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        17.121359,
+        16.5655192
+      ],
+      "mean": 16.8434391
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 493,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 391,
+    "longest_sender_write_stall_s_max": 0.7500550001859665
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        30.787446515948062,
+        31.545509562818832
+      ],
+      "mean": 31.16647803938345
+    },
+    "wire_mbit": {
+      "samples": [
+        46.70809462051232,
+        47.18746180323355
+      ],
+      "mean": 46.94777821187294
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        22.67416444780034,
+        21.661840200078977
+      ],
+      "mean": 22.16800232393966
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        54.825581650000004,
+        53.79476155
+      ],
+      "mean": 54.310171600000004
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 7109,
+    "fec_recovered_sum": 3956,
+    "fec_unrecovered_sum": 5,
+    "tcp_retransmits_sum": 58,
+    "longest_sender_write_stall_s_max": 0.5002079904079437
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "burst",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        8.661725620519155,
+        6.985228627915414
+      ],
+      "mean": 7.823477124217284
+    },
+    "wire_mbit": {
+      "samples": [
+        9.607116950401437,
+        7.767822366753014
+      ],
+      "mean": 8.687469658577225
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        42.115731849999996,
+        84.811408
+      ],
+      "mean": 63.463569925
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 1300,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 977,
+    "longest_sender_write_stall_s_max": 3.7499919682741165
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "burst",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        9.325739940737854,
+        8.556714113533946
+      ],
+      "mean": 8.9412270271359
+    },
+    "wire_mbit": {
+      "samples": [
+        14.431383328334643,
+        13.365710368380759
+      ],
+      "mean": 13.8985468483577
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        21.629572521252207,
+        22.121635181711095
+      ],
+      "mean": 21.87560385148165
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        55.443977,
+        61.199938
+      ],
+      "mean": 58.321957499999996
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 2389,
+    "fec_recovered_sum": 182,
+    "fec_unrecovered_sum": 546,
+    "tcp_retransmits_sum": 963,
+    "longest_sender_write_stall_s_max": 2.501463010907173
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "policer",
+    "mode": "nofec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        20.292252731341563,
+        17.18329726912819
+      ],
+      "mean": 18.737775000234876
+    },
+    "wire_mbit": {
+      "samples": [
+        22.10798447800321,
+        18.740711099570447
+      ],
+      "mean": 20.42434778878683
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.0,
+        0.0
+      ],
+      "mean": 0.0
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        72.154992,
+        82.080952
+      ],
+      "mean": 77.117972
+    },
+    "policer_dropped_a_sum": 234,
+    "qdisc_dropped_a_sum": 234,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 229,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-fixed",
+    "source": "stable",
+    "profile": "policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        20.50222101746909,
+        22.842690520080648
+      ],
+      "mean": 21.672455768774867
+    },
+    "wire_mbit": {
+      "samples": [
+        26.85929443465564,
+        28.257089060213556
+      ],
+      "mean": 27.5581917474346
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        14.640729945507541,
+        10.385505104945075
+      ],
+      "mean": 12.513117525226308
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        83.035141,
+        82.101742
+      ],
+      "mean": 82.5684415
+    },
+    "policer_dropped_a_sum": 1159,
+    "qdisc_dropped_a_sum": 1159,
+    "fec_recovered_sum": 605,
+    "fec_unrecovered_sum": 148,
+    "tcp_retransmits_sum": 305,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "stable",
+    "profile": "fixed-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        20.53736978249789,
+        24.34450778729823
+      ],
+      "mean": 22.44093878489806
+    },
+    "wire_mbit": {
+      "samples": [
+        26.55778221889098,
+        30.681302956299383
+      ],
+      "mean": 28.619542587595184
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        13.697996918335901,
+        11.878854231834838
+      ],
+      "mean": 12.78842557508537
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        78.728452,
+        79.20619190000001
+      ],
+      "mean": 78.96732195000001
+    },
+    "policer_dropped_a_sum": 1294,
+    "qdisc_dropped_a_sum": 1294,
+    "fec_recovered_sum": 672,
+    "fec_unrecovered_sum": 146,
+    "tcp_retransmits_sum": 272,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "window",
+    "profile": "window-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        24.169869998293223,
+        22.94622535339245
+      ],
+      "mean": 23.558047675842836
+    },
+    "wire_mbit": {
+      "samples": [
+        29.49565370788861,
+        27.277539656601896
+      ],
+      "mean": 28.386596682245255
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        9.376204886141911,
+        7.2227423395157
+      ],
+      "mean": 8.299473612828805
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        73.3363784,
+        72.48466365
+      ],
+      "mean": 72.91052102500001
+    },
+    "policer_dropped_a_sum": 693,
+    "qdisc_dropped_a_sum": 693,
+    "fec_recovered_sum": 340,
+    "fec_unrecovered_sum": 91,
+    "tcp_retransmits_sum": 209,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "stable",
+    "profile": "fixed-step",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        30.858229628070006,
+        30.81157494937792
+      ],
+      "mean": 30.834902288723963
+    },
+    "wire_mbit": {
+      "samples": [
+        33.83128929700219,
+        33.78792470225033
+      ],
+      "mean": 33.80960699962626
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.05281702376071108,
+        0.05427332883374966
+      ],
+      "mean": 0.05354517629723037
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        46.21177846875,
+        45.948244875
+      ],
+      "mean": 46.080011671875
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 257,
+    "longest_sender_write_stall_s_max": 2.250149980187416
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "window",
+    "profile": "window-step",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        30.78028841641615,
+        30.77793450417961
+      ],
+      "mean": 30.779111460297877
+    },
+    "wire_mbit": {
+      "samples": [
+        33.69115303039004,
+        33.69720745025909
+      ],
+      "mean": 33.69418024032457
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.059380763427038505,
+        0.05518069932805275
+      ],
+      "mean": 0.05728073137754563
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        40.64325665625,
+        45.6356495625
+      ],
+      "mean": 43.139453109375
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 378,
+    "longest_sender_write_stall_s_max": 2.250001013278961
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "stable",
+    "profile": "fixed-clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.55081827138679,
+        42.57920944974749
+      ],
+      "mean": 42.565013860567134
+    },
+    "wire_mbit": {
+      "samples": [
+        46.60010925079467,
+        46.63050192656959
+      ],
+      "mean": 46.61530558868213
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.05743564940070434,
+        0.05966181568275018
+      ],
+      "mean": 0.058548732541727266
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        65.36741755,
+        68.98702365
+      ],
+      "mean": 67.1772206
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 211,
+    "longest_sender_write_stall_s_max": 0.25126001238822937
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "window",
+    "profile": "window-clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.44929360488826,
+        42.5818397214129
+      ],
+      "mean": 42.51556666315058
+    },
+    "wire_mbit": {
+      "samples": [
+        46.50823047758262,
+        46.63315071095213
+      ],
+      "mean": 46.570690594267376
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.06057714878504956,
+        0.0626698882512836
+      ],
+      "mean": 0.06162351851816658
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        61.51569005,
+        63.9495991
+      ],
+      "mean": 62.732644575
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 197,
+    "longest_sender_write_stall_s_max": 0.25183799862861633
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "stable",
+    "profile": "fixed-random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        31.29101968900657,
+        31.2377804468746
+      ],
+      "mean": 31.264400067940585
+    },
+    "wire_mbit": {
+      "samples": [
+        47.17582233826567,
+        47.16674651669294
+      ],
+      "mean": 47.17128442747931
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        22.05979804872288,
+        22.29945680051558
+      ],
+      "mean": 22.179627424619227
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        57.6413098,
+        58.22173445
+      ],
+      "mean": 57.931522125
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 6948,
+    "fec_recovered_sum": 3882,
+    "fec_unrecovered_sum": 7,
+    "tcp_retransmits_sum": 259,
+    "longest_sender_write_stall_s_max": 0.2513349950313568
+  },
+  {
+    "experiment": "qos-window-fix",
+    "source": "window",
+    "profile": "window-random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        30.188688628358264,
+        31.045149555771243
+      ],
+      "mean": 30.616919092064755
+    },
+    "wire_mbit": {
+      "samples": [
+        45.844887824238995,
+        46.79824566318517
+      ],
+      "mean": 46.32156674371208
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        22.700416818420948,
+        22.19956840056664
+      ],
+      "mean": 22.449992609493794
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        54.3005398,
+        58.95983285
+      ],
+      "mean": 56.630186325
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 6894,
+    "fec_recovered_sum": 3890,
+    "fec_unrecovered_sum": 39,
+    "tcp_retransmits_sum": 30,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-parent",
+    "profile": "parent-burst",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        10.059058577158478,
+        9.081116025274323
+      ],
+      "mean": 9.5700873012164
+    },
+    "wire_mbit": {
+      "samples": [
+        15.527267839896394,
+        14.077008384692443
+      ],
+      "mean": 14.802138112294418
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        21.72785277467482,
+        21.393374741200827
+      ],
+      "mean": 21.560613757937823
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        55.940134,
+        76.940437
+      ],
+      "mean": 66.4402855
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 2468,
+    "fec_recovered_sum": 196,
+    "fec_unrecovered_sum": 538,
+    "tcp_retransmits_sum": 1009,
+    "longest_sender_write_stall_s_max": 0.250230997800827
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-candidate",
+    "profile": "candidate-burst",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        11.315884936828768,
+        12.922957052039957
+      ],
+      "mean": 12.119420994434362
+    },
+    "wire_mbit": {
+      "samples": [
+        18.206921323405,
+        20.750261874555495
+      ],
+      "mean": 19.478591598980245
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        22.284554068280944,
+        23.273879977687987
+      ],
+      "mean": 22.779217022984465
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        61.1244066,
+        77.65045975
+      ],
+      "mean": 69.387433175
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 3689,
+    "fec_recovered_sum": 831,
+    "fec_unrecovered_sum": 703,
+    "tcp_retransmits_sum": 825,
+    "longest_sender_write_stall_s_max": 0.750204011797905
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-parent",
+    "profile": "parent-random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        31.77102686776038,
+        29.32725114258389
+      ],
+      "mean": 30.549139005172137
+    },
+    "wire_mbit": {
+      "samples": [
+        46.819303469402044,
+        45.30806524849595
+      ],
+      "mean": 46.063684358949
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        20.836220220647018,
+        23.621475179423808
+      ],
+      "mean": 22.228847700035413
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        52.906477,
+        56.12406305
+      ],
+      "mean": 54.515270025
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 6561,
+    "fec_recovered_sum": 3769,
+    "fec_unrecovered_sum": 68,
+    "tcp_retransmits_sum": 120,
+    "longest_sender_write_stall_s_max": 0.7498800158500671
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-candidate",
+    "profile": "candidate-random",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        30.741829884265503,
+        30.954128999100433
+      ],
+      "mean": 30.847979441682966
+    },
+    "wire_mbit": {
+      "samples": [
+        46.96536976102693,
+        46.47684894920871
+      ],
+      "mean": 46.72110935511782
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        22.964449165322527,
+        22.152971846371393
+      ],
+      "mean": 22.55871050584696
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        55.21235515,
+        63.58376235
+      ],
+      "mean": 59.398058750000004
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 6717,
+    "fec_recovered_sum": 3808,
+    "fec_unrecovered_sum": 10,
+    "tcp_retransmits_sum": 21,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-parent",
+    "profile": "parent-clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.48388136460485,
+        42.51726725274192
+      ],
+      "mean": 42.50057430867338
+    },
+    "wire_mbit": {
+      "samples": [
+        46.41049182484594,
+        46.58963424751693
+      ],
+      "mean": 46.50006303618144
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.06085547585178649,
+        0.06273430886443343
+      ],
+      "mean": 0.06179489235810996
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        60.130170050000004,
+        56.96145825
+      ],
+      "mean": 58.54581415
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 248,
+    "longest_sender_write_stall_s_max": 0.2542479932308197
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-candidate",
+    "profile": "candidate-clean",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        42.51990896077968,
+        42.290954044514926
+      ],
+      "mean": 42.4054315026473
+    },
+    "wire_mbit": {
+      "samples": [
+        46.467794696770454,
+        46.30402670805324
+      ],
+      "mean": 46.38591070241185
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.05926511260371395,
+        0.05478493110034012
+      ],
+      "mean": 0.057025021852027034
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        63.516681399999996,
+        57.41626235
+      ],
+      "mean": 60.466471874999996
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 249,
+    "longest_sender_write_stall_s_max": 0.5001379996538162
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-parent",
+    "profile": "parent-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        25.2524240973776,
+        20.257909298656745
+      ],
+      "mean": 22.75516669801717
+    },
+    "wire_mbit": {
+      "samples": [
+        30.815733025022908,
+        26.593371257631432
+      ],
+      "mean": 28.70455214132717
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        9.345857020002903,
+        14.833720229316027
+      ],
+      "mean": 12.089788624659466
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        73.788792,
+        79.385869
+      ],
+      "mean": 76.58733050000001
+    },
+    "policer_dropped_a_sum": 1082,
+    "qdisc_dropped_a_sum": 1082,
+    "fec_recovered_sum": 522,
+    "fec_unrecovered_sum": 140,
+    "tcp_retransmits_sum": 266,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-burst-fix",
+    "source": "burst-candidate",
+    "profile": "candidate-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        23.261999121618818,
+        25.18296546129474
+      ],
+      "mean": 24.222482291456778
+    },
+    "wire_mbit": {
+      "samples": [
+        29.281624162444224,
+        30.4144781867278
+      ],
+      "mean": 29.84805117458601
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        11.61391851722329,
+        8.494723283089648
+      ],
+      "mean": 10.054320900156469
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        81.303393,
+        79.19474565
+      ],
+      "mean": 80.249069325
+    },
+    "policer_dropped_a_sum": 833,
+    "qdisc_dropped_a_sum": 833,
+    "fec_recovered_sum": 368,
+    "fec_unrecovered_sum": 138,
+    "tcp_retransmits_sum": 321,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "burst-candidate",
+    "profile": "gain110-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        25.741555223260544,
+        23.224693887012773
+      ],
+      "mean": 24.48312455513666
+    },
+    "wire_mbit": {
+      "samples": [
+        31.060193762366964,
+        28.991225746903964
+      ],
+      "mean": 30.025709754635464
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        8.506763209914933,
+        11.117006850849576
+      ],
+      "mean": 9.811885030382253
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        76.5005649,
+        85.74819
+      ],
+      "mean": 81.12437745
+    },
+    "policer_dropped_a_sum": 1038,
+    "qdisc_dropped_a_sum": 1038,
+    "fec_recovered_sum": 349,
+    "fec_unrecovered_sum": 166,
+    "tcp_retransmits_sum": 321,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "gain100",
+    "profile": "gain100-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        28.39645730255065,
+        30.283051028858484
+      ],
+      "mean": 29.33975416570457
+    },
+    "wire_mbit": {
+      "samples": [
+        32.717768471945995,
+        34.47902138934527
+      ],
+      "mean": 33.59839493064563
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        4.676972699975597,
+        3.8189805255273495
+      ],
+      "mean": 4.247976612751473
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        71.9001576,
+        74.40707040000001
+      ],
+      "mean": 73.153614
+    },
+    "policer_dropped_a_sum": 395,
+    "qdisc_dropped_a_sum": 395,
+    "fec_recovered_sum": 101,
+    "fec_unrecovered_sum": 36,
+    "tcp_retransmits_sum": 261,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "gain090",
+    "profile": "gain090-policer",
+    "mode": "fec-obfs",
+    "n": 2,
+    "goodput_mbit": {
+      "samples": [
+        28.815312931577978,
+        27.347099940395193
+      ],
+      "mean": 28.081206435986587
+    },
+    "wire_mbit": {
+      "samples": [
+        33.53539370337218,
+        32.65294682414949
+      ],
+      "mean": 33.09417026376083
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        5.54427967856847,
+        7.655466982428689
+      ],
+      "mean": 6.59987333049858
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        77.439348,
+        74.696785
+      ],
+      "mean": 76.0680665
+    },
+    "policer_dropped_a_sum": 971,
+    "qdisc_dropped_a_sum": 971,
+    "fec_recovered_sum": 304,
+    "fec_unrecovered_sum": 212,
+    "tcp_retransmits_sum": 494,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "burst-candidate",
+    "profile": "gain110-random",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        30.348705479356344
+      ],
+      "mean": 30.348705479356344
+    },
+    "wire_mbit": {
+      "samples": [
+        45.25119867755389
+      ],
+      "mean": 45.25119867755389
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        21.460325276649296
+      ],
+      "mean": 21.460325276649296
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        49.26047115
+      ],
+      "mean": 49.26047115
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 3321,
+    "fec_recovered_sum": 1937,
+    "fec_unrecovered_sum": 9,
+    "tcp_retransmits_sum": 14,
+    "longest_sender_write_stall_s_max": 0.0
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "gain100",
+    "profile": "gain100-random",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        30.403310584438444
+      ],
+      "mean": 30.403310584438444
+    },
+    "wire_mbit": {
+      "samples": [
+        46.65196835732137
+      ],
+      "mean": 46.65196835732137
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        23.185826604334892
+      ],
+      "mean": 23.185826604334892
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        58.8416078
+      ],
+      "mean": 58.8416078
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 3344,
+    "fec_recovered_sum": 1875,
+    "fec_unrecovered_sum": 3,
+    "tcp_retransmits_sum": 8,
+    "longest_sender_write_stall_s_max": 0.2502500116825104
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "burst-candidate",
+    "profile": "gain110-clean",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        42.3448772791591
+      ],
+      "mean": 42.3448772791591
+    },
+    "wire_mbit": {
+      "samples": [
+        46.38759882520213
+      ],
+      "mean": 46.38759882520213
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.06528406157957065
+      ],
+      "mean": 0.06528406157957065
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        63.3860398
+      ],
+      "mean": 63.3860398
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 109,
+    "longest_sender_write_stall_s_max": 0.2501299977302551
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "gain100",
+    "profile": "gain100-clean",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        42.07401483695868
+      ],
+      "mean": 42.07401483695868
+    },
+    "wire_mbit": {
+      "samples": [
+        46.08750666223306
+      ],
+      "mean": 46.08750666223306
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.06615588171943752
+      ],
+      "mean": 0.06615588171943752
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        54.38600865
+      ],
+      "mean": 54.38600865
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 100,
+    "longest_sender_write_stall_s_max": 0.2511259913444519
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "burst-candidate",
+    "profile": "gain110-step",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        30.86070415745198
+      ],
+      "mean": 30.86070415745198
+    },
+    "wire_mbit": {
+      "samples": [
+        33.749789042438465
+      ],
+      "mean": 33.749789042438465
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.05643026334122893
+      ],
+      "mean": 0.05643026334122893
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        40.6192113125
+      ],
+      "mean": 40.6192113125
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 154,
+    "longest_sender_write_stall_s_max": 2.250001013278961
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "source": "gain100",
+    "profile": "gain100-step",
+    "mode": "fec-obfs",
+    "n": 1,
+    "goodput_mbit": {
+      "samples": [
+        30.38087511839155
+      ],
+      "mean": 30.38087511839155
+    },
+    "wire_mbit": {
+      "samples": [
+        33.31334879472625
+      ],
+      "mean": 33.31334879472625
+    },
+    "parity_over_wire_datagrams_pct": {
+      "samples": [
+        0.056066541758928064
+      ],
+      "mean": 0.056066541758928064
+    },
+    "steady_pacing_mbit_mean": {
+      "samples": [
+        40.76330815625
+      ],
+      "mean": 40.76330815625
+    },
+    "policer_dropped_a_sum": 0,
+    "qdisc_dropped_a_sum": 0,
+    "fec_recovered_sum": 0,
+    "fec_unrecovered_sum": 0,
+    "tcp_retransmits_sum": 160,
+    "longest_sender_write_stall_s_max": 1.9999860227108002
+  }
+]

@@ -1,0 +1,542 @@
+{
+  "source_revision": "eafe3f755cab2e735b787b1d14c90d4f0faa6b8a",
+  "fault_events": [
+    {
+      "elapsed_s": 0.0,
+      "utc": "2026-10-03T04:32:49.453178+00:00",
+      "phase": "clean_start"
+    },
+    {
+      "elapsed_s": 30.134,
+      "utc": "2026-10-03T04:33:19.586893+00:00",
+      "phase": "loss"
+    },
+    {
+      "elapsed_s": 90.097,
+      "utc": "2026-10-03T04:34:19.550183+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 150.103,
+      "utc": "2026-10-03T04:35:19.556405+00:00",
+      "phase": "outage"
+    },
+    {
+      "elapsed_s": 155.103,
+      "utc": "2026-10-03T04:35:24.555572+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 210.125,
+      "utc": "2026-10-03T04:36:19.578380+00:00",
+      "phase": "outage"
+    },
+    {
+      "elapsed_s": 250.109,
+      "utc": "2026-10-03T04:36:59.561769+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 310.0,
+      "utc": "2026-10-03T04:37:59.453218+00:00",
+      "phase": "peer_restart_begin"
+    },
+    {
+      "elapsed_s": 311.481,
+      "utc": "2026-10-03T04:38:00.934408+00:00",
+      "phase": "peer_restart_ready"
+    },
+    {
+      "elapsed_s": 400.13,
+      "utc": "2026-10-03T04:39:29.583409+00:00",
+      "phase": "loss"
+    },
+    {
+      "elapsed_s": 500.125,
+      "utc": "2026-10-03T04:41:09.578233+00:00",
+      "phase": "clean"
+    }
+  ],
+  "clock_offset_measurement": null,
+  "traffic": {
+    "connections": 4,
+    "elapsed_seconds": 600.0122711,
+    "final": true,
+    "longest_delivery_gap_seconds": 40.871035,
+    "seconds_since_delivery": 0.015598,
+    "socket_errors": 29,
+    "utc": "2026-10-03T04:42:48.8252884Z",
+    "verified_bytes_per_direction": 652673024,
+    "jsonl_samples": 601,
+    "total_verified_bytes_both_directions": 1305346048
+  },
+  "recovery_samples": [
+    {
+      "previous_fault": "loss",
+      "cleared_host_utc": "2026-10-03T04:34:19.550183+00:00",
+      "first_sample_with_post_clear_delivery_utc": "2026-10-03T04:34:19.8189661Z",
+      "sample_time_minus_clear_nominal_seconds": 0.268783,
+      "nominal_first_post_clear_delivery_report_seconds": 0.268783,
+      "last_delivery_in_that_sample_delay_seconds": 0.2475484,
+      "app_connections_at_first_recovered_sample": 1,
+      "socket_errors_at_first_recovered_sample": 0,
+      "bytes_since_last_pre_clear_sample": 1179648
+    },
+    {
+      "previous_fault": "outage",
+      "cleared_host_utc": "2026-10-03T04:35:24.555572+00:00",
+      "first_sample_with_post_clear_delivery_utc": "2026-10-03T04:35:25.8190762Z",
+      "sample_time_minus_clear_nominal_seconds": 1.263504,
+      "nominal_first_post_clear_delivery_report_seconds": 1.263504,
+      "last_delivery_in_that_sample_delay_seconds": 1.2420022,
+      "app_connections_at_first_recovered_sample": 2,
+      "socket_errors_at_first_recovered_sample": 2,
+      "bytes_since_last_pre_clear_sample": 1769472
+    },
+    {
+      "previous_fault": "outage",
+      "cleared_host_utc": "2026-10-03T04:36:59.561769+00:00",
+      "first_sample_with_post_clear_delivery_utc": "2026-10-03T04:37:00.8189021Z",
+      "sample_time_minus_clear_nominal_seconds": 1.257133,
+      "nominal_first_post_clear_delivery_report_seconds": 1.257133,
+      "last_delivery_in_that_sample_delay_seconds": 1.2446864,
+      "app_connections_at_first_recovered_sample": 3,
+      "socket_errors_at_first_recovered_sample": 21,
+      "bytes_since_last_pre_clear_sample": 1179648
+    },
+    {
+      "previous_fault": "peer_restart_begin",
+      "cleared_host_utc": "2026-10-03T04:38:00.934408+00:00",
+      "first_sample_with_post_clear_delivery_utc": "2026-10-03T04:38:15.8189341Z",
+      "sample_time_minus_clear_nominal_seconds": 14.884526,
+      "nominal_first_post_clear_delivery_report_seconds": 14.884526,
+      "last_delivery_in_that_sample_delay_seconds": 14.8675719,
+      "app_connections_at_first_recovered_sample": 4,
+      "socket_errors_at_first_recovered_sample": 28,
+      "bytes_since_last_pre_clear_sample": 1507328
+    },
+    {
+      "previous_fault": "loss",
+      "cleared_host_utc": "2026-10-03T04:41:09.578233+00:00",
+      "first_sample_with_post_clear_delivery_utc": "2026-10-03T04:41:09.8189185Z",
+      "sample_time_minus_clear_nominal_seconds": 0.240685,
+      "nominal_first_post_clear_delivery_report_seconds": 0.240685,
+      "last_delivery_in_that_sample_delay_seconds": 0.2121271,
+      "app_connections_at_first_recovered_sample": 4,
+      "socket_errors_at_first_recovered_sample": 28,
+      "bytes_since_last_pre_clear_sample": 1572864
+    }
+  ],
+  "resources": {
+    "wg-quic": {
+      "sample_count": 120,
+      "pids": [
+        4788
+      ],
+      "first_sample_utc": "2026-10-03T04:32:48.9300731Z",
+      "last_sample_utc": "2026-10-03T04:42:47.0127856Z",
+      "WorkingSet64": {
+        "first": 74878976,
+        "last": 48353280,
+        "min": 45617152,
+        "max": 81625088
+      },
+      "PrivateMemorySize64": {
+        "first": 70656000,
+        "last": 77627392,
+        "min": 70656000,
+        "max": 77873152
+      },
+      "HandleCount": {
+        "first": 241,
+        "last": 246,
+        "min": 241,
+        "max": 251
+      },
+      "CPU": {
+        "first": 0.640625,
+        "last": 346,
+        "min": 0.640625,
+        "max": 346
+      }
+    },
+    "wg-quic-quick": {
+      "sample_count": 120,
+      "pids": [
+        4392
+      ],
+      "first_sample_utc": "2026-10-03T04:32:48.9300731Z",
+      "last_sample_utc": "2026-10-03T04:42:47.0127856Z",
+      "WorkingSet64": {
+        "first": 50847744,
+        "last": 17764352,
+        "min": 17174528,
+        "max": 51466240
+      },
+      "PrivateMemorySize64": {
+        "first": 50925568,
+        "last": 51806208,
+        "min": 50925568,
+        "max": 51900416
+      },
+      "HandleCount": {
+        "first": 304,
+        "last": 311,
+        "min": 304,
+        "max": 322
+      },
+      "CPU": {
+        "first": 0.390625,
+        "last": 2.109375,
+        "min": 0.390625,
+        "max": 2.109375
+      }
+    }
+  },
+  "lifecycle_done": "passed",
+  "traffic_stderr": "",
+  "lifecycle_log": "",
+  "error_log": null,
+  "core_before": {
+    "observation_id": "9c2e67d82e701ba66fa55a62e19f82ef",
+    "interface": "wgqsoaknativetraffic",
+    "state": "up",
+    "fec_mode": "auto",
+    "obfs_mode": "salamander"
+  },
+  "sessions_before": [
+    {
+      "telemetry_version": 1,
+      "session_id": 1,
+      "session_generation": 1,
+      "role": "outbound",
+      "state": "established",
+      "configured_endpoint": "10.0.2.2:51892",
+      "current_endpoint": "10.0.2.2:51892",
+      "established_at": "2026-10-03T12:32:48.2691448+08:00",
+      "sampled_at": "2026-10-03T12:32:48.3834953+08:00",
+      "peers": [
+        {
+          "public_key": "TRm6tZh8QGC5Er4hXOdvx0ja5rgqhsYKOBD6wXn8mis=",
+          "endpoint_generation": 1,
+          "configured": true,
+          "authenticated": true
+        }
+      ],
+      "stats": {
+        "wg_tx_packets": 2,
+        "wg_tx_bytes": 180,
+        "wg_rx_packets": 1,
+        "wg_rx_bytes": 92,
+        "wire_tx_packets": 9,
+        "wire_tx_bytes": 778,
+        "wire_rx_packets": 3,
+        "wire_rx_bytes": 302,
+        "queue_drops": 0,
+        "send_queue_depth": 0,
+        "priority_queue_depth": 0,
+        "control_queue_depth": 0,
+        "fec_data_tx": 3,
+        "fec_parity_tx": 3,
+        "fec_raw_lost": 0,
+        "fec_recovered": 0,
+        "fec_unrecovered": 0,
+        "fec_current_parity_shards": 1,
+        "fec_loss_estimate_ppm": 0,
+        "quic_bytes_sent": 4666,
+        "quic_packets_sent": 16,
+        "quic_bytes_received": 3244,
+        "quic_packets_received": 13,
+        "quic_bytes_acked": 3512,
+        "quic_packets_acked": 12,
+        "quic_bytes_lost": 0,
+        "quic_packets_lost": 0,
+        "quic_spurious_loss_packets": 0,
+        "quic_pto_count": 0,
+        "quic_min_rtt_us": 781,
+        "quic_latest_rtt_us": 1397,
+        "quic_smoothed_rtt_us": 3475,
+        "quic_rttvar_us": 2896,
+        "quic_congestion_window_bytes": 38400,
+        "quic_bytes_in_flight": 0,
+        "quic_bandwidth_estimate_bps": 55706664,
+        "quic_pacing_rate_bps": 111413328,
+        "quic_path_rtt_us": 1397,
+        "quic_queue_delay_us": 2077,
+        "quic_fec_recoverable_loss_ppm": 0,
+        "quic_fec_residual_loss_ppm": 0,
+        "quic_congestion_model_state": 0,
+        "quic_datagram_send_queue_len": 0,
+        "quic_datagram_rcv_queue_len": 0,
+        "quic_datagram_rcv_queue_drops": 0,
+        "quic_datagram_rcv_queue_high_water": 2
+      }
+    }
+  ],
+  "core_after": {
+    "observation_id": "9c2e67d82e701ba66fa55a62e19f82ef",
+    "interface": "wgqsoaknativetraffic",
+    "state": "up",
+    "fec_mode": "auto",
+    "obfs_mode": "salamander"
+  },
+  "sessions_after": [
+    {
+      "telemetry_version": 1,
+      "session_id": 9,
+      "session_generation": 9,
+      "role": "outbound",
+      "state": "established",
+      "configured_endpoint": "10.0.2.2:51892",
+      "current_endpoint": "10.0.2.2:51892",
+      "established_at": "2026-10-03T12:38:14.4733929+08:00",
+      "sampled_at": "2026-10-03T12:42:52.0859503+08:00",
+      "peers": [
+        {
+          "public_key": "TRm6tZh8QGC5Er4hXOdvx0ja5rgqhsYKOBD6wXn8mis=",
+          "endpoint_generation": 1,
+          "configured": true,
+          "authenticated": true
+        }
+      ],
+      "replaces_session_id": 8,
+      "stats": {
+        "wg_tx_packets": 438272,
+        "wg_tx_bytes": 309904412,
+        "wg_rx_packets": 275875,
+        "wg_rx_bytes": 297689252,
+        "wire_tx_packets": 482886,
+        "wire_tx_bytes": 320303811,
+        "wire_rx_packets": 354439,
+        "wire_rx_bytes": 349966169,
+        "queue_drops": 0,
+        "send_queue_depth": 0,
+        "priority_queue_depth": 0,
+        "control_queue_depth": 0,
+        "fec_data_tx": 555,
+        "fec_parity_tx": 140,
+        "fec_raw_lost": 12034,
+        "fec_recovered": 4975,
+        "fec_unrecovered": 7059,
+        "fec_current_parity_shards": 0,
+        "fec_loss_estimate_ppm": 0,
+        "quic_bytes_sent": 337259480,
+        "quic_packets_sent": 590023,
+        "quic_bytes_received": 364878769,
+        "quic_packets_received": 532697,
+        "quic_bytes_acked": 333226462,
+        "quic_packets_acked": 483051,
+        "quic_bytes_lost": 0,
+        "quic_packets_lost": 0,
+        "quic_spurious_loss_packets": 0,
+        "quic_pto_count": 1,
+        "quic_min_rtt_us": 21,
+        "quic_latest_rtt_us": 1619,
+        "quic_smoothed_rtt_us": 7566,
+        "quic_rttvar_us": 7570,
+        "quic_congestion_window_bytes": 11488,
+        "quic_bytes_in_flight": 0,
+        "quic_bandwidth_estimate_bps": 22976000,
+        "quic_pacing_rate_bps": 25273600,
+        "quic_path_rtt_us": 1143,
+        "quic_queue_delay_us": 6422,
+        "quic_fec_recoverable_loss_ppm": 0,
+        "quic_fec_residual_loss_ppm": 0,
+        "quic_congestion_model_state": 1,
+        "quic_datagram_send_queue_len": 0,
+        "quic_datagram_rcv_queue_len": 0,
+        "quic_datagram_rcv_queue_drops": 0,
+        "quic_datagram_rcv_queue_high_water": 63
+      }
+    }
+  ],
+  "recent_sessions_after": [
+    {
+      "telemetry_version": 1,
+      "final_sequence": 8,
+      "session_id": 8,
+      "session_generation": 8,
+      "role": "outbound",
+      "state": "closed",
+      "configured_endpoint": "10.0.2.2:51892",
+      "current_endpoint": "10.0.2.2:51892",
+      "established_at": "2026-10-03T12:37:00.2388059+08:00",
+      "closed_at": "2026-10-03T12:38:14.4628305+08:00",
+      "sampled_at": "2026-10-03T12:38:14.4628305+08:00",
+      "peers": [
+        {
+          "public_key": "TRm6tZh8QGC5Er4hXOdvx0ja5rgqhsYKOBD6wXn8mis=",
+          "endpoint_generation": 1,
+          "authenticated": true
+        }
+      ],
+      "close_reason": "idle_timeout",
+      "error_class": "quic_idle_timeout",
+      "last_error": "timeout: no recent network activity",
+      "replaced_by_session_id": 9,
+      "replaces_session_id": 7,
+      "final": true,
+      "final_stats": {
+        "wg_tx_packets": 183995,
+        "wg_tx_bytes": 130685764,
+        "wg_rx_packets": 115156,
+        "wg_rx_bytes": 125112060,
+        "wire_tx_packets": 184282,
+        "wire_tx_bytes": 134625226,
+        "wire_rx_packets": 115437,
+        "wire_rx_bytes": 127616010,
+        "queue_drops": 0,
+        "send_queue_depth": 0,
+        "priority_queue_depth": 0,
+        "control_queue_depth": 0,
+        "fec_data_tx": 506,
+        "fec_parity_tx": 79,
+        "fec_raw_lost": 0,
+        "fec_recovered": 0,
+        "fec_unrecovered": 0,
+        "fec_current_parity_shards": 0,
+        "fec_loss_estimate_ppm": 0,
+        "quic_bytes_sent": 139677550,
+        "quic_packets_sent": 187651,
+        "quic_bytes_received": 132626956,
+        "quic_packets_received": 178262,
+        "quic_bytes_acked": 139533686,
+        "quic_packets_acked": 184199,
+        "quic_bytes_lost": 0,
+        "quic_packets_lost": 0,
+        "quic_spurious_loss_packets": 0,
+        "quic_pto_count": 6,
+        "quic_min_rtt_us": 25,
+        "quic_latest_rtt_us": 3271,
+        "quic_smoothed_rtt_us": 2442,
+        "quic_rttvar_us": 623,
+        "quic_congestion_window_bytes": 40138,
+        "quic_bytes_in_flight": 5745,
+        "quic_bandwidth_estimate_bps": 80278272,
+        "quic_pacing_rate_bps": 88306099,
+        "quic_path_rtt_us": 36,
+        "quic_queue_delay_us": 2405,
+        "quic_fec_recoverable_loss_ppm": 0,
+        "quic_fec_residual_loss_ppm": 0,
+        "quic_congestion_model_state": 1,
+        "quic_datagram_send_queue_len": 0,
+        "quic_datagram_rcv_queue_len": 0,
+        "quic_datagram_rcv_queue_drops": 0,
+        "quic_datagram_rcv_queue_high_water": 59
+      }
+    }
+  ],
+  "stats_after": {
+    "session_admission_rejected": 0,
+    "authentication_timeouts": 0,
+    "wg_tx_packets": 1036780,
+    "wg_tx_bytes": 733136684,
+    "wg_rx_packets": 634704,
+    "wg_rx_bytes": 701496152,
+    "wire_tx_packets": 1108141,
+    "wire_tx_bytes": 756928004,
+    "wire_rx_packets": 765163,
+    "wire_rx_bytes": 792965212,
+    "queue_drops": 0,
+    "fec_data_tx": 1708,
+    "fec_parity_tx": 357,
+    "fec_raw_lost": 17369,
+    "fec_recovered": 7331,
+    "fec_unrecovered": 10038,
+    "fec_current_parity_shards": 0,
+    "fec_loss_estimate_ppm": 0,
+    "active_sessions": 1,
+    "send_queue_depth": 0,
+    "priority_queue_depth": 0,
+    "control_queue_depth": 0,
+    "receive_queue_overflow": {
+      "supported": false,
+      "source": "unavailable",
+      "platform": "windows",
+      "packets": 0
+    },
+    "quic_bytes_acked": 333226462,
+    "quic_packets_acked": 483051,
+    "quic_bytes_lost": 0,
+    "quic_packets_lost": 0,
+    "quic_spurious_loss_packets": 0,
+    "quic_pto_count": 1,
+    "quic_min_rtt_us": 21,
+    "quic_smoothed_rtt_us": 7566,
+    "quic_latest_rtt_us": 1619,
+    "quic_rttvar_us": 7570,
+    "quic_congestion_window_bytes": 11488,
+    "quic_bytes_in_flight": 0,
+    "quic_bandwidth_estimate_bps": 22976000,
+    "quic_pacing_rate_bps": 25273600,
+    "quic_path_rtt_us": 1143,
+    "quic_queue_delay_us": 6422,
+    "quic_fec_recoverable_loss_ppm": 0,
+    "quic_fec_residual_loss_ppm": 0,
+    "quic_congestion_model_state": 1,
+    "quic_datagram_send_queue_len": 0,
+    "quic_datagram_rcv_queue_len": 0,
+    "quic_datagram_rcv_queue_drops": 0,
+    "quic_datagram_rcv_queue_high_water": 63,
+    "runtime_alloc_bytes": 858082944,
+    "runtime_alloc_objects": 7928619,
+    "runtime_heap_objects": 31905,
+    "runtime_gc_cycles": 311,
+    "runtime_gc_pause_cpu_ns": 536301700
+  },
+  "limits": [
+    "One-second traffic reports are interval observations, not exact times of first recovered delivery.",
+    "Recovery durations compare guest UTC against host UTC without a measured clock-offset bracket; they are nominal values, not rigorous cross-clock upper bounds.",
+    "Isolated Wintun DNS API regression queries ran concurrently as background configuration load; timestamps are preserved in the DNS test records.",
+    "This is Windows 10 validation, not Windows 11.",
+    "The final socket-error increment occurred when the fixed-duration probe canceled an in-flight read; expected fault/cancellation errors are distinct from byte mismatches."
+  ],
+  "schema_version": 1,
+  "source": {
+    "source_commit": "eafe3f755cab2e735b787b1d14c90d4f0faa6b8a",
+    "source_mode": "immutable git archive, -buildvcs=false",
+    "archive_sha256": "989d668708760b5a9709bd676c5589d064eaa5846e0031b81b550d32c49062ba",
+    "version": "0.4.1-stability-eafe3f7",
+    "go": "go version go1.26.3 linux/amd64",
+    "sha256": {
+      "wg-quic.exe": "24f2e62d3717ddab9503e14e195cad89d468c7dc47e35736c55c9d7abd4db786",
+      "wg-quic-quick.exe": "201855ce6c62de99ecd74dc72f4fec44a98c1b82928f66aa8ad040daf84fa526"
+    }
+  },
+  "runtime_binaries": [
+    {
+      "pid": 4788,
+      "path": "C:\\ProgramData\\wg-quic\\runtime\\run-67da4468024e3feca3b752d7761f1464\\wg-quic.exe",
+      "sha256": "24F2E62D3717DDAB9503E14E195CAD89D468C7DC47E35736C55C9D7ABD4DB786"
+    },
+    {
+      "pid": 4392,
+      "path": "C:\\ProgramData\\wg-quic\\runtime\\run-67da4468024e3feca3b752d7761f1464\\wg-quic-quick.exe",
+      "sha256": "201855CE6C62DE99ECD74DC72F4FEC44A98C1B82928F66AA8AD040DAF84FA526"
+    }
+  ],
+  "operating_system": {
+    "ProductName": "Windows 10 Enterprise LTSC 2021 Evaluation",
+    "DisplayVersion": "21H2",
+    "CurrentBuildNumber": "19044",
+    "UBR": 7725,
+    "EditionID": "EnterpriseSEval"
+  },
+  "raw_sha256": {
+    "traffic.err": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lifecycle.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "resources.jsonl": "57bf9628ed7e75ace549cefa6f18a773366dbcf0c49442c46419f3e954258306",
+    "status-before.json": "bd9bc5e7036b5b49df52c9ad228cd48a34e87929db08d5831f0f37fb74232b0c",
+    "ready": "5025d4ce44dfb90dd2ac29dd474c197f0d39c057303ec8add4b2271705647a26",
+    "done": "c9d7a0682d275afe0a4d41a00294f56d6d82783a4de393ea188806cc8b3ee509",
+    "status-after.json": "56c3536938d1215ee16a991b61733c1da80e9e5397f257a853fc7b004dbbde32",
+    "traffic.jsonl": "f2db8642beb38ac1a9ee5931a5eff755ad35032a0691addec56e2a656d1a7f63"
+  },
+  "peer_source": "v0.4.1 (bd405b6e61b50846cd891e627d102bca52af85f7)",
+  "byte_mismatches": 0,
+  "vpn_restarted_during_traffic": false,
+  "background_dns_tests": [
+    "2026-10-03T04:32:49.848308Z to 2026-10-03T04:34:00.291509Z",
+    "2026-10-03T04:37:14.204650Z to 2026-10-03T04:40:21.392824Z"
+  ]
+}

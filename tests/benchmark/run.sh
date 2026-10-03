@@ -1054,7 +1054,7 @@ run_trial() {
 			workload_error=${workload_error//,/;}
 		fi
 	fi
-	compose_run exec -T b sh -c "sed -n '1,400p' /tmp/wgq-bench-server-5201.json" >"$trial_dir/iperf-server.json" || true
+	compose_run exec -T b cat /tmp/wgq-bench-server-5201.json >"$trial_dir/iperf-server.json" || true
 	printf '%s\n' \
 		'start_s,end_s,seconds,bytes,bits_per_second,retransmits,lost_percent,omitted,snd_cwnd_bytes,snd_rtt_us,snd_rttvar_us,snd_pmtu_bytes' \
 		>"$trial_dir/intervals.csv"

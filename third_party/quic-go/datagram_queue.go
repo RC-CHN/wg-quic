@@ -158,12 +158,18 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 }
 
 // Add queues a new DATAGRAM frame for sending.
-// Up to 32 DATAGRAM frames will be queued.
+// Up to maxDatagramSendQueueLen DATAGRAM frames will be queued.
 // Once that limit is reached, Add blocks until the queue size has reduced.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
 
 	for {
+		select {
+		case <-h.closed:
+			h.sendMx.Unlock()
+			return h.closeErr
+		default:
+		}
 		if h.sendQueue.Len() < maxDatagramSendQueueLen {
 			h.sendQueue.PushBack(f)
 			h.sendMx.Unlock()
@@ -353,12 +359,27 @@ func (h *datagramQueue) ReceiveOwnedAddrPort(ctx context.Context) (ReceivedDatag
 }
 
 func (h *datagramQueue) CloseWithError(e error) {
+	// Connection shutdown runs after the packet packer has stopped. Hold the
+	// send lock while publishing closure so a concurrent Add either transfers
+	// its buffer before the drain or returns the error with ownership intact.
+	h.sendMx.Lock()
+	defer h.sendMx.Unlock()
 	h.rcvMx.Lock()
+	defer h.rcvMx.Unlock()
+	select {
+	case <-h.closed:
+		return
+	default:
+	}
+	for !h.sendQueue.Empty() {
+		frame := h.sendQueue.PopFront()
+		releaseDatagramSendBuffer(frame.Data)
+		frame.Data = nil
+	}
 	for !h.rcvQueue.Empty() {
 		datagram := h.rcvQueue.PopFront()
 		datagram.Release()
 	}
 	h.closeErr = e
 	close(h.closed)
-	h.rcvMx.Unlock()
 }

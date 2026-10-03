@@ -1,0 +1,820 @@
+{
+  "schema_version": 1,
+  "collected_date": "2026-10-03",
+  "platform": {
+    "display_version": "24H2",
+    "version": "10.0.26100",
+    "ubr": 1742,
+    "secure_boot": true,
+    "user": "WGQUIC-WIN11\\WgQuicTest",
+    "tpm_spec": "2.0, 0, 1.83",
+    "architecture": "64-bit",
+    "build": "26100",
+    "bootstrap_done": true,
+    "utc": "2026-10-03T04:21:11.1418827Z",
+    "tpm_ready": true,
+    "caption": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+    "tpm_present": true,
+    "administrator_enabled": true
+  },
+  "profile": {
+    "desktop_client_broker": true,
+    "mtu": 1420,
+    "dns_servers": [
+      "10.89.0.2"
+    ],
+    "allowed_ips": [
+      "10.89.0.2/32",
+      "10.89.1.0/24"
+    ],
+    "fec": "auto",
+    "congestion": "model",
+    "obfs": "salamander"
+  },
+  "api_equivalence": {
+    "passed": true,
+    "fixture_build": {
+      "exe_sha256": "241162b4488fd7ea83234e88ceb4158066b5347e01efeb2dcc18b8db43fd35d9",
+      "source_mode": "isolated uncommitted API comparison candidate",
+      "source_files": {
+        "network_dns_windows_amd64.go": "422e12a075b152beec24331113e5779c2acca33b52781816c2f734665f69ceed",
+        "network_dns_apply_windows.go": "116d0fc4d3d2d06ec7dc034ee5eed1518420a80a1ea3199df6c9f48d8034f3c2",
+        "network_dns_apply_windows_test.go": "c909de1b1dae5a64e7c193cbe4209c9fc4e67b117a4fca985e22adfdd8864c85",
+        "network_dns_apply_integration_windows_test.go": "5a5906b4d0ca1c080f8ca08f4f9a1efec852d9e57e223a452ffe3275a17f894d",
+        "network_dns_windows.go": "8155862909c4d27cd65e1d040bd85e1cb902807fcfcf966ae060eb476e9149e1",
+        "network_dns_windows_arm64.go": "b6aed18adca815a17f558a0e43ca5b901a4f80fedd01288d62e72492ceced70c",
+        "network_dns_windows_test.go": "30f9cfb881fc8aca4b0d5859d43720ce313cca252159735604dda61cb3dacbe2",
+        "network_dns_windows_386.go": "8e0eaf8b75d1825eba5f17b1394f2b53b51522948d1c68cfe20591886d7e7adb"
+      }
+    },
+    "cases": [
+      {
+        "name": "mixed_order_suffix",
+        "initial_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": ""
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "native_ms": 1.2686,
+        "powershell_ms": 5876.0842999999995,
+        "native_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "corp.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.54,192.0.2.53",
+              "searchlist": ""
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::54,2001:db8::53",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.54",
+                "192.0.2.53"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::54",
+                "2001:db8::53"
+              ]
+            }
+          ],
+          "suffix": "corp.example",
+          "use_suffix": false
+        },
+        "legacy_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "corp.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.54,192.0.2.53\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+              "searchlist": ""
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::54,2001:db8::53\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.54",
+                "192.0.2.53"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::54",
+                "2001:db8::53"
+              ]
+            }
+          ],
+          "suffix": "corp.example",
+          "use_suffix": false
+        },
+        "passed": true
+      },
+      {
+        "name": "ipv4_only_preserves_suffix",
+        "initial_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "native_ms": 1.1591,
+        "powershell_ms": 5417.5432,
+        "native_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.54,192.0.2.53",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.54",
+                "192.0.2.53"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "legacy_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.54,192.0.2.53",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.54",
+                "192.0.2.53"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "passed": true
+      },
+      {
+        "name": "ipv6_only_preserves_suffix",
+        "initial_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "native_ms": 1.2513,
+        "powershell_ms": 6015.0113,
+        "native_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::54,2001:db8::53",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::54",
+                "2001:db8::53"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "legacy_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::54,2001:db8::53",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::54",
+                "2001:db8::53"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "passed": true
+      },
+      {
+        "name": "suffix_only_preserves_servers",
+        "initial_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "seed.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "seed.example",
+          "use_suffix": false
+        },
+        "native_ms": 1.271,
+        "powershell_ms": 5902.0587000000005,
+        "native_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "corp.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "corp.example",
+          "use_suffix": false
+        },
+        "legacy_settings": {
+          "register": true,
+          "registry": [
+            {
+              "domain": "corp.example",
+              "family": "Tcpip",
+              "nameserver": "192.0.2.90,192.0.2.91",
+              "searchlist": "untouched.example"
+            },
+            {
+              "domain": "",
+              "family": "Tcpip6",
+              "nameserver": "2001:db8::90,2001:db8::91",
+              "searchlist": ""
+            }
+          ],
+          "servers": [
+            {
+              "family": 2,
+              "servers": [
+                "192.0.2.90",
+                "192.0.2.91"
+              ]
+            },
+            {
+              "family": 23,
+              "servers": [
+                "2001:db8::90",
+                "2001:db8::91"
+              ]
+            }
+          ],
+          "suffix": "corp.example",
+          "use_suffix": false
+        },
+        "passed": true
+      }
+    ],
+    "comparison_rule": "Effective ordered DNS settings, untouched address family/suffix/search list/registration flags, and other-adapter preservation must match. Only trailing REG_SZ NUL padding is ignored; raw values are preserved below.",
+    "first_fixture_attempt": "Integration did not start because wintun.dll was missing from the test executable directory; fake tests passed. Dependency was supplied before this v2 run."
+  },
+  "resolver_fixture": {
+    "soak_lifecycle_sha256": "3df1cbd5c2cc9121282f23ad289b4a9b42e630dbcda0c30e72c511683047c98d",
+    "dns_responder_sha256": "292db2c157e79d6f3909d00eed0ba37d99c5e5521b89f0126db5d4432b8b45d8",
+    "baseline_source": "6d48e0a2dab96eb016f251de643a6ca854008171",
+    "baseline_query": {
+      "addresses": [
+        "203.0.113.73"
+      ],
+      "name": "9e1d3f7c3dbc46acba7c92adc104216b.wgq-native.test.invalid",
+      "explicit_server": false,
+      "expected_address": "203.0.113.73",
+      "elapsed_ms": 654
+    },
+    "server_records": [
+      {
+        "answers": 1,
+        "matched": true,
+        "name": "9e1d3f7c3dbc46acba7c92adc104216b.wgq-native.test.invalid.",
+        "rcode": 0,
+        "remote": "10.89.0.1:62723",
+        "type": 1,
+        "utc": "2026-10-03T05:29:05.415092168Z"
+      }
+    ]
+  },
+  "runs": {
+    "admindnsbaseline": {
+      "source_revision": "6d48e0a2dab96eb016f251de643a6ca854008171",
+      "source_archive_sha256": "91d6715e839be4ae170023980eaeff9131341d4bdc8d46b5aa4c4230a14965c5",
+      "source_mode": "immutable git archive",
+      "environment": {
+        "quick_sha256": "0BDB8F61B0BDB9DF5CE7A5B24CEBC024AB1C98E15BDA1882CCCB55426C741D81",
+        "build": "26100",
+        "quick_version": "wg-quic-quick 0.4.1+stability.6d48e0a2dab9",
+        "version": "10.0.26100",
+        "desktop_broker": true,
+        "core_version": "wg-quic 0.4.1+stability.6d48e0a2dab9",
+        "broker_executable": "C:\\Program Files\\wg-quic\\wg-quic-manager.exe",
+        "caption": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+        "broker_sha256": "0BDB8F61B0BDB9DF5CE7A5B24CEBC024AB1C98E15BDA1882CCCB55426C741D81",
+        "core_sha256": "84DD583C267D28C2656AE9C36D0AE7E899A264E166E36328C5F8870DADC39576"
+      },
+      "identity": {
+        "administrator_enabled": true,
+        "sid": "S-1-5-21-3325548819-4094972545-717489806-1000",
+        "user": "WGQUIC-WIN11\\WgQuicTest",
+        "session_id": 2
+      },
+      "passed": 1,
+      "measurements_ms": {
+        "up_ms": {
+          "min": 10420,
+          "median": 10420,
+          "max": 10420
+        },
+        "down_ms": {
+          "min": 518,
+          "median": 518,
+          "max": 518
+        },
+        "first_ping_ms": {
+          "min": 51,
+          "median": 51,
+          "max": 51
+        }
+      },
+      "cycles": [
+        {
+          "cycle": 1,
+          "up_ms": 10420,
+          "first_ping_ms": 51,
+          "ping_attempts": 1,
+          "route_check_ms": 1992,
+          "down_ms": 518,
+          "success": true,
+          "error": ""
+        }
+      ],
+      "queries": [
+        {
+          "cycle": 1,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "9e1d3f7c3dbc46acba7c92adc104216b.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 654
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "9e1d3f7c3dbc46acba7c92adc104216b.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:62723",
+              "type": 1,
+              "utc": "2026-10-03T05:29:05.415092168Z"
+            }
+          ]
+        }
+      ]
+    },
+    "admindnsfinal": {
+      "source_revision": "86254f076e05ca6363a6327c41ffa32a451d5e41",
+      "source_archive_sha256": "77cee8806bfe77499a4761801c40133384e2aec6ef005b4b13a81d8d2e355df4",
+      "source_mode": "immutable git archive",
+      "environment": {
+        "quick_sha256": "50C70D4F5B84237057D4EBC8159C87679CAA1DC5650A2C02F9C8631A7A39335C",
+        "build": "26100",
+        "quick_version": "wg-quic-quick 0.4.1+stability.86254f076e05",
+        "version": "10.0.26100",
+        "desktop_broker": true,
+        "core_version": "wg-quic 0.4.1+stability.86254f076e05",
+        "broker_executable": "C:\\Program Files\\wg-quic\\wg-quic-manager.exe",
+        "caption": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+        "broker_sha256": "50C70D4F5B84237057D4EBC8159C87679CAA1DC5650A2C02F9C8631A7A39335C",
+        "core_sha256": "9E6204FC8C90B1F96445460211557730610BEFDC36871E88053A818E332C8908"
+      },
+      "identity": {
+        "administrator_enabled": true,
+        "sid": "S-1-5-21-3325548819-4094972545-717489806-1000",
+        "user": "WGQUIC-WIN11\\WgQuicTest",
+        "session_id": 2
+      },
+      "passed": 5,
+      "measurements_ms": {
+        "up_ms": {
+          "min": 5813,
+          "median": 6095,
+          "max": 7699
+        },
+        "down_ms": {
+          "min": 337,
+          "median": 374,
+          "max": 823
+        },
+        "first_ping_ms": {
+          "min": 4,
+          "median": 4,
+          "max": 108
+        }
+      },
+      "cycles": [
+        {
+          "cycle": 1,
+          "up_ms": 6095,
+          "first_ping_ms": 43,
+          "ping_attempts": 1,
+          "route_check_ms": 3624,
+          "down_ms": 823,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 2,
+          "up_ms": 6331,
+          "first_ping_ms": 108,
+          "ping_attempts": 1,
+          "route_check_ms": 37,
+          "down_ms": 377,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 3,
+          "up_ms": 7699,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 36,
+          "down_ms": 368,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 4,
+          "up_ms": 5813,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 35,
+          "down_ms": 337,
+          "success": true,
+          "error": ""
+        },
+        {
+          "cycle": 5,
+          "up_ms": 6086,
+          "first_ping_ms": 4,
+          "ping_attempts": 1,
+          "route_check_ms": 34,
+          "down_ms": 374,
+          "success": true,
+          "error": ""
+        }
+      ],
+      "queries": [
+        {
+          "cycle": 1,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "6930c718397f4589ba961f36178386f6.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 738
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "6930c718397f4589ba961f36178386f6.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:62081",
+              "type": 1,
+              "utc": "2026-10-03T05:37:05.794029426Z"
+            }
+          ]
+        },
+        {
+          "cycle": 2,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "63f3a87dbaf64ed9a79c3a17ae495040.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 10
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "63f3a87dbaf64ed9a79c3a17ae495040.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:49956",
+              "type": 1,
+              "utc": "2026-10-03T05:37:13.462820823Z"
+            }
+          ]
+        },
+        {
+          "cycle": 3,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "5eb0dee7b54e404e889b7c41466ecdab.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 5
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "5eb0dee7b54e404e889b7c41466ecdab.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:53917",
+              "type": 1,
+              "utc": "2026-10-03T05:37:21.628199157Z"
+            }
+          ]
+        },
+        {
+          "cycle": 4,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "770e0cbf9e4b4c1eb47aeb4c1d9497e9.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 5
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "770e0cbf9e4b4c1eb47aeb4c1d9497e9.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:56213",
+              "type": 1,
+              "utc": "2026-10-03T05:37:27.888863108Z"
+            }
+          ]
+        },
+        {
+          "cycle": 5,
+          "client": {
+            "addresses": [
+              "203.0.113.73"
+            ],
+            "name": "6ec318cbb1ed428d951e8704daad88d4.wgq-native.test.invalid",
+            "explicit_server": false,
+            "expected_address": "203.0.113.73",
+            "elapsed_ms": 5
+          },
+          "server_matches": [
+            {
+              "answers": 1,
+              "matched": true,
+              "name": "6ec318cbb1ed428d951e8704daad88d4.wgq-native.test.invalid.",
+              "rcode": 0,
+              "remote": "10.89.0.1:62646",
+              "type": 1,
+              "utc": "2026-10-03T05:37:34.385748736Z"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "raw_artifact_root": "dist/stability-2026-10-03/windows11",
+  "limitations": [
+    "Virtualized Windows 11, 4 vCPU and 4096 MiB; the small sequential cycle sample is a regression check, not a controlled physical-PC latency benchmark.",
+    "Earlier 600-second checked-traffic evidence remains tied to 6d48e0a; this later change only replaces local DNS policy application. Its acceptance adds dual-interface API comparisons and five real system-resolver lifecycle cycles, without repeating transport fault injection.",
+    "Every query uses a fresh nonce and no explicit DNS server; matching responder logs confirm delivery from the VPN address 10.89.0.1. The documentation answer is a marker and is not contacted."
+  ]
+}

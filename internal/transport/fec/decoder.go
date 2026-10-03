@@ -1,6 +1,7 @@
 package fec
 
 import (
+	"container/heap"
 	"encoding/binary"
 	"errors"
 	"time"
@@ -24,6 +25,7 @@ type Result struct {
 
 type receiveGroup struct {
 	created       time.Time
+	expiryIndex   int
 	epoch         uint16
 	groupID       uint64
 	k             int
@@ -51,6 +53,7 @@ type completedGroup struct {
 
 type Decoder struct {
 	groups      map[uint64]*receiveGroup
+	groupExpiry receiveGroupExpiry
 	completed   map[uint64]*completedGroup
 	codecs      map[codecDimensions]reedsolomon.Encoder
 	lastGroupID uint64
@@ -86,7 +89,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 	if p.groupID > d.lastGroupID {
 		d.lastGroupID = p.groupID
 	}
-	result.SendFeedback = append(result.SendFeedback, d.fastExpire()...)
+	result.SendFeedback = append(result.SendFeedback, d.fastExpire(now)...)
 	if done := d.completed[p.groupID]; done != nil {
 		if done.epoch != p.epoch {
 			return result, errors.New("FEC epoch changed within completed group")
@@ -104,6 +107,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 			data: make(map[int][]byte), parity: make(map[int][]byte),
 		}
 		d.groups[p.groupID] = group
+		heap.Push(&d.groupExpiry, group)
 		d.scheduleExpiry(now.Add(groupTTL))
 	}
 	if group.epoch != p.epoch {
@@ -151,7 +155,7 @@ func (d *Decoder) Handle(now time.Time, data []byte) (Result, error) {
 	}
 	result.Frames = append(result.Frames, recovered...)
 	if final {
-		delete(d.groups, group.groupID)
+		d.removeGroup(group)
 		d.limitCompleted()
 		d.completed[group.groupID] = &completedGroup{
 			finalized:     now,
@@ -209,23 +213,19 @@ func validFeedback(total, missing, recovered uint16) bool {
 
 // Expire advances receiver state even when no more datagrams arrive.
 func (d *Decoder) Expire(now time.Time) []Feedback {
-	return d.expire(now)
+	return append(d.fastExpire(now), d.expire(now)...)
 }
 
-// fastExpire reclaims incomplete groups left behind once a newer group
-// arrives. DATAGRAM frames are not reordered, so when a shard with group ID G
-// shows up, every older incomplete group must have lost its close frame (or
-// enough shards) and can be reported immediately instead of waiting out
-// groupTTL. This keeps the controller's parity response fast under burst loss.
-func (d *Decoder) fastExpire() []Feedback {
+// fastExpire reports stalled groups before the full TTL, but only after a
+// reordering grace period. QUIC DATAGRAMs are unordered: a newer group alone
+// is not evidence of loss. Expiry order keeps this independent of the number
+// of groups awaiting reordered close/parity frames.
+func (d *Decoder) fastExpire(now time.Time) []Feedback {
 	var feedback []Feedback
-	for id, group := range d.groups {
-		// DATAGRAM frames are not reordered, but interleaving emits up to
-		// MaxInterleave groups concurrently, so an older group may still be in
-		// flight. Only groups lagging the newest by at least MaxInterleave are
-		// certainly lost.
-		if d.lastGroupID-id < MaxInterleave {
-			continue
+	for len(d.groupExpiry) != 0 {
+		group := d.groupExpiry[0]
+		if d.lastGroupID-group.groupID < MaxInterleave || now.Sub(group.created) <= completionGrace {
+			break
 		}
 		if group.k > 0 {
 			received := 0
@@ -246,7 +246,7 @@ func (d *Decoder) fastExpire() []Feedback {
 				Missing: 1, Recovered: 0, Total: 0,
 			})
 		}
-		delete(d.groups, id)
+		d.removeGroup(group)
 	}
 	return feedback
 }
@@ -384,7 +384,7 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 	}
 	d.nextExpiry = time.Time{}
 	var feedback []Feedback
-	for id, group := range d.groups {
+	for _, group := range d.groups {
 		if now.Sub(group.created) > groupTTL {
 			if group.k > 0 {
 				received := 0
@@ -398,7 +398,7 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 					Missing: uint16(group.k - received), Total: uint16(group.k),
 				})
 			}
-			delete(d.groups, id)
+			d.removeGroup(group)
 		} else {
 			d.scheduleExpiry(group.created.Add(groupTTL))
 		}
@@ -419,6 +419,37 @@ func (d *Decoder) expire(now time.Time) []Feedback {
 		}
 	}
 	return feedback
+}
+
+type receiveGroupExpiry []*receiveGroup
+
+func (q receiveGroupExpiry) Len() int { return len(q) }
+func (q receiveGroupExpiry) Less(i, j int) bool {
+	if q[i].created.Equal(q[j].created) {
+		return q[i].groupID < q[j].groupID
+	}
+	return q[i].created.Before(q[j].created)
+}
+func (q receiveGroupExpiry) Swap(i, j int) {
+	q[i], q[j] = q[j], q[i]
+	q[i].expiryIndex, q[j].expiryIndex = i, j
+}
+func (q *receiveGroupExpiry) Push(value any) {
+	group := value.(*receiveGroup)
+	group.expiryIndex = len(*q)
+	*q = append(*q, group)
+}
+func (q *receiveGroupExpiry) Pop() any {
+	last := len(*q) - 1
+	group := (*q)[last]
+	(*q)[last] = nil
+	*q = (*q)[:last]
+	return group
+}
+
+func (d *Decoder) removeGroup(group *receiveGroup) {
+	delete(d.groups, group.groupID)
+	heap.Remove(&d.groupExpiry, group.expiryIndex)
 }
 
 func (d *Decoder) scheduleExpiry(at time.Time) {

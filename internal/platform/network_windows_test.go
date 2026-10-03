@@ -44,14 +44,48 @@ func TestWindowsNetworkPlanLeavesEndpointRoutingToManager(t *testing.T) {
 			t.Fatalf("ordinary network operation owns endpoint routing: %s", operation.apply)
 		}
 	}
-	if !strings.Contains(operations[1].apply, "NlMtuBytes 1280") {
-		t.Fatalf("Windows IP-interface MTU did not use the central default: %s", operations[1].apply)
+	if !strings.Contains(operations[0].apply, "NlMtuBytes 1280") {
+		t.Fatalf("Windows IP-interface MTU did not use the central default: %s", operations[0].apply)
 	}
 	last := operations[len(operations)-1]
 	if !strings.Contains(last.apply, "Set-DnsClientServerAddress") ||
 		!strings.Contains(last.apply, "Set-DnsClient") ||
-		last.undo == "" {
+		last.undo == "" || !last.dns {
 		t.Fatalf("DNS operation is incomplete: %#v", last)
+	}
+}
+
+func TestWindowsNetworkPlanMakesAddressesImmediatelyUsable(t *testing.T) {
+	cfg := &config.Config{Interface: config.Interface{
+		Addresses: []netip.Prefix{
+			netip.MustParsePrefix("10.77.0.1/32"),
+			netip.MustParsePrefix("fd00:77::1/128"),
+		},
+	}}
+	operations, err := windowsNetworkOperations("wg0", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := map[string]bool{}
+	for _, operation := range operations {
+		if strings.Contains(operation.apply, "New-NetIPAddress") {
+			if !prepared["IPv4"] || !prepared["IPv6"] {
+				t.Fatal("addresses can enter Tentative state before DAD is disabled")
+			}
+		}
+		for _, command := range strings.Split(operation.apply, ";") {
+			if !strings.Contains(command, "-DadTransmits 0") {
+				continue
+			}
+			if !strings.Contains(command, "Set-NetIPInterface -InterfaceIndex $ifIndex") {
+				t.Fatalf("DAD changes are not scoped to the owned adapter: %s", command)
+			}
+			for _, family := range []string{"IPv4", "IPv6"} {
+				if strings.Contains(command, "-AddressFamily "+family) {
+					prepared[family] = true
+				}
+			}
+		}
 	}
 }
 

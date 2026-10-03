@@ -19,8 +19,9 @@ const (
 	// interleaveMissingThreshold is the number of unrecovered shards in a
 	// single group that counts as a burst and ramps interleaving up.
 	interleaveMissingThreshold = 4
-	// interleaveDecreaseGroups is how many consecutive zero-loss groups it
-	// takes before halving the interleave depth.
+	// interleaveDecreaseGroups is the equivalent number of full, zero-loss
+	// groups required before halving interleave; partial groups contribute
+	// their actual source count to the same confidence window.
 	interleaveDecreaseGroups = 32
 )
 
@@ -42,10 +43,15 @@ type Controller struct {
 	observedFrames    int
 	decreaseGroups    int
 	unrecoveredGroups int
-	lossEWMA          float64
-	lossInitialized   bool
-	pathRTT           time.Duration
-	dataShards        int
+	severeLossGroups  int
+	// Count source frames rather than timer-flushed groups when deciding
+	// whether a burst regime ended. Small groups otherwise forget bursts
+	// many times faster than full groups.
+	interleaveHealthyFrames int
+	lossEWMA                float64
+	lossInitialized         bool
+	pathRTT                 time.Duration
+	dataShards              int
 
 	transportInitialized bool
 	lastTransportSent    uint64
@@ -108,12 +114,19 @@ func (c *Controller) Observe(feedback Feedback) bool {
 	}
 	if feedback.Missing == 0 {
 		c.zeroLossGroups++
+		c.interleaveHealthyFrames = min(c.interleaveHealthyFrames+int(feedback.Total), interleaveDecreaseGroups*c.dataShards)
 	} else {
 		c.zeroLossGroups = 0
+		c.interleaveHealthyFrames = 0
 	}
 
 	desired := c.desiredParityLocked()
 	if feedback.Missing > feedback.Recovered {
+		if feedback.Missing-feedback.Recovered >= max(1, (feedback.Total+1)/2) {
+			c.severeLossGroups++
+		} else {
+			c.severeLossGroups = 0
+		}
 		c.unrecoveredGroups++
 		if c.parity < desired ||
 			feedback.Missing-feedback.Recovered >= 2 ||
@@ -122,21 +135,25 @@ func (c *Controller) Observe(feedback Feedback) bool {
 			c.unrecoveredGroups = 0
 		}
 		if c.interleave < MaxInterleave && c.parity >= interleaveParityFloor &&
-			feedback.Missing-feedback.Recovered >= interleaveMissingThreshold {
-			// A single group losing several unrecovered shards is a burst:
-			// spread future groups by doubling the interleave depth.
+			(feedback.Missing-feedback.Recovered >= interleaveMissingThreshold || c.severeLossGroups >= 2) {
+			// A large unrecovered group is a burst. Short timer-flushed
+			// groups cannot reach the absolute threshold: require two
+			// consecutive groups losing at least half their sources there.
 			c.interleave *= 2
+			c.severeLossGroups = 0
 		}
 		c.observedFrames = 0
 		c.decreaseGroups = 0
 		return c.parity != previous
 	}
 	c.unrecoveredGroups = 0
+	c.severeLossGroups = 0
 	decreaseWindow := c.decreaseWindowLocked(desired)
-	if c.interleave > 1 && c.zeroLossGroups >= interleaveDecreaseGroups {
+	if c.interleave > 1 && c.interleaveHealthyFrames >= interleaveDecreaseGroups*c.dataShards {
 		// A long healthy run means the burst regime has ended: halve the
 		// interleave depth.
 		c.interleave /= 2
+		c.interleaveHealthyFrames = 0
 		c.zeroLossGroups = 0
 		return c.parity != previous
 	}

@@ -1,0 +1,301 @@
+{
+  "schema_version": 1,
+  "collected_date": "2026-10-03",
+  "source_revision": "c3175debfb95f5e9e2c01d308d73fa19e4ccc760",
+  "platform": {
+    "ProductName": "Windows 10 Enterprise LTSC 2021 Evaluation",
+    "DisplayVersion": "21H2",
+    "CurrentBuild": "19044",
+    "UBR": 7725,
+    "BuildLabEx": "19041.1.amd64fre.vb_release.191206-1406",
+    "InstallationType": "Client",
+    "windows_version": [
+      10,
+      0,
+      19044,
+      2,
+      ""
+    ]
+  },
+  "executables": {
+    "wg-quic-quick.exe": {
+      "sha256": "fdf50b1e78b34f1db102513ce8923c650433412b9891166bf74263d82cd80a79",
+      "bytes": 5619200
+    },
+    "wg-quic.exe": {
+      "sha256": "358138b595488050349ab38bfa776c3037e81ceabd48c9f978505e5e22b269da",
+      "bytes": 9544704
+    }
+  },
+  "fixture": {
+    "interface": "wgqsoaktraffic",
+    "fec": "auto",
+    "obfuscation": "salamander",
+    "protocol": "64 KiB sequenced TCP echo with byte-for-byte verification",
+    "payload_rate_limit_bytes_per_second_per_direction": 2097152,
+    "duration_seconds": 600.0021359,
+    "lifecycle_path": "direct administrative quick up/down",
+    "fault_direction": "Linux peer eth0 egress only",
+    "loss_phase": "netem loss 5% delay 10ms 3ms",
+    "outage_phase": "netem loss 100%",
+    "traffic_sample_interval_seconds": 1,
+    "resource_sample_interval_seconds": 5,
+    "actual_fault_events": [
+      {
+        "elapsed_s": 0.0,
+        "utc": "2026-10-03T03:48:15.185345+00:00",
+        "phase": "clean_start"
+      },
+      {
+        "elapsed_s": 90.313,
+        "utc": "2026-10-03T03:49:45.499294+00:00",
+        "phase": "host_fault_driver_resumed_before_first_fault"
+      },
+      {
+        "elapsed_s": 90.422,
+        "utc": "2026-10-03T03:49:45.607802+00:00",
+        "phase": "loss"
+      },
+      {
+        "elapsed_s": 150.101,
+        "utc": "2026-10-03T03:50:45.286786+00:00",
+        "phase": "clean"
+      },
+      {
+        "elapsed_s": 210.101,
+        "utc": "2026-10-03T03:51:45.287359+00:00",
+        "phase": "outage"
+      },
+      {
+        "elapsed_s": 215.103,
+        "utc": "2026-10-03T03:51:50.289006+00:00",
+        "phase": "clean"
+      },
+      {
+        "elapsed_s": 270.108,
+        "utc": "2026-10-03T03:52:45.294585+00:00",
+        "phase": "outage"
+      },
+      {
+        "elapsed_s": 310.12,
+        "utc": "2026-10-03T03:53:25.305894+00:00",
+        "phase": "clean"
+      },
+      {
+        "elapsed_s": 350.0,
+        "utc": "2026-10-03T03:54:05.186332+00:00",
+        "phase": "peer_restart_begin"
+      },
+      {
+        "elapsed_s": 353.738,
+        "utc": "2026-10-03T03:54:08.924082+00:00",
+        "phase": "peer_restart_ready"
+      },
+      {
+        "elapsed_s": 430.122,
+        "utc": "2026-10-03T03:55:25.308564+00:00",
+        "phase": "loss"
+      },
+      {
+        "elapsed_s": 530.117,
+        "utc": "2026-10-03T03:57:05.302805+00:00",
+        "phase": "clean"
+      }
+    ]
+  },
+  "result": {
+    "traffic_validation": "passed",
+    "overall_lifecycle": "failed",
+    "probe_reported_final": true,
+    "verified_bytes_per_direction": 637206528,
+    "verified_bytes_both_directions": 1274413056,
+    "payload_corruption_detected": false,
+    "longest_delivery_gap_seconds": 40.8775927,
+    "final_seconds_since_delivery": 0.0012013,
+    "application_connections": 4,
+    "application_reconnections": 3,
+    "socket_errors_during_faults": 28,
+    "traffic_stderr_empty": true,
+    "vpn_restarted_during_traffic": false,
+    "vpn_restart_evidence": "Core PID 7120 and quick PID 6980 unchanged in all 120 samples; before/after observation_id identical.",
+    "established_quic_session_ids": [
+      1,
+      8,
+      9
+    ],
+    "failed_quic_dial_or_reconnect_session_ids": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "successful_quic_reestablishments": 2
+  },
+  "recovery": {
+    "method": "First one-second report whose last verified delivery is after fault clearance; upper bounds include the collection-derived host/guest clock uncertainty bracket. This is not an exact first-delivery latency.",
+    "guest_minus_host_clock_offset_bracket_seconds": [
+      -0.1686100959777832,
+      0.06653618812561035
+    ],
+    "events": [
+      {
+        "previous_fault": "loss",
+        "cleared_host_utc": "2026-10-03T03:50:45.286786+00:00",
+        "first_sample_with_post_clear_delivery_utc": "2026-10-03T03:50:46.3595207Z",
+        "sample_time_minus_clear_nominal_seconds": 1.072734,
+        "first_post_clear_delivery_upper_bound_seconds": 1.2413440959777833,
+        "last_delivery_in_that_sample_delay_seconds": 0.9945725000000001,
+        "app_connections_at_first_recovered_sample": 1,
+        "socket_errors_at_first_recovered_sample": 0,
+        "bytes_since_last_pre_clear_sample": 1310720
+      },
+      {
+        "previous_fault": "outage",
+        "cleared_host_utc": "2026-10-03T03:51:50.289006+00:00",
+        "first_sample_with_post_clear_delivery_utc": "2026-10-03T03:51:51.3628632Z",
+        "sample_time_minus_clear_nominal_seconds": 1.073857,
+        "first_post_clear_delivery_upper_bound_seconds": 1.2424670959777833,
+        "last_delivery_in_that_sample_delay_seconds": 1.0458284,
+        "app_connections_at_first_recovered_sample": 2,
+        "socket_errors_at_first_recovered_sample": 2,
+        "bytes_since_last_pre_clear_sample": 1507328
+      },
+      {
+        "previous_fault": "outage",
+        "cleared_host_utc": "2026-10-03T03:53:25.305894+00:00",
+        "first_sample_with_post_clear_delivery_utc": "2026-10-03T03:53:26.3628932Z",
+        "sample_time_minus_clear_nominal_seconds": 1.056999,
+        "first_post_clear_delivery_upper_bound_seconds": 1.2256090959777832,
+        "last_delivery_in_that_sample_delay_seconds": 1.0259057,
+        "app_connections_at_first_recovered_sample": 3,
+        "socket_errors_at_first_recovered_sample": 21,
+        "bytes_since_last_pre_clear_sample": 786432
+      },
+      {
+        "previous_fault": "peer_restart_begin",
+        "cleared_host_utc": "2026-10-03T03:54:08.924082+00:00",
+        "first_sample_with_post_clear_delivery_utc": "2026-10-03T03:54:21.3588719Z",
+        "sample_time_minus_clear_nominal_seconds": 12.434789,
+        "first_post_clear_delivery_upper_bound_seconds": 12.603399095977784,
+        "last_delivery_in_that_sample_delay_seconds": 12.4228918,
+        "app_connections_at_first_recovered_sample": 4,
+        "socket_errors_at_first_recovered_sample": 28,
+        "bytes_since_last_pre_clear_sample": 1179648
+      },
+      {
+        "previous_fault": "loss",
+        "cleared_host_utc": "2026-10-03T03:57:05.302805+00:00",
+        "first_sample_with_post_clear_delivery_utc": "2026-10-03T03:57:06.3591165Z",
+        "sample_time_minus_clear_nominal_seconds": 1.056311,
+        "first_post_clear_delivery_upper_bound_seconds": 1.2249210959777832,
+        "last_delivery_in_that_sample_delay_seconds": 1.0384387,
+        "app_connections_at_first_recovered_sample": 4,
+        "socket_errors_at_first_recovered_sample": 28,
+        "bytes_since_last_pre_clear_sample": 3080192
+      }
+    ]
+  },
+  "resources": {
+    "wg-quic": {
+      "pid": 7120,
+      "samples": 120,
+      "working_set_bytes": {
+        "first": 65355776,
+        "last": 51257344,
+        "min": 43606016,
+        "max": 67391488
+      },
+      "private_memory_bytes": {
+        "first": 72278016,
+        "last": 80412672,
+        "min": 72278016,
+        "max": 80412672
+      },
+      "handles": {
+        "first": 242,
+        "last": 254,
+        "min": 242,
+        "max": 254
+      },
+      "cpu_seconds": {
+        "first": 0.515625,
+        "last": 361.609375,
+        "min": 0.515625,
+        "max": 361.609375
+      }
+    },
+    "wg-quic-quick": {
+      "pid": 6980,
+      "samples": 120,
+      "working_set_bytes": {
+        "first": 16588800,
+        "last": 16543744,
+        "min": 16408576,
+        "max": 16625664
+      },
+      "private_memory_bytes": {
+        "first": 50700288,
+        "last": 50618368,
+        "min": 50544640,
+        "max": 50733056
+      },
+      "handles": {
+        "first": 304,
+        "last": 299,
+        "min": 299,
+        "max": 304
+      },
+      "cpu_seconds": {
+        "first": 0.1875,
+        "last": 0.1875,
+        "min": 0.1875,
+        "max": 0.1875
+      }
+    }
+  },
+  "shutdown": {
+    "passed": false,
+    "reported_duration_seconds": 13.3,
+    "win32_exit": 1,
+    "service_exit": 0,
+    "last_checkpoint": 413,
+    "stage": "rolling back host network",
+    "primary_error": "platform network cleanup: PowerShell network configuration: context deadline exceeded",
+    "following_error": "release endpoint routes: wait for endpoint refresh workers: context deadline exceeded",
+    "started_local": "2026-10-03T11:58:18.222860+08:00",
+    "network_cleanup_failed_local": "2026-10-03T11:58:31.289233+08:00",
+    "completed_local": "2026-10-03T11:58:31.353092+08:00",
+    "post_collection_service_state": "Stopped",
+    "post_collection_service_pid": 0,
+    "post_collection_core_quick_probe_processes_present": false,
+    "repair_performed_by_collector": false,
+    "cleanup_pending_possible": true
+  },
+  "limits": [
+    "Windows 10 Enterprise LTSC 21H2 build 19044.7725; this is not Windows 11 validation.",
+    "The initial host fault driver failed at approximately 30 seconds before injection due to script execute permission. It resumed at 90.313 seconds; the guest traffic process and tunnel were not restarted. Use actual_fault_events, not the original planned schedule.",
+    "Traffic recovered from each injected fault, but shutdown failed. Do not report the whole run as passing.",
+    "Recovery timing has one-second reporting resolution and host/guest clock uncertainty; reported values are conservative sampled upper bounds.",
+    "Ten minutes and one VM do not establish indefinite memory stability or physical Windows hardware performance."
+  ],
+  "raw_artifact_directory": "dist/stability-2026-10-03/win10-traffic-collected/final",
+  "raw_sha256": {
+    "traffic.err": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lifecycle.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "resources.jsonl": "8fb836fefc53a256dbd5119d19ec70901303194a6453eb28b7e0b77d516a8c14",
+    "status-before.json": "2fb1ba502492fc8b8729c9123926f0f676445db99a641801cc80d1eea985e986",
+    "ready": "e2e6311058c1e5517e3c93eb8282072922ab940293a02c2579be33874a5bf83a",
+    "collection.json": "7d3c56bda6e1379d484788e9349559c19d274bf5cee377c65ea1a81d578e9757",
+    "done": "128aa7b0a4ebd803fcadca288c4ede204be879c50a69a74fb1ad449e78cef45b",
+    "status-after.json": "929fdefc7c6b2aa89466c2ef547ded4a8aa5b400352e660e6d83364769acecf9",
+    "error.txt": "ae80fcf61b36d1bca7dfa42e7b8429fba7d6406f7777ddd47ea6b2871cbcad7e",
+    "traffic.jsonl": "0f6580aa6bd9131050b8504aeda796eb3f2bb2660c259668f29a18386bcb975c"
+  },
+  "build_provenance": {
+    "source_mode": "working tree build",
+    "vcs_modified": true,
+    "source_revision_semantics": "Git base revision recorded in binary metadata; this was not an immutable archived-source build. Exact tested executable SHA-256 values are recorded below."
+  }
+}

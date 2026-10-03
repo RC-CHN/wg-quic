@@ -93,6 +93,42 @@ func TestAddrPortRejectsNonUDPAddress(t *testing.T) {
 	}
 }
 
+func TestCarrierClosedConnectionRejectsDatagrams(t *testing.T) {
+	cfg := Config{HandshakeTimeout: time.Second, ObfsMode: "none"}
+	client, err := Open(0, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	server, err := Open(0, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	outbound, err := client.Dial(ctx, netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), server.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound, _, err := server.Accept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inbound.CloseWithError("")
+	if err := outbound.CloseWithError("test shutdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := outbound.SendDatagram([]byte("must not silently disappear")); err == nil {
+		t.Fatal("closed connection accepted a datagram")
+	}
+	payload := AcquireDatagramSendBuffer(64)
+	if err := outbound.SendDatagramOwned(payload); err == nil {
+		t.Fatal("closed connection accepted ownership of a datagram")
+	}
+	ReleaseDatagramSendBuffer(payload)
+}
+
 func TestClassifyConnectionErrorUsesTypedQUICErrors(t *testing.T) {
 	tests := []struct {
 		name, reason, class string

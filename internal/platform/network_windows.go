@@ -11,6 +11,13 @@ import (
 type windowsOperation struct {
 	apply string
 	undo  string
+	// Native rollback keys describe only the object created by this operation.
+	// The interface identity is captured separately before any apply runs.
+	address   netip.Prefix
+	route     netip.Prefix
+	dns       bool
+	dnsValues []string
+	mtu       uint32
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
@@ -23,9 +30,23 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	}
 	base := windowsPowerShellBase(name)
 	var operations []windowsOperation
+	// Wintun is a point-to-point interface, so duplicate-address probes cannot
+	// discover another host on a shared link. Disable DAD before adding either
+	// address family; otherwise Windows leaves new addresses Tentative for
+	// several seconds after quick has reported the interface ready.
+	// Wintun's CreateTUN MTU controls the userspace view. Mirror the centrally
+	// chosen value onto both Windows IP interfaces in the same operation.
+	mtu := cfg.EffectiveMTU()
+	operations = append(operations, windowsOperation{
+		mtu: uint32(mtu),
+		apply: base +
+			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +
+			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv6 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop",
+	})
 	for _, prefix := range cfg.Interface.Addresses {
 		address := prefix.Addr().String()
 		operations = append(operations, windowsOperation{
+			address: prefix,
 			apply: base +
 				"New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress " + powerShellQuote(address) +
 				" -PrefixLength " + fmt.Sprint(prefix.Bits()) +
@@ -35,15 +56,6 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 				" -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
 		})
 	}
-	// Wintun's CreateTUN MTU controls the userspace device view. Windows also
-	// exposes per-family IP-interface MTUs, so mirror the same centrally chosen
-	// value here without owning a second fallback policy.
-	mtu := cfg.EffectiveMTU()
-	operations = append(operations, windowsOperation{
-		apply: base +
-			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +
-			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv6 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop",
-	})
 	if table != "off" {
 		for _, prefix := range uniqueAllowedPrefixes(cfg) {
 			operation, err := windowsPeerRouteOperation(name, cfg, prefix)
@@ -86,6 +98,7 @@ func windowsPeerRouteOperation(
 	destination := prefix.String()
 	base := windowsPowerShellBase(name)
 	return windowsOperation{
+		route: prefix,
 		apply: base +
 			"New-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
 			" -NextHop " + powerShellQuote(nextHop) +
@@ -120,7 +133,7 @@ func windowsDNSOperation(base string, values []string) (windowsOperation, error)
 	undo := base +
 		"Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue;" +
 		"Set-DnsClient -InterfaceIndex $ifIndex -ResetConnectionSpecificSuffix -ErrorAction SilentlyContinue"
-	return windowsOperation{apply: apply.String(), undo: undo}, nil
+	return windowsOperation{apply: apply.String(), undo: undo, dns: true, dnsValues: append([]string(nil), values...)}, nil
 }
 
 func windowsPowerShellBase(name string) string {

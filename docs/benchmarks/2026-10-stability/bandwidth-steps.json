@@ -1,0 +1,188 @@
+[
+  {
+    "experiment": "qos-window-fix",
+    "variant": "fixed",
+    "repeat": 1,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.46740014074755,
+        "samples": 10,
+        "pacing_mbit_mean": 70.732831375,
+        "queue_delay_ms_mean": 21.551625,
+        "cwnd_bytes_mean": 322926.625,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 7.7594664237520865,
+        "samples": 10,
+        "pacing_mbit_mean": 12.007461857142857,
+        "queue_delay_ms_mean": 23.807142857142857,
+        "cwnd_bytes_mean": 54014.0,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 42.78261481191636,
+        "samples": 10,
+        "pacing_mbit_mean": 62.746136875,
+        "queue_delay_ms_mean": 21.6605,
+        "cwnd_bytes_mean": 287668.0,
+        "loss_counter_end": 0
+      }
+    }
+  },
+  {
+    "experiment": "qos-window-fix",
+    "variant": "fixed",
+    "repeat": 2,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.4663512130925,
+        "samples": 10,
+        "pacing_mbit_mean": 62.748337375,
+        "queue_delay_ms_mean": 19.90475,
+        "cwnd_bytes_mean": 287542.0,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 7.6545756913606935,
+        "samples": 10,
+        "pacing_mbit_mean": 11.633519375,
+        "queue_delay_ms_mean": 22.08975,
+        "cwnd_bytes_mean": 52942.0,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 42.67878065198162,
+        "samples": 10,
+        "pacing_mbit_mean": 70.18691157142857,
+        "queue_delay_ms_mean": 19.26985714285714,
+        "cwnd_bytes_mean": 311482.28571428574,
+        "loss_counter_end": 0
+      }
+    }
+  },
+  {
+    "experiment": "qos-window-fix",
+    "variant": "window",
+    "repeat": 1,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.468232181750736,
+        "samples": 10,
+        "pacing_mbit_mean": 62.3563535,
+        "queue_delay_ms_mean": 18.427,
+        "cwnd_bytes_mean": 286757.375,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 8.493483470662602,
+        "samples": 10,
+        "pacing_mbit_mean": 11.396234857142858,
+        "queue_delay_ms_mean": 20.19542857142857,
+        "cwnd_bytes_mean": 51229.142857142855,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 42.57162786480694,
+        "samples": 10,
+        "pacing_mbit_mean": 50.945685625,
+        "queue_delay_ms_mean": 16.45675,
+        "cwnd_bytes_mean": 247572.5,
+        "loss_counter_end": 0
+      }
+    }
+  },
+  {
+    "experiment": "qos-window-fix",
+    "variant": "window",
+    "repeat": 2,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.36413115760498,
+        "samples": 10,
+        "pacing_mbit_mean": 62.7938655,
+        "queue_delay_ms_mean": 17.107125,
+        "cwnd_bytes_mean": 291542.625,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 7.654771654261992,
+        "samples": 10,
+        "pacing_mbit_mean": 12.32200175,
+        "queue_delay_ms_mean": 19.303125,
+        "cwnd_bytes_mean": 53259.25,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 42.67728205946187,
+        "samples": 10,
+        "pacing_mbit_mean": 69.2694295,
+        "queue_delay_ms_mean": 18.547875,
+        "cwnd_bytes_mean": 284478.625,
+        "loss_counter_end": 0
+      }
+    }
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "variant": "gain110",
+    "repeat": 1,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.36307590365458,
+        "samples": 10,
+        "pacing_mbit_mean": 58.173624000000004,
+        "queue_delay_ms_mean": 19.690125000000002,
+        "cwnd_bytes_mean": 255122.375,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 7.65453891806704,
+        "samples": 10,
+        "pacing_mbit_mean": 12.904586625,
+        "queue_delay_ms_mean": 19.660375000000002,
+        "cwnd_bytes_mean": 50036.75,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 42.780331077597225,
+        "samples": 10,
+        "pacing_mbit_mean": 55.650018714285714,
+        "queue_delay_ms_mean": 19.91042857142857,
+        "cwnd_bytes_mean": 274871.5714285714,
+        "loss_counter_end": 0
+      }
+    }
+  },
+  {
+    "experiment": "qos-pacing-gain",
+    "variant": "gain100",
+    "repeat": 1,
+    "phases": {
+      "initial50": {
+        "rx_goodput_mbit": 42.67734260147544,
+        "samples": 10,
+        "pacing_mbit_mean": 52.594269125,
+        "queue_delay_ms_mean": 11.409125,
+        "cwnd_bytes_mean": 265993.5,
+        "loss_counter_end": 0
+      },
+      "reduced10": {
+        "rx_goodput_mbit": 7.654529154497563,
+        "samples": 10,
+        "pacing_mbit_mean": 11.884665,
+        "queue_delay_ms_mean": 10.391375,
+        "cwnd_bytes_mean": 57323.25,
+        "loss_counter_end": 0
+      },
+      "restored50": {
+        "rx_goodput_mbit": 41.56594304914403,
+        "samples": 11,
+        "pacing_mbit_mean": 65.175914,
+        "queue_delay_ms_mean": 6.578875,
+        "cwnd_bytes_mean": 300579.0,
+        "loss_counter_end": 0
+      }
+    }
+  }
+]

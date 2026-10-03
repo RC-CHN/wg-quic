@@ -67,6 +67,33 @@ func TestModelSenderUsesFasterApplicationLimitedSample(t *testing.T) {
 	require.Greater(t, sender.bandwidthEstimate, Bandwidth(1_000_000))
 }
 
+func TestModelSenderExpiresOldBandwidthPeak(t *testing.T) {
+	sender, _, _, _ := newTestModelSender()
+	const peak = Bandwidth(80_000_000)
+	const reduced = Bandwidth(40_000_000)
+	sender.recordBandwidthSample(peak)
+	for range modelBandwidthWindow - 1 {
+		sender.recordBandwidthSample(reduced)
+	}
+	require.Equal(t, peak, sender.bandwidthEstimate, "a recent peak still belongs to the delivery window")
+	sender.recordBandwidthSample(reduced)
+	require.Equal(t, reduced, sender.bandwidthEstimate, "a stale peak must expire after a full window of lower capacity samples")
+	sender.recordBandwidthSample(peak)
+	require.Equal(t, peak, sender.bandwidthEstimate, "new capacity must remain discoverable after a decrease")
+}
+
+func TestModelSenderLowApplicationDemandDoesNotExpireBandwidth(t *testing.T) {
+	sender, clock, _, _ := newTestModelSender()
+	sender.congestionWindow = 400_000
+	const capacity = Bandwidth(40_000_000)
+	sender.recordBandwidthSample(capacity)
+	for range 3 * modelBandwidthWindow {
+		clock.Advance(sender.deliverySamplePeriod())
+		sender.observeDelivery(1200, 12_000, clock.Now())
+	}
+	require.Equal(t, capacity, sender.bandwidthEstimate, "application-limited delivery is not evidence of reduced network capacity")
+}
+
 func TestModelSenderDoesNotExitStartupOnApplicationLimitedRounds(t *testing.T) {
 	sender, _, _, _ := newTestModelSender()
 	sender.roundEnd = 1

@@ -1,0 +1,446 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "provenance": {
+    "source_commit": "bba728edf6eff415f9cc62d24a533c5a62763afe",
+    "source_mode": "git archive; only fixture subnet and image tag changed",
+    "duration_seconds": 2400,
+    "schedule": "300:lossy-wifi,600:fiber,900:cellular,1200:dsl,1500:lossy-wifi,1800:fiber,2100:cable",
+    "binaries": {
+      "wg-quic": "51d9bd99b59d692bd3f02f6fbc9657ec758b8e7aa0009c49389900efe67b3105",
+      "wg-quic-quick": "90bad6eab9a5818c537c389255e87304669eea92fead35bd7d87a75b741438cb"
+    }
+  },
+  "parameters": {
+    "trial_id": "fec-obfs-auto-none-custom-300-lossy-wifi_600-fiber_900-cellular_1200-dsl_1500-lossy-wifi_1800-fiber_2100-cable-tcp-r1-rate50-50-delay10-10-loss2-2-p1",
+    "mode": "fec-obfs",
+    "congestion": "auto",
+    "protocol_policy": "none",
+    "link_profile": "custom",
+    "link_schedule": "300:lossy-wifi,600:fiber,900:cellular,1200:dsl,1500:lossy-wifi,1800:fiber,2100:cable",
+    "workload": "tcp",
+    "resources": {
+      "cpus": "1",
+      "cpu_set_a": "40",
+      "cpu_set_b": "41",
+      "memory": "512m",
+      "memory_swap": "512m",
+      "gomaxprocs": "1",
+      "gomemlimit": "192MiB"
+    },
+    "repeat": 1,
+    "link": {
+      "impairment": "symmetric",
+      "fwd_rate_mbit": 50,
+      "rev_rate_mbit": 50,
+      "fwd_delay_ms": 10,
+      "rev_delay_ms": 10,
+      "fwd_jitter_ms": 0,
+      "rev_jitter_ms": 0,
+      "fwd_loss_pct": 2,
+      "rev_loss_pct": 2,
+      "fwd_duplicate_pct": 0,
+      "rev_duplicate_pct": 0,
+      "fwd_reorder_pct": 0,
+      "rev_reorder_pct": 0
+    },
+    "queue_packets": 1000,
+    "mtu": 1280,
+    "duration_s": 2400,
+    "iperf_interval_s": 0.25,
+    "stall_bps_threshold": 0,
+    "parallel": 1,
+    "offered_mbit": 50,
+    "disable_offloads": 1,
+    "quic_socket_gso_disabled": true
+  },
+  "receiver": {
+    "start": 0,
+    "end": 2400.060191,
+    "seconds": 2400.060191,
+    "bytes": 37814796288,
+    "bits_per_second": 126046159.77483208,
+    "sender": false
+  },
+  "receiver_zero_delivery_windows": [
+    {
+      "start_s": 901.000524,
+      "end_s": 902.000515,
+      "duration_s": 0.999990999999909
+    },
+    {
+      "start_s": 903.000511,
+      "end_s": 904.000514,
+      "duration_s": 1.0000029999999924
+    },
+    {
+      "start_s": 926.001053,
+      "end_s": 927.00106,
+      "duration_s": 1.000007000000096
+    },
+    {
+      "start_s": 930.000562,
+      "end_s": 931.000515,
+      "duration_s": 0.999953000000005
+    },
+    {
+      "start_s": 932.000515,
+      "end_s": 933.000164,
+      "duration_s": 0.9996490000000904
+    },
+    {
+      "start_s": 936.001053,
+      "end_s": 937.000624,
+      "duration_s": 0.9995710000000599
+    },
+    {
+      "start_s": 981.000504,
+      "end_s": 984.000514,
+      "duration_s": 3.0000099999999748
+    },
+    {
+      "start_s": 986.001062,
+      "end_s": 989.000183,
+      "duration_s": 2.9991209999999455
+    },
+    {
+      "start_s": 991.00084,
+      "end_s": 992.00101,
+      "duration_s": 1.0001699999999119
+    },
+    {
+      "start_s": 1004.000514,
+      "end_s": 1005.00073,
+      "duration_s": 1.000216000000023
+    },
+    {
+      "start_s": 1025.00053,
+      "end_s": 1026.000511,
+      "duration_s": 0.9999809999999343
+    },
+    {
+      "start_s": 1027.001064,
+      "end_s": 1028.000517,
+      "duration_s": 0.9994529999999031
+    },
+    {
+      "start_s": 1029.000506,
+      "end_s": 1031.000513,
+      "duration_s": 2.0000069999998686
+    },
+    {
+      "start_s": 1040.001068,
+      "end_s": 1041.001067,
+      "duration_s": 0.9999989999998888
+    },
+    {
+      "start_s": 1056.000521,
+      "end_s": 1058.000536,
+      "duration_s": 2.000015000000076
+    },
+    {
+      "start_s": 1060.000514,
+      "end_s": 1061.000507,
+      "duration_s": 0.999992999999904
+    },
+    {
+      "start_s": 1107.000536,
+      "end_s": 1108.000508,
+      "duration_s": 0.9999720000000707
+    },
+    {
+      "start_s": 1124.001063,
+      "end_s": 1125.000511,
+      "duration_s": 0.9994480000000294
+    },
+    {
+      "start_s": 1128.001063,
+      "end_s": 1129.000515,
+      "duration_s": 0.9994520000000193
+    },
+    {
+      "start_s": 1145.001061,
+      "end_s": 1146.000561,
+      "duration_s": 0.9995000000001255
+    },
+    {
+      "start_s": 1152.001061,
+      "end_s": 1157.000511,
+      "duration_s": 4.999450000000024
+    },
+    {
+      "start_s": 1159.000952,
+      "end_s": 1166.000532,
+      "duration_s": 6.9995799999999235
+    },
+    {
+      "start_s": 1167.000442,
+      "end_s": 1168.000509,
+      "duration_s": 1.0000669999999445
+    },
+    {
+      "start_s": 1169.000513,
+      "end_s": 1172.001063,
+      "duration_s": 3.0005499999999756
+    },
+    {
+      "start_s": 1173.001082,
+      "end_s": 1174.001072,
+      "duration_s": 0.9999900000000252
+    },
+    {
+      "start_s": 1184.000509,
+      "end_s": 1186.000776,
+      "duration_s": 2.0002670000001217
+    },
+    {
+      "start_s": 1192.001058,
+      "end_s": 1193.000376,
+      "duration_s": 0.9993179999999029
+    }
+  ],
+  "receiver_zero_delivery_window_definition": "Consecutive complete receiver 1-second intervals containing zero bytes; interval-resolution observation, not exact packet silence duration.",
+  "phase_results": [
+    {
+      "start_s": 0,
+      "end_s": 300,
+      "profile": "custom-50mbit-2pct",
+      "receiver_mbit": 30.82107464157088,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 300,
+      "end_s": 600,
+      "profile": "lossy-wifi",
+      "receiver_mbit": 4.540336654547293,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 600,
+      "end_s": 900,
+      "profile": "fiber",
+      "receiver_mbit": 385.08253286934416,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 900,
+      "end_s": 1200,
+      "profile": "cellular",
+      "receiver_mbit": 3.858752711012586,
+      "receiver_zero_seconds": 45.99573302268982
+    },
+    {
+      "start_s": 1200,
+      "end_s": 1500,
+      "profile": "dsl",
+      "receiver_mbit": 11.107905389407088,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 1500,
+      "end_s": 1800,
+      "profile": "lossy-wifi",
+      "receiver_mbit": 4.103421637098409,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 1800,
+      "end_s": 2100,
+      "profile": "fiber",
+      "receiver_mbit": 380.8407052753026,
+      "receiver_zero_seconds": 0
+    },
+    {
+      "start_s": 2100,
+      "end_s": 2400,
+      "profile": "cable",
+      "receiver_mbit": 187.99928221647963,
+      "receiver_zero_seconds": 0
+    }
+  ],
+  "sender": {
+    "tcp_retransmits": 11106,
+    "longest_sender_write_stall_s": 12.000150978565216,
+    "definition": "Zero-byte application writes at the sender in 250ms iperf intervals; not receiver delivery gaps."
+  },
+  "endpoints": {
+    "a": {
+      "observation_id_unchanged": true,
+      "session_ids_before": [
+        1
+      ],
+      "session_ids_after": [
+        1
+      ],
+      "state": "up",
+      "final_stats": {
+        "session_admission_rejected": 0,
+        "authentication_timeouts": 0,
+        "wg_tx_packets": 30807002,
+        "wg_tx_bytes": 40417536992,
+        "wg_rx_packets": 10061938,
+        "wg_rx_bytes": 967115648,
+        "wire_tx_packets": 31655619,
+        "wire_tx_bytes": 41770336928,
+        "wire_rx_packets": 10725784,
+        "wire_rx_bytes": 1255474223,
+        "queue_drops": 3678,
+        "fec_data_tx": 1798909,
+        "fec_parity_tx": 482066,
+        "fec_raw_lost": 11093,
+        "fec_recovered": 10535,
+        "fec_unrecovered": 558,
+        "fec_current_parity_shards": 0,
+        "fec_loss_estimate_ppm": 0,
+        "active_sessions": 1,
+        "send_queue_depth": 0,
+        "priority_queue_depth": 0,
+        "control_queue_depth": 0,
+        "receive_queue_overflow": {
+          "supported": true,
+          "source": "linux_so_rxq_ovfl",
+          "platform": "linux",
+          "packets": 0
+        },
+        "quic_bytes_acked": 42557880036,
+        "quic_packets_acked": 31619182,
+        "quic_bytes_lost": 46718325,
+        "quic_packets_lost": 38640,
+        "quic_spurious_loss_packets": 17,
+        "quic_pto_count": 1,
+        "quic_min_rtt_us": 8252,
+        "quic_smoothed_rtt_us": 23437,
+        "quic_latest_rtt_us": 18253,
+        "quic_rttvar_us": 4489,
+        "quic_congestion_window_bytes": 62630,
+        "quic_bytes_in_flight": 0,
+        "quic_bandwidth_estimate_bps": 17071538,
+        "quic_pacing_rate_bps": 18778691,
+        "quic_path_rtt_us": 14675,
+        "quic_queue_delay_us": 8761,
+        "quic_fec_recoverable_loss_ppm": 0,
+        "quic_fec_residual_loss_ppm": 0,
+        "quic_congestion_model_state": 1,
+        "quic_datagram_send_queue_len": 0,
+        "quic_datagram_rcv_queue_len": 0,
+        "quic_datagram_rcv_queue_drops": 3,
+        "quic_datagram_rcv_queue_high_water": 128,
+        "runtime_alloc_bytes": 14824194288,
+        "runtime_alloc_objects": 135270265,
+        "runtime_heap_objects": 173048,
+        "runtime_gc_cycles": 481,
+        "runtime_gc_pause_cpu_ns": 36362826
+      },
+      "final_rss_kib": 89796,
+      "resource_samples": {
+        "count": 59,
+        "first_elapsed_s": 1518.755,
+        "last_elapsed_s": 2401.302,
+        "min_rss_kib": 51540,
+        "max_sampled_rss_kib": 135460,
+        "lifetime_peak_rss_kib": 151460,
+        "min_threads": 9,
+        "max_threads": 10,
+        "min_file_descriptors": 14,
+        "max_file_descriptors": 14,
+        "pid_unchanged_in_sample": true
+      }
+    },
+    "b": {
+      "observation_id_unchanged": true,
+      "session_ids_before": [
+        1
+      ],
+      "session_ids_after": [
+        1
+      ],
+      "state": "up",
+      "final_stats": {
+        "session_admission_rejected": 0,
+        "authentication_timeouts": 0,
+        "wg_tx_packets": 10066735,
+        "wg_tx_bytes": 967576480,
+        "wg_rx_packets": 30797048,
+        "wg_rx_bytes": 40404453024,
+        "wire_tx_packets": 10750925,
+        "wire_tx_bytes": 1258361039,
+        "wire_rx_packets": 31616982,
+        "wire_rx_bytes": 41724694069,
+        "queue_drops": 0,
+        "fec_data_tx": 973709,
+        "fec_parity_tx": 313978,
+        "fec_raw_lost": 20643,
+        "fec_recovered": 19974,
+        "fec_unrecovered": 669,
+        "fec_current_parity_shards": 0,
+        "fec_loss_estimate_ppm": 0,
+        "active_sessions": 1,
+        "send_queue_depth": 0,
+        "priority_queue_depth": 0,
+        "control_queue_depth": 0,
+        "receive_queue_overflow": {
+          "supported": true,
+          "source": "linux_so_rxq_ovfl",
+          "platform": "linux",
+          "packets": 0
+        },
+        "quic_bytes_acked": 1569584449,
+        "quic_packets_acked": 10783596,
+        "quic_bytes_lost": 3571260,
+        "quic_packets_lost": 25244,
+        "quic_spurious_loss_packets": 0,
+        "quic_pto_count": 0,
+        "quic_min_rtt_us": 8724,
+        "quic_smoothed_rtt_us": 33066,
+        "quic_latest_rtt_us": 15789,
+        "quic_rttvar_us": 9333,
+        "quic_congestion_window_bytes": 126715,
+        "quic_bytes_in_flight": 0,
+        "quic_bandwidth_estimate_bps": 26435334,
+        "quic_pacing_rate_bps": 29078867,
+        "quic_path_rtt_us": 15789,
+        "quic_queue_delay_us": 17276,
+        "quic_fec_recoverable_loss_ppm": 0,
+        "quic_fec_residual_loss_ppm": 0,
+        "quic_congestion_model_state": 1,
+        "quic_datagram_send_queue_len": 0,
+        "quic_datagram_rcv_queue_len": 0,
+        "quic_datagram_rcv_queue_drops": 18,
+        "quic_datagram_rcv_queue_high_water": 128,
+        "runtime_alloc_bytes": 21935740304,
+        "runtime_alloc_objects": 178095524,
+        "runtime_heap_objects": 286270,
+        "runtime_gc_cycles": 957,
+        "runtime_gc_pause_cpu_ns": 49364274
+      },
+      "final_rss_kib": 62256,
+      "resource_samples": {
+        "count": 59,
+        "first_elapsed_s": 1518.858,
+        "last_elapsed_s": 2401.372,
+        "min_rss_kib": 45516,
+        "max_sampled_rss_kib": 79544,
+        "lifetime_peak_rss_kib": 87892,
+        "min_threads": 9,
+        "max_threads": 9,
+        "min_file_descriptors": 14,
+        "max_file_descriptors": 14,
+        "pid_unchanged_in_sample": true
+      }
+    }
+  },
+  "raw_sha256": {
+    "iperf-client.json": "b5e896dddbb53e6bbfb719f89bb70f12dbb1f851c0538ed2e6a50483acec4b8b",
+    "iperf-server.json": "dd28ea8673dc2ed248c6f6110179b7cff231da9ac784b31681334d273cd5f016",
+    "controller.csv": "451d32fdd9baa020d6e44414d0e2f1948563ec9801230b740b449ddcefcb1b49",
+    "status-a-before.json": "9e7db40457ea92bd1854f4d7b1facd2e70a58d625f8b75305a6da4232d4ca40c",
+    "status-a-after.json": "f1b46789f7b3d80466500196f7b4ef71c75d1b1eb1bc2e26d38711bf4ed32008",
+    "status-b-before.json": "002df6a717db7f19e4a95411fc20a33a4d1fde90c22b567754381cca01102592",
+    "status-b-after.json": "2a7aec78c54f4491c7255e6e7fc605aaa51994beeac860334355050dade1e5a3"
+  },
+  "limits": [
+    "Single 40-minute trial; does not establish multi-day stability.",
+    "Cellular phase had a 7-second receiver gap despite transport remaining active; investigation recorded separately.",
+    "Resource sampling covers only the final approximately 15 minutes; VmHWM includes process lifetime."
+  ]
+}

@@ -616,7 +616,10 @@ func (b *Bind) retainClosedSession(observation telemetry.ClosedSessionObservatio
 	b.telemetryMu.Unlock()
 }
 
-func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
+// The caller holds state.mu. A missing closed record needs a pending link only
+// while the old session can still publish its final observation; an evicted
+// record will never be finalized again.
+func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64, oldStillActive bool) {
 	if oldSessionID == 0 || newSessionID == 0 {
 		return
 	}
@@ -628,7 +631,9 @@ func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
 			return
 		}
 	}
-	b.replacements[oldSessionID] = newSessionID
+	if oldStillActive {
+		b.replacements[oldSessionID] = newSessionID
+	}
 	b.telemetryMu.Unlock()
 }
 
@@ -1617,7 +1622,7 @@ func (b *Bind) newSessionLocked(
 		_ = sess.fecEncoder.SetInterleave(profile.interleave)
 	}
 	state.sessions[sess.id] = sess
-	b.recordSessionReplacement(replacesSessionID, sess.id)
+	b.recordSessionReplacement(replacesSessionID, sess.id, state.sessions[replacesSessionID] != nil)
 	b.stats.activeSessions.Add(1)
 	if role == "outbound" {
 		b.recordSessionEventAt(
@@ -1689,7 +1694,13 @@ func (b *Bind) runSession(sess *session) {
 		defer timer.Stop()
 	}
 	sendDone := make(chan struct{})
-	go func() { defer close(sendDone); sess.sendLoop() }()
+	go func() {
+		defer close(sendDone)
+		// A local send failure need not close the QUIC receive half. Retire
+		// both workers so a live transport cannot hide a dead send queue.
+		defer sess.cancel()
+		sess.sendLoop()
+	}()
 	sess.receiveLoop()
 	sess.cancel()
 	<-sendDone
@@ -2024,6 +2035,10 @@ func (s *session) close() {
 		}
 		s.mu.Unlock()
 		s.state.mu.Lock()
+		// Publish before removal under the same lock used by replacement
+		// registration. There must be no gap where the old session is absent
+		// from both the active set and the final-observation history.
+		s.endpoint.owner.retainClosedSession(final)
 		delete(s.state.sessions, s.id)
 		if s.role == "inbound" {
 			s.state.inboundSessions--
@@ -2054,7 +2069,6 @@ func (s *session) close() {
 			}
 		}
 		s.endpoint.mu.Unlock()
-		s.endpoint.owner.retainClosedSession(final)
 		s.endpoint.owner.recordSessionEventAt(
 			s.id, s.generation, telemetry.SessionEventClosed, final.CloseReason,
 			closedAt, nil,
@@ -2101,6 +2115,11 @@ func (s *session) sendLoop() {
 		packetBytes := len(packet)
 		kind, fecPacket := fec.PacketKind(packet)
 		if err := qconn.SendDatagramOwned(packet); err != nil {
+			if s.ctx.Err() == nil {
+				reason, class, message := quiccarrier.ClassifyConnectionError(err)
+				s.setCloseCause(reason, class, errors.New(message))
+				s.endpoint.owner.debugf("QUIC send stopped: session=%d remote=%s error=%v", s.id, s.endpoint.addr, err)
+			}
 			return false
 		}
 		s.endpoint.owner.stats.wireTxPackets.Add(1)
@@ -2147,7 +2166,7 @@ func (s *session) sendLoop() {
 	}
 	resetTimer := func() {
 		stopTimer()
-		timer.Reset(s.fecFlushDeadline)
+		timer.Reset(s.fecEncoder.FlushDelay(s.fecFlushDeadline))
 		timerActive = true
 	}
 	applyFECPolicy := func(policy string) bool {
@@ -2192,12 +2211,15 @@ func (s *session) sendLoop() {
 			pastStartup := s.state.cfg.CongestionMode != "model" || stats.CongestionModelState != 0
 			qconn.SetGSOBatchingEnabled(parity == 0 && lossPPM == 0 && pastStartup)
 		}
+		previousFlushDelay := s.fecEncoder.FlushDelay(s.fecFlushDeadline)
 		packets, err := s.fecEncoder.Add(frame)
 		if err != nil || !sendPackets(packets) {
 			return false
 		}
 		if s.fecEncoder.Pending() {
-			if !timerActive {
+			if !timerActive || s.fecEncoder.FlushDelay(s.fecFlushDeadline) != previousFlushDelay {
+				// Reconfiguring interleave closes every old group. Start the
+				// new lane window from its first source, not the old deadline.
 				resetTimer()
 			}
 		} else {
@@ -2291,6 +2313,7 @@ func (s *session) sendLoop() {
 }
 
 func (s *session) receiveLoop() {
+	defer s.state.reassembly.discardSession(s.id)
 	select {
 	case <-s.ready:
 	case <-s.ctx.Done():
@@ -2383,6 +2406,7 @@ func (s *session) receiveLoop() {
 			}
 			handleDatagram(received.datagram)
 		case now := <-expiry.C:
+			s.state.reassembly.expire(now)
 			s.sendFECFeedback(s.fecDecoder.Expire(now))
 			continue
 		case <-s.ctx.Done():

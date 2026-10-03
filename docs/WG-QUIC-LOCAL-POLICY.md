@@ -35,8 +35,13 @@ and CUBIC are benchmark/debug alternatives.
 The per-peer directive
 `peer.fec-latency=latency|balanced|throughput` selects a local encoder profile.
 `balanced` uses the interface values; `latency` caps data shards at four,
-forces interleave one, and caps the flush deadline at 1 ms; `throughput` uses
-at least interleave two and a 4 ms flush deadline. Outbound sessions inherit
+starts with interleave one, and caps the base flush window at 1 ms;
+`throughput` uses at least interleave two and a base window of at least 4 ms.
+The configured interleave is a minimum that automatic burst protection may
+increase. Only that automatic increase scales the repair window: the effective
+window is `base * active_interleave / configured_interleave`. Source frames
+are sent immediately; the window applies to parity and group closure.
+Outbound sessions inherit
 the configured endpoint's peer policy. Inbound and roamed sessions receive a
 policy only after WireGuard authenticates the peer identity. A live change
 flushes the old group before reconfiguring the encoder, so it changes no v1
@@ -50,11 +55,12 @@ The current automatic sender uses these defaults:
 | --- | ---: |
 | Default interface data-shard limit | 32 |
 | Initial target parity | 1 |
-| Partial-group flush deadline | 2 ms |
+| Partial-group base flush window | 2 ms; up to 8 ms under automatic burst interleaving |
 | Controller parity range | 0 through 8 |
 | Controller interleave range | 1 through 4 |
 | Healthy-path protected probe | one group after 4,096 raw frames |
-| Normal decrease evidence | 32 groups |
+| Normal parity decrease evidence | 32 groups |
+| Interleave decrease evidence | 32 configured groups' worth of healthy source frames |
 
 For a partial group with `k` source shards, emitted parity is bounded by
 `min(target_parity, max(1, floor(k/2)))` and by the wire maximum. The sender
@@ -79,6 +85,14 @@ parity is zero, two or more losses at a sample rate of at least 0.5%
 immediately leave the fast path. A protected probe with even one missing
 source shard has the same effect, including when FEC repaired that shard.
 
+At parity target four or higher, four unrecovered sources in a group trigger
+additional interleaving. Short groups can also trigger it after two consecutive
+groups each lose at least half their sources without recovery. Interleaving
+doubles up to four lanes. It decreases only after a healthy source-frame
+window, so frequent timer-flushed tiny groups do not prematurely end burst
+protection. The repair window grows with the additional lanes to avoid
+splitting the same traffic into tiny, disproportionately expensive groups.
+
 These thresholds, the independent-loss model, and the local peer profiles are
 implementation policy. They may change without a wire-version change.
 
@@ -94,21 +108,28 @@ a separate product metric and are not used to pretend that parity is free.
 Current behavior includes:
 
 - delivery samples over windows between 5 and 50 ms, derived from RTT;
-- a ten-slot delivery-sample window used to raise the bandwidth estimate;
-  ordinary samples do not lower the estimate, and ACK-compression samples are
-  bounded by 1.5 times in-flight bytes over the path RTT;
+- a ten-slot maximum over eligible delivery samples; old peaks expire as new
+  capacity-limited samples enter the window. Low application demand does not
+  lower the estimate, and ACK-compression samples are bounded by 1.5 times
+  in-flight bytes over the path RTT;
 - a startup pacing gain of 2.0 and a steady probing gain of 1.10;
 - a target congestion window of twice the estimated bandwidth-delay product;
 - exit from startup after three capacity-limited rounds without 25% bandwidth
   growth;
 - no multiplicative response to random packet loss alone;
-- model reductions for ECN or loss accompanied by standing queue growth;
+- model reductions for explicit ECN, or for loss accompanied by an elevated
+  queue-delay estimate;
 - a dynamic path-local propagation RTT and queue-delay estimate; and
 - reset to a four-packet minimum window after a retransmission timeout.
 
 The standing-queue test requires at least 5 ms of excess smoothed RTT and a
-relative threshold of 25%; a more severe 50% threshold triggers repeated
-model reduction. The path RTT baseline can move after sustained access-path
+relative threshold of 25%; a more severe 50% threshold permits a model
+reduction from ACK feedback alone. Queue and loss responses share a minimum
+one-model-RTT interval and a packet-flight recovery boundary. Once a response
+records the largest sent packet number, feedback about that flight cannot
+compound the reduction, even when delayed beyond an RTT. Validated ECN shares
+this flight boundary; new-flight ECN responds without the queue threshold or
+RTT timer. The path RTT baseline can move after sustained access-path
 changes instead of retaining only the connection-lifetime minimum.
 
 FEC feedback currently supplies recoverable and residual-loss classification
@@ -162,19 +183,21 @@ The implemented profile has the following deliberate or known limits:
   blocking.
 - There is no padding, packet-size shaping, port hopping, multipath scheduler,
   or application-layer reliable retransmission.
-- FEC adapts parity and burst interleave. Per-peer policy can change `k`,
-  interleave, and flush deadline at a group boundary, but the path controller
-  does not continuously tune `k`, flush deadline, repair deadlines, or
-  per-packet protection.
+- FEC adapts parity and burst interleave, scaling the repair window with
+  additional interleaving. Per-peer policy can change `k`, interleave, and
+  the base flush window at a group boundary. The path controller does not
+  continuously tune `k`, receiver repair deadlines, or per-packet protection.
 - FEC completion and feedback use 3-second expiry, which is not derived from
   a peer latency policy.
 - Feedback and malformed-frame diagnostics are incomplete.
 - The model controller has no explicit source/repair budget split, confidence
   score, fairness guarantee, or complete BBRv3 state machine.
-- Malformed-record tables/fuzzing, duplicate-feedback tests, and explicit
-  `auto`/`off` asymmetric interoperability tests are still missing. Golden
-  vectors lock the WGQ1, WGQF, and Salamander v1 bytes, and recovery, expiry,
-  controller, framing, and full WireGuard-over-carrier behavior are covered.
+- Comprehensive parser fuzzing, duplicate-feedback replay tests, and explicit
+  `auto`/`off` asymmetric end-to-end tests remain validation gaps. Existing
+  tests cover malformed frames, invalid payload/epoch handling, feedback
+  counter bounds, and fuzzed late-shard accounting. Golden vectors lock the
+  WGQ1, WGQF, and Salamander v1 bytes; recovery, expiry, controller, framing,
+  and full WireGuard-over-carrier behavior are also covered.
 
 ## 14. Non-normative design intent and validation contract
 
