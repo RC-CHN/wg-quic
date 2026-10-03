@@ -48,6 +48,8 @@ type modelSender struct {
 	fullBandwidth       Bandwidth
 	fullBandwidthRounds int
 	startupSampleReady  bool
+	lowDeliverySamples  int
+	lowDeliveryPeak     Bandwidth
 
 	ackWindowActive      bool
 	ackWindowStart       monotime.Time
@@ -66,6 +68,8 @@ type modelSender struct {
 	higherRTTCandidate time.Duration
 	higherRTTSince     monotime.Time
 	queueSignalResume  monotime.Time
+	higherRTTDrainEnd  protocol.PacketNumber
+	higherRTTDraining  bool
 
 	lastFECTotal     uint64
 	lastFECMissing   uint64
@@ -150,7 +154,7 @@ func (m *modelSender) OnPacketAcked(
 	priorInFlight protocol.ByteCount,
 	eventTime monotime.Time,
 ) {
-	m.observePathRTT(eventTime)
+	m.observePathRTT(eventTime, packetNumber, priorInFlight)
 	m.seedFromFirstRTT()
 	m.updateFECSignal()
 	m.observeDelivery(ackedBytes, priorInFlight, eventTime)
@@ -265,7 +269,13 @@ func (m *modelSender) hasStandingQueue(now monotime.Time, ratio float64) bool {
 	relativeThreshold := time.Duration((ratio - 1) * float64(minRTT))
 	// Sub-millisecond paths routinely see scheduler and ACK batching noise
 	// that is large as a ratio but too small to represent a harmful queue.
-	return smoothedRTT-minRTT >= max(5*time.Millisecond, relativeThreshold)
+	// Serialization on a slow path is unavoidable even with no standing
+	// queue. Do not turn one packet's service time into repeated rate cuts.
+	var serialization time.Duration
+	if m.bandwidthEstimate > 0 {
+		serialization = time.Duration(uint64(m.maxDatagramSize) * 8 * uint64(time.Second) / uint64(m.bandwidthEstimate))
+	}
+	return smoothedRTT-minRTT >= max(5*time.Millisecond, relativeThreshold, 2*serialization)
 }
 
 // observePathRTT maintains a path-local propagation RTT instead of relying on
@@ -273,7 +283,7 @@ func (m *modelSender) hasStandingQueue(now monotime.Time, ratio float64) bool {
 // after the controller has drained to a small window; a very large decrease
 // must persist long enough to reject one-off samples during route / qdisc
 // transitions.
-func (m *modelSender) observePathRTT(now monotime.Time) {
+func (m *modelSender) observePathRTT(now monotime.Time, packetNumber protocol.PacketNumber, priorInFlight protocol.ByteCount) {
 	sample := m.rttStats.LatestRTT()
 	if sample <= 0 {
 		return
@@ -284,6 +294,7 @@ func (m *modelSender) observePathRTT(now monotime.Time) {
 	}
 
 	if sample < m.propagationRTT {
+		m.higherRTTDraining = false
 		m.higherRTTSince = 0
 		m.higherRTTCandidate = 0
 		// Ordinary new minima are safe to use immediately. Dramatic drops are
@@ -313,9 +324,20 @@ func (m *modelSender) observePathRTT(now monotime.Time) {
 	// the old baseline is no longer actionable and likely belongs to an old
 	// access path.
 	if sample*4 <= m.propagationRTT*5 ||
-		m.congestionWindow > 2*m.minCongestionWindow() {
+		m.congestionWindow > 2*m.minCongestionWindow() || priorInFlight > 2*m.minCongestionWindow() {
 		m.higherRTTSince = 0
 		m.higherRTTCandidate = 0
+		m.higherRTTDraining = false
+		return
+	}
+	// A smaller window is not proof the old, larger flight has drained.
+	// Confirm the baseline using packets sent after actual in-flight bytes
+	// fell, otherwise a capacity drop teaches queue delay as propagation.
+	if !m.higherRTTDraining {
+		m.higherRTTDraining = true
+		m.higherRTTDrainEnd = m.largestSent
+	}
+	if packetNumber <= m.higherRTTDrainEnd {
 		return
 	}
 	if m.higherRTTSince.IsZero() {
@@ -401,7 +423,29 @@ func (m *modelSender) observeDelivery(
 	// rate. The flight/RTT bound above prevents a compressed ACK burst from
 	// manufacturing capacity.
 	if priorInFlight >= m.congestionWindow/2 || sample > m.bandwidthEstimate {
+		if sample < m.bandwidthEstimate/4 && m.hasStandingQueue(eventTime, modelSevereQueueThreshold) {
+			m.lowDeliverySamples++
+			m.lowDeliveryPeak = max(m.lowDeliveryPeak, sample)
+			if m.lowDeliverySamples >= 3 {
+				// Several loaded sampling windows agree on a large decrease.
+				// Retire the stale peak and stop filling its old flight size.
+				peak := m.lowDeliveryPeak
+				m.clearBandwidthWindow()
+				m.recordBandwidthSample(peak)
+				m.state = modelStateProbe
+				m.congestionWindow = min(m.congestionWindow, m.targetCongestionWindow())
+				m.queueResponseEnd = m.largestSent
+				m.lastQueueResponse = eventTime
+				m.connStats.RecordEvent("controller_state", "capacity_drop")
+			}
+		} else {
+			m.lowDeliverySamples = 0
+			m.lowDeliveryPeak = 0
+		}
 		m.recordBandwidthSample(sample)
+	} else {
+		m.lowDeliverySamples = 0
+		m.lowDeliveryPeak = 0
 	}
 	m.ackWindowStart = eventTime
 	m.ackWindowBytes = 0
@@ -524,8 +568,9 @@ func (m *modelSender) windowRTT() time.Duration {
 
 func (m *modelSender) reduceModel(factor float64) {
 	reduced := Bandwidth(float64(m.bandwidthEstimate) * factor)
-	minimum := BandwidthFromDelta(m.minCongestionWindow(), m.windowRTT())
-	m.bandwidthEstimate = max(minimum, reduced)
+	// Minimum flight size is not minimum pacing rate. Raising a learned
+	// low rate to minWindow / propagationRTT creates a persistent queue.
+	m.bandwidthEstimate = max(BitsPerSecond, reduced)
 	m.clearBandwidthWindow()
 	m.congestionWindow = min(m.congestionWindow, m.targetCongestionWindow())
 	m.congestionWindow = max(m.minCongestionWindow(), m.congestionWindow)
@@ -537,6 +582,8 @@ func (m *modelSender) clearBandwidthWindow() {
 	m.bandwidthSampleIndex = 0
 	m.bandwidthSampleCount = 0
 	m.startupSampleReady = false
+	m.lowDeliverySamples = 0
+	m.lowDeliveryPeak = 0
 }
 
 func (m *modelSender) updateFECSignal() {
