@@ -13,9 +13,10 @@ type windowsOperation struct {
 	undo  string
 	// Native rollback keys describe only the object created by this operation.
 	// The interface identity is captured separately before any apply runs.
-	address netip.Addr
+	address netip.Prefix
 	route   netip.Prefix
 	dns     bool
+	mtu     uint32
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
@@ -36,6 +37,7 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	// chosen value onto both Windows IP interfaces in the same operation.
 	mtu := cfg.EffectiveMTU()
 	operations = append(operations, windowsOperation{
+		mtu: uint32(mtu),
 		apply: base +
 			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +
 			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv6 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop",
@@ -43,7 +45,7 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	for _, prefix := range cfg.Interface.Addresses {
 		address := prefix.Addr().String()
 		operations = append(operations, windowsOperation{
-			address: prefix.Addr(),
+			address: prefix,
 			apply: base +
 				"New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress " + powerShellQuote(address) +
 				" -PrefixLength " + fmt.Sprint(prefix.Bits()) +

@@ -61,6 +61,25 @@ func (f *fakeWindowsNetworkSystem) ResetDNS(ctx context.Context, compartment uin
 	return errors.Join(ctx.Err(), f.failures["dns"])
 }
 
+func (f *fakeWindowsNetworkSystem) ConfigureInterface(ctx context.Context, compartment uint32, luid uint64, mtu uint32) error {
+	return f.applyNative(ctx, compartment, luid, fmt.Sprintf("configure:%d", mtu))
+}
+
+func (f *fakeWindowsNetworkSystem) CreateAddress(ctx context.Context, compartment uint32, luid uint64, prefix netip.Prefix) error {
+	return f.applyNative(ctx, compartment, luid, "create-address:"+prefix.String())
+}
+
+func (f *fakeWindowsNetworkSystem) CreateRoute(ctx context.Context, selected windowsSelectedRoute) error {
+	return f.applyNative(ctx, selected.Key.CompartmentID, selected.Key.InterfaceLUID, "create-route:"+selected.Key.Destination+":"+selected.Key.NextHop)
+}
+
+func (f *fakeWindowsNetworkSystem) applyNative(ctx context.Context, compartment uint32, luid uint64, call string) error {
+	f.luids = append(f.luids, luid)
+	f.compartments = append(f.compartments, compartment)
+	f.calls = append(f.calls, call)
+	return errors.Join(ctx.Err(), f.failures[call])
+}
+
 func TestWindowsNetworkRollbackNativeDualStack(t *testing.T) {
 	cfg := &config.Config{
 		Interface: config.Interface{Addresses: []netip.Prefix{
@@ -75,9 +94,6 @@ func TestWindowsNetworkRollbackNativeDualStack(t *testing.T) {
 		t.Fatal(err)
 	}
 	system := &fakeWindowsNetworkSystem{}
-	for i := range operations {
-		system.completed = append(system.completed, i)
-	}
 	state := &windowsNetworkState{name: "old-alias", interfaceLUID: 77, compartmentID: 9}
 	if err := state.apply(t.Context(), operations, system); err != nil {
 		t.Fatal(err)
@@ -87,7 +103,11 @@ func TestWindowsNetworkRollbackNativeDualStack(t *testing.T) {
 	if err := state.rollback(t.Context(), system); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"apply", "route:10.88.0.0/16:0.0.0.0", "route:fd88::/64:::", "address:fd77::6", "address:10.77.0.6"}
+	want := []string{
+		"configure:1280", "create-address:10.77.0.6/24", "create-address:fd77::6/64",
+		"create-route:fd88::/64:::", "create-route:10.88.0.0/16:0.0.0.0",
+		"route:10.88.0.0/16:0.0.0.0", "route:fd88::/64:::", "address:fd77::6", "address:10.77.0.6",
+	}
 	if !reflect.DeepEqual(system.calls, want) {
 		t.Fatalf("rollback calls = %v, want %v", system.calls, want)
 	}
@@ -106,12 +126,12 @@ func TestWindowsNetworkRollbackNativeDualStack(t *testing.T) {
 func TestWindowsNetworkRollbackOwnsOnlyCompletedApply(t *testing.T) {
 	applyErr := errors.New("preexisting route rejected")
 	operations := []windowsOperation{
-		{apply: "mtu"},
-		{apply: "address", address: netip.MustParseAddr("10.77.0.6")},
+		{apply: "mtu", mtu: 1280},
+		{apply: "address", address: netip.MustParsePrefix("10.77.0.6/24")},
 		{apply: "route", route: netip.MustParsePrefix("10.88.0.0/16")},
 		{apply: "dns", undo: "restore DNS"},
 	}
-	system := &fakeWindowsNetworkSystem{completed: []int{0, 1}, applyErr: applyErr}
+	system := &fakeWindowsNetworkSystem{failures: map[string]error{"create-route:10.88.0.0/16:0.0.0.0": applyErr}}
 	state := &windowsNetworkState{name: "wg0", interfaceLUID: 77, compartmentID: 9}
 	if err := state.apply(t.Context(), operations, system); !errors.Is(err, applyErr) {
 		t.Fatalf("apply error: %v", err)
@@ -119,7 +139,7 @@ func TestWindowsNetworkRollbackOwnsOnlyCompletedApply(t *testing.T) {
 	if err := state.rollback(t.Context(), system); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"apply", "address:10.77.0.6"}; !reflect.DeepEqual(system.calls, want) {
+	if want := []string{"configure:1280", "create-address:10.77.0.6/24", "create-route:10.88.0.0/16:0.0.0.0", "address:10.77.0.6"}; !reflect.DeepEqual(system.calls, want) {
 		t.Fatalf("undid an unowned or unattempted operation: %v", system.calls)
 	}
 }
@@ -127,18 +147,18 @@ func TestWindowsNetworkRollbackOwnsOnlyCompletedApply(t *testing.T) {
 func TestWindowsNetworkRollbackContinuesAfterDNSAndRouteFailures(t *testing.T) {
 	dnsErr, routeErr := errors.New("DNS failure"), errors.New("route failure")
 	system := &fakeWindowsNetworkSystem{failures: map[string]error{
-		"scripts": dnsErr, "route:10.88.0.0/16:0.0.0.0": routeErr,
+		"dns": dnsErr, "route:10.88.0.0/16:0.0.0.0": routeErr,
 	}}
 	state := &windowsNetworkState{name: "wg0", interfaceLUID: 77, compartmentID: 9, undo: []windowsOperation{
-		{address: netip.MustParseAddr("10.77.0.6")},
+		{address: netip.MustParsePrefix("10.77.0.6/24")},
 		{route: netip.MustParsePrefix("10.88.0.0/16")},
-		{undo: "restore DNS"},
+		{undo: "restore DNS", dns: true},
 	}}
 	err := state.rollback(t.Context(), system)
 	if !errors.Is(err, dnsErr) || !errors.Is(err, routeErr) || !strings.Contains(err.Error(), "10.88.0.0/16") {
 		t.Fatalf("lost cleanup diagnostics: %v", err)
 	}
-	want := []string{"scripts:restore DNS", "route:10.88.0.0/16:0.0.0.0", "address:10.77.0.6"}
+	want := []string{"dns", "route:10.88.0.0/16:0.0.0.0", "address:10.77.0.6"}
 	if !reflect.DeepEqual(system.calls, want) {
 		t.Fatalf("cleanup stopped after failure: %v", system.calls)
 	}

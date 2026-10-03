@@ -55,8 +55,8 @@ and run in an elevated shell on the disposable Windows machine:
 
 ```powershell
 $env:WG_QUIC_TEST_WINDOWS_NETWORK='1'
-.\platform.test.exe -test.v -test.timeout 6m `
-  -test.run 'TestWindows(NetworkRollback|NativeAddressDelete|DNS)'
+.\platform.test.exe -test.v -test.timeout 8m `
+  -test.run 'TestWindows(NetworkRollback|NetworkApply|NativeStartup|NativeAddressDelete|DNS)'
 ```
 
 The opt-in tests create and remove their own two Wintun adapters. Address and
@@ -82,5 +82,22 @@ were checked against upstream WireGuard's
 and [API binding](https://git.zx2c4.com/wireguard-windows/tree/tunnel/winipcfg/winipcfg.go).
 Windows amd64 passes the GUID indirectly; ARM64 passes two 64-bit words.
 Compilation for both architectures is required; an amd64 guest does not
-establish ARM64 runtime behavior. Network startup still uses its existing
-PowerShell batch.
+establish ARM64 runtime behavior.
+
+Startup uses native IP Helper calls for MTU/DAD, temporary addresses and
+active routes; DNS apply retains its existing PowerShell command. The
+startup comparison first records fresh Wintun state, then checks native
+versus PowerShell DHCP, DAD, MTU, address origins, source-address selection,
+route metrics and policy-store behavior. A native address must be Preferred
+immediately after creation, before any reference PowerShell calls can hide
+a DAD wait. Microsoft documents the native
+[`SetIpInterfaceEntry`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipinterfaceentry)
+and [`CreateUnicastIpAddressEntry`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-createunicastipaddressentry)
+contracts: read the current interface before changing MTU/DAD, normalize
+IPv4 SitePrefixLength to zero, and initialize each temporary address row.
+DHCP parity is measured on fresh Wintun devices; these calls must not be
+generalized to change physical adapters.
+
+The Windows CI job runs these integration tests on its Windows Server
+runner. That provides recurring native API coverage and does not replace
+the separate Windows 11 guest acceptance run.
