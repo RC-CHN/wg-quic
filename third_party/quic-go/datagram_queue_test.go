@@ -2,6 +2,7 @@ package quic
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"runtime"
 	"testing"
@@ -332,6 +333,36 @@ func TestDatagramQueueCloseDrainsReceiveBuffers(t *testing.T) {
 	queue.CloseWithError(assert.AnError)
 
 	require.Zero(t, queue.rcvQueue.Len())
+}
+
+func TestDatagramQueueSendAfterClose(t *testing.T) {
+	for _, queued := range []int{0, 1, maxDatagramSendQueueLen} {
+		t.Run(fmt.Sprintf("queued=%d", queued), func(t *testing.T) {
+			queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+			for range queued {
+				require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte("queued")}))
+			}
+			queue.CloseWithError(assert.AnError)
+			payload := []byte("caller retains ownership on error")
+			require.ErrorIs(t, queue.Add(&wire.DatagramFrame{Data: payload}), assert.AnError)
+			require.Equal(t, "caller retains ownership on error", string(payload))
+			require.Zero(t, queue.Len())
+		})
+	}
+}
+
+func TestDatagramQueueCloseReleasesPendingSendBuffers(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	frames := make([]*wire.DatagramFrame, maxDatagramSendQueueLen)
+	for i := range frames {
+		frames[i] = &wire.DatagramFrame{Data: AcquireDatagramSendBuffer()[:1200]}
+		require.NoError(t, queue.Add(frames[i]))
+	}
+	queue.CloseWithError(assert.AnError)
+	require.Zero(t, queue.Len())
+	for _, frame := range frames {
+		require.Nil(t, frame.Data, "closed queue must relinquish queued payload storage")
+	}
 }
 
 func BenchmarkDatagramReceiveQueue(b *testing.B) {
