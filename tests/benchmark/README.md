@@ -45,10 +45,14 @@ experiment.
 
 Loss, duplication, reordering, and protocol-policy trials automatically disable
 TSO/GSO/GRO plus UDP segmentation/GRO forwarding on the container outer
-interfaces. Without this, one large virtual segment can count as one netem
-packet and a configured 5% loss rate can become only a fraction of a percent on
-the wire. Clean trials leave offloads enabled. Override the decision only for
-a deliberate control with `DISABLE_OFFLOADS=0|1`.
+interfaces, and disable quic-go's socket-level UDP GSO with
+`QUIC_GO_DISABLE_GSO`. Disabling device offloads alone can still let
+`UDP_SEGMENT` batches reach the qdisc. One batch can then count as one netem
+packet, so the loss pattern differs between FEC modes that use different GSO
+policies; a policer can also reject an oversized batch. Check the recorded
+`tc` packet and drop counters when interpreting loss trials. Clean trials leave
+offloads enabled. Override the decision only for a deliberate control with
+`DISABLE_OFFLOADS=0|1`.
 
 ## Synthetic link profiles
 
