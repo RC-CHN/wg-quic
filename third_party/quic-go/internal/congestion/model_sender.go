@@ -57,6 +57,7 @@ type modelSender struct {
 	bandwidthSampleCount int
 
 	lastQueueResponse monotime.Time
+	queueResponseEnd  protocol.PacketNumber
 	rttSeeded         bool
 
 	propagationRTT     time.Duration
@@ -102,6 +103,7 @@ func NewModelSender(
 		state:             modelStateStartup,
 		largestSent:       protocol.InvalidPacketNumber,
 		roundEnd:          protocol.InvalidPacketNumber,
+		queueResponseEnd:  protocol.InvalidPacketNumber,
 		rttSeeded:         rttStats.HasMeasurement(),
 	}
 	if rttStats.HasMeasurement() {
@@ -153,12 +155,12 @@ func (m *modelSender) OnPacketAcked(
 	m.updateFECSignal()
 	m.observeDelivery(ackedBytes, priorInFlight, eventTime)
 	m.updateRound(packetNumber, priorInFlight >= m.congestionWindow/2)
-	m.respondToPersistentQueue(eventTime)
+	m.respondToPersistentQueue(eventTime, packetNumber)
 	m.updateCongestionWindow(ackedBytes, priorInFlight)
 }
 
 func (m *modelSender) OnCongestionEvent(
-	_ protocol.PacketNumber,
+	packetNumber protocol.PacketNumber,
 	lostBytes protocol.ByteCount,
 	_ protocol.ByteCount,
 ) {
@@ -174,7 +176,7 @@ func (m *modelSender) OnCongestionEvent(
 		return
 	}
 	if m.hasStandingQueue(m.clock.Now(), modelQueueThreshold) {
-		m.reduceModel(0.85)
+		m.respondToQueue(m.clock.Now(), packetNumber, 0.85)
 	}
 }
 
@@ -446,16 +448,26 @@ func (m *modelSender) updateRound(acked protocol.PacketNumber, capacityLimited b
 	}
 }
 
-func (m *modelSender) respondToPersistentQueue(now monotime.Time) {
+func (m *modelSender) respondToPersistentQueue(now monotime.Time, packetNumber protocol.PacketNumber) {
 	if !m.hasStandingQueue(now, modelSevereQueueThreshold) {
 		return
 	}
-	interval := m.modelRTT()
-	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < interval {
+	m.respondToQueue(now, packetNumber, 0.90)
+}
+
+// Acknowledgements and losses from the flight already outstanding when we
+// reduced the model cannot describe the effect of that reduction. Respond at
+// most once to that flight, even if delayed loss detection crosses an RTT.
+func (m *modelSender) respondToQueue(now monotime.Time, packetNumber protocol.PacketNumber, factor float64) {
+	if m.queueResponseEnd != protocol.InvalidPacketNumber && packetNumber <= m.queueResponseEnd {
+		return
+	}
+	if !m.lastQueueResponse.IsZero() && now.Sub(m.lastQueueResponse) < m.modelRTT() {
 		return
 	}
 	m.lastQueueResponse = now
-	m.reduceModel(0.90)
+	m.queueResponseEnd = max(m.largestSent, packetNumber)
+	m.reduceModel(factor)
 }
 
 func (m *modelSender) seedFromFirstRTT() {
