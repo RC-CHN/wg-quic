@@ -45,6 +45,10 @@ type Supervisor struct {
 	activePeerSet string
 	wg            sync.WaitGroup
 	extraLeases   []RouteLease
+	// Retired leases are no longer used by the core and may be retried while
+	// running. extraLeases may still serve an unfinalized generation, so those
+	// must stay installed until shutdown.
+	retiredLeases []RouteLease
 }
 
 type peerState struct {
@@ -206,7 +210,9 @@ func (s *Supervisor) Initialize(ctx context.Context) (map[string]netip.AddrPort,
 				PublicKey: publicKey, Endpoint: endpoint, Generation: 1,
 			}
 			if err := s.core.SetPeerEndpoint(ctx, update); err != nil {
-				_ = lease.Release(context.Background())
+				if releaseErr := s.retireLease(context.Background(), lease); releaseErr != nil {
+					installErrors = append(installErrors, releaseErr)
+				}
 				installErrors = append(installErrors, err)
 				continue
 			}
@@ -351,6 +357,9 @@ func (s *Supervisor) refreshPeer(ctx context.Context, publicKey string, rotate b
 	if closed {
 		return errors.New("endpoint supervisor is closed")
 	}
+	if err := s.releaseRetiredLeases(ctx); err != nil {
+		s.options.Logf("retry retired endpoint route leases: %v", err)
+	}
 	state, ok := s.peers[publicKey]
 	if !ok {
 		return errors.New("peer public key is not configured")
@@ -432,8 +441,7 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 		PublicKey: state.spec.PublicKey, Endpoint: newEndpoint, Generation: newGeneration,
 	}
 	if err := s.core.SetPeerEndpoint(ctx, update); err != nil {
-		_ = lease.Release(context.Background())
-		return err
+		return errors.Join(err, s.retireLease(context.Background(), lease))
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, s.options.ReadinessTimeout)
 	err = s.core.WaitPeerReady(readyCtx, update)
@@ -453,7 +461,7 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 			return fmt.Errorf("finalize migrated peer endpoint: %w", finalizeErr)
 		}
 		if oldLease != nil {
-			if releaseErr := oldLease.Release(context.Background()); releaseErr != nil {
+			if releaseErr := s.retireLease(context.Background(), oldLease); releaseErr != nil {
 				s.options.Logf("release old endpoint route lease: %v", releaseErr)
 			}
 		}
@@ -487,11 +495,7 @@ func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address n
 		s.extraLeases = append(s.extraLeases, lease)
 		return errors.Join(err, fmt.Errorf("finalize rolled-back peer endpoint: %w", finalizeErr))
 	}
-	if releaseErr := lease.Release(context.Background()); releaseErr != nil {
-		// Keep the failed release reachable so Close can retry it. RouteLease
-		// implementations are idempotent and only mark themselves released
-		// after a successful manager operation.
-		s.extraLeases = append(s.extraLeases, lease)
+	if releaseErr := s.retireLease(context.Background(), lease); releaseErr != nil {
 		return errors.Join(err, fmt.Errorf("release failed endpoint route: %w", releaseErr))
 	}
 	return err
@@ -510,6 +514,9 @@ func (s *Supervisor) RefreshRoutes(ctx context.Context) error {
 		return errors.New("endpoint supervisor is closed")
 	}
 	var errs []error
+	if err := s.releaseRetiredLeases(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("retry retired endpoint route leases: %w", err))
+	}
 	for _, publicKey := range s.order {
 		state := s.peers[publicKey]
 		s.mu.RLock()
@@ -846,6 +853,9 @@ func (s *Supervisor) releaseAll(ctx context.Context) error {
 
 func (s *Supervisor) releaseAllLocked(ctx context.Context) error {
 	var errs []error
+	if err := s.releaseRetiredLeases(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	for index := len(s.order) - 1; index >= 0; index-- {
 		state := s.peers[s.order[index]]
 		if state.lease == nil {
@@ -864,6 +874,31 @@ func (s *Supervisor) releaseAllLocked(ctx context.Context) error {
 			failedExtra = append(failedExtra, lease)
 		}
 	}
+	clear(s.extraLeases[len(failedExtra):])
 	s.extraLeases = failedExtra
+	return errors.Join(errs...)
+}
+
+// Callers hold opMu. A failed route release must keep its ownership token:
+// otherwise neither later refreshes nor Close can reconcile it.
+func (s *Supervisor) retireLease(ctx context.Context, lease RouteLease) error {
+	if err := lease.Release(ctx); err != nil {
+		s.retiredLeases = append(s.retiredLeases, lease)
+		return err
+	}
+	return nil
+}
+
+func (s *Supervisor) releaseRetiredLeases(ctx context.Context) error {
+	var errs []error
+	failed := s.retiredLeases[:0]
+	for _, lease := range s.retiredLeases {
+		if err := lease.Release(ctx); err != nil {
+			errs = append(errs, err)
+			failed = append(failed, lease)
+		}
+	}
+	clear(s.retiredLeases[len(failed):])
+	s.retiredLeases = failed
 	return errors.Join(errs...)
 }

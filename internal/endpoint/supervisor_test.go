@@ -119,6 +119,7 @@ type fakeCoreControl struct {
 	redialErrors []error
 	health       map[string]PeerHealth
 	finalized    []PeerUpdate
+	setErrors    []error
 }
 
 func (c *fakeCoreControl) FinalizePeerEndpoint(
@@ -134,8 +135,13 @@ func (c *fakeCoreControl) FinalizePeerEndpoint(
 
 func (c *fakeCoreControl) SetPeerEndpoint(_ context.Context, update PeerUpdate) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.updates = append(c.updates, update)
-	c.mu.Unlock()
+	if len(c.setErrors) != 0 {
+		err := c.setErrors[0]
+		c.setErrors = c.setErrors[1:]
+		return err
+	}
 	return nil
 }
 
