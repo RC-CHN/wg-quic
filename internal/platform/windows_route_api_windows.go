@@ -22,6 +22,7 @@ var (
 	windowsProcConvertLUIDToIndex      = windowsIPHLPAPI.NewProc("ConvertInterfaceLuidToIndex")
 	windowsProcCreateRoute             = windowsIPHLPAPI.NewProc("CreateIpForwardEntry2")
 	windowsProcDeleteRoute             = windowsIPHLPAPI.NewProc("DeleteIpForwardEntry2")
+	windowsProcDeleteAddress           = windowsIPHLPAPI.NewProc("DeleteUnicastIpAddressEntry")
 	windowsProcGetBestRoute            = windowsIPHLPAPI.NewProc("GetBestRoute2")
 	windowsProcGetCurrentCompartmentID = windowsIPHLPAPI.NewProc("GetCurrentThreadCompartmentId")
 	windowsProcInitializeRoute         = windowsIPHLPAPI.NewProc("InitializeIpForwardEntry")
@@ -55,10 +56,9 @@ func windowsInterfaceLUID(alias string) (uint64, error) {
 	return luid, nil
 }
 
-func windowsInterfaceIndex(alias string) (uint32, error) {
-	luid, err := windowsInterfaceLUID(alias)
-	if err != nil {
-		return 0, err
+func windowsInterfaceIndexFromLUID(luid uint64) (uint32, error) {
+	if luid == 0 {
+		return 0, errors.New("resolve Windows interface index: empty LUID")
 	}
 	var index uint32
 	status, _, _ := syscall.SyscallN(
@@ -67,12 +67,51 @@ func windowsInterfaceIndex(alias string) (uint32, error) {
 		uintptr(unsafe.Pointer(&index)),
 	)
 	if status != 0 {
-		return 0, fmt.Errorf("resolve Windows interface %q index: %w", alias, syscall.Errno(status))
+		return 0, fmt.Errorf("resolve Windows interface LUID %d index: %w", luid, syscall.Errno(status))
 	}
 	if index == 0 {
-		return 0, fmt.Errorf("resolve Windows interface %q index: empty index", alias)
+		return 0, fmt.Errorf("resolve Windows interface LUID %d index: empty index", luid)
 	}
 	return index, nil
+}
+
+func (windowsNativeRouteSystem) DeleteAddress(ctx context.Context, compartmentID uint32, luid uint64, address netip.Addr) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := windowsValidateCompartment(windowsRouteKey{CompartmentID: compartmentID}); err != nil {
+		return err
+	}
+	if luid == 0 {
+		return errors.New("delete Windows address: empty interface LUID")
+	}
+	raw, err := windowsRawAddress(address)
+	if err != nil {
+		return err
+	}
+	// x/sys represents this SOCKADDR_INET union with its largest IPv6 member.
+	row := windows.MibUnicastIpAddressRow{
+		Address: *(*windows.RawSockaddrInet6)(unsafe.Pointer(&raw)), InterfaceLuid: luid,
+	}
+	status, _, _ := syscall.SyscallN(windowsProcDeleteAddress.Addr(), uintptr(unsafe.Pointer(&row)))
+	if status == uintptr(windows.ERROR_NOT_FOUND) || status == uintptr(windows.ERROR_FILE_NOT_FOUND) {
+		return nil
+	}
+	if status == uintptr(windows.ERROR_INVALID_PARAMETER) {
+		// Windows can report INVALID_PARAMETER when this exact address was
+		// already removed. Confirm absence instead of hiding every such error
+		// (which can also describe a malformed row or another real failure).
+		err := windows.GetUnicastIpAddressEntry(&row)
+		if errors.Is(err, windows.ERROR_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+			return nil
+		}
+	}
+	if status != 0 {
+		return syscall.Errno(status)
+	}
+	return nil
 }
 
 func (windowsNativeRouteSystem) BestRoute(

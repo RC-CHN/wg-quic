@@ -11,6 +11,10 @@ import (
 type windowsOperation struct {
 	apply string
 	undo  string
+	// Native rollback keys describe only the object created by this operation.
+	// The interface identity is captured separately before any apply runs.
+	address netip.Addr
+	route   netip.Prefix
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
@@ -38,6 +42,7 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	for _, prefix := range cfg.Interface.Addresses {
 		address := prefix.Addr().String()
 		operations = append(operations, windowsOperation{
+			address: prefix.Addr(),
 			apply: base +
 				"New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress " + powerShellQuote(address) +
 				" -PrefixLength " + fmt.Sprint(prefix.Bits()) +
@@ -89,6 +94,7 @@ func windowsPeerRouteOperation(
 	destination := prefix.String()
 	base := windowsPowerShellBase(name)
 	return windowsOperation{
+		route: prefix,
 		apply: base +
 			"New-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix " + powerShellQuote(destination) +
 			" -NextHop " + powerShellQuote(nextHop) +

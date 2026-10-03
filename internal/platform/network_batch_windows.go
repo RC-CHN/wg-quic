@@ -23,7 +23,21 @@ func runWindowsNetworkBatch(ctx context.Context, name string, scripts []string, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	index, err := windowsInterfaceIndex(name)
+	luid, err := windowsInterfaceLUID(name)
+	if err != nil {
+		return nil, err
+	}
+	return runWindowsNetworkBatchOnInterface(ctx, name, luid, scripts, keepGoing)
+}
+
+func runWindowsNetworkBatchOnInterface(ctx context.Context, name string, luid uint64, scripts []string, keepGoing bool) ([]int, error) {
+	if len(scripts) == 0 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	index, err := windowsInterfaceIndexFromLUID(luid)
 	if err != nil {
 		return nil, err
 	}
