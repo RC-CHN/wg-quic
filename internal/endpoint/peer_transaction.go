@@ -355,7 +355,7 @@ func (p *preparedEndpointPeerSet) Rollback(ctx context.Context) error {
 	var rollbackErrors []error
 	for index := len(p.affected) - 1; index >= 0; index-- {
 		transition := p.transitions[p.affected[index]]
-		if !transition.installed {
+		if transition == nil || !transition.installed {
 			continue
 		}
 		if !transition.restored {
@@ -382,18 +382,24 @@ func (p *preparedEndpointPeerSet) Rollback(ctx context.Context) error {
 	if len(rollbackErrors) != 0 {
 		return errors.Join(rollbackErrors...)
 	}
+	s.mu.Lock()
 	if p.state == endpointPeerSetCommitted {
-		s.mu.Lock()
 		for _, publicKey := range p.affected {
 			s.stopRefreshWorkerLocked(publicKey)
 		}
-		s.peers = p.before
-		s.order = slices.Clone(p.beforeOrder)
+	}
+	// Preparing an existing peer can already advance the core's endpoint
+	// generation. Publish the restored generation even when the peer set was
+	// never committed; otherwise later refreshes reuse a stale generation.
+	// Unaffected entries in before retain their live state and route ownership.
+	s.peers = p.before
+	s.order = slices.Clone(p.beforeOrder)
+	if p.state == endpointPeerSetCommitted {
 		for _, publicKey := range p.affected {
 			s.startRefreshWorkerLocked(publicKey)
 		}
-		s.mu.Unlock()
 	}
+	s.mu.Unlock()
 	if err := p.releaseCandidateLeases(ctx, false); err != nil {
 		return err
 	}
