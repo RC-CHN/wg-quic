@@ -3181,6 +3181,23 @@ func (c *Conn) SendDatagramOwned(p []byte) error {
 }
 
 func (c *Conn) sendDatagram(p []byte, owned bool) error {
+	return c.sendDatagramContext(context.Background(), p, owned, false)
+}
+
+// SendDatagramOwnedContext is SendDatagramOwned with cancellable admission.
+// Cancellation retains caller ownership and does not close the connection.
+func (c *Conn) SendDatagramOwnedContext(ctx context.Context, p []byte) error {
+	return c.sendDatagramContext(ctx, p, true, false)
+}
+
+// SendPriorityDatagramOwned reserves bounded queue space for small control
+// messages. It shares normal QUIC pacing / congestion control; it only changes
+// application queue order. On error ownership remains with the caller.
+func (c *Conn) SendPriorityDatagramOwned(ctx context.Context, p []byte) error {
+	return c.sendDatagramContext(ctx, p, true, true)
+}
+
+func (c *Conn) sendDatagramContext(ctx context.Context, p []byte, owned, priority bool) error {
 	if !c.supportsDatagrams() {
 		return errors.New("datagram support disabled")
 	}
@@ -3196,7 +3213,7 @@ func (c *Conn) sendDatagram(p []byte, owned bool) error {
 		f.Data = make([]byte, len(p))
 		copy(f.Data, p)
 	}
-	return c.datagramQueue.Add(f)
+	return c.datagramQueue.addContext(ctx, f, priority)
 }
 
 // MaxDatagramPayloadSize returns a conservative payload limit for a DATAGRAM

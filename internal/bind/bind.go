@@ -1369,8 +1369,10 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 		sess.stats.wgTxBytes.Add(uint64(len(buf)))
 		queue := sess.send
 		copies := 1
-		if priorityWireGuardDatagram(buf) {
+		if controlWireGuardDatagram(buf) {
 			queue = sess.priority
+		}
+		if priorityWireGuardDatagram(buf) {
 			// Duplicate handshake/keepalive datagrams so a burst cannot wipe
 			// out both copies at once; WireGuard dedupes the repeat by its
 			// counter, so the duplicated send is protocol-safe.
@@ -1704,6 +1706,12 @@ func (b *Bind) runSession(sess *session) {
 		timer := time.AfterFunc(sess.state.cfg.InboundAuthenticationTimeout, sess.expireAuthentication)
 		defer timer.Stop()
 	}
+	priorityDone := make(chan struct{})
+	go func() {
+		defer close(priorityDone)
+		defer sess.cancel()
+		sess.prioritySendLoop()
+	}()
 	sendDone := make(chan struct{})
 	go func() {
 		defer close(sendDone)
@@ -1715,6 +1723,7 @@ func (b *Bind) runSession(sess *session) {
 	sess.receiveLoop()
 	sess.cancel()
 	<-sendDone
+	<-priorityDone
 }
 
 type session struct {
@@ -2129,7 +2138,8 @@ func (s *session) sendLoop() {
 	sendPacket := func(packet []byte) bool {
 		packetBytes := len(packet)
 		kind, fecPacket := fec.PacketKind(packet)
-		if err := qconn.SendDatagramOwned(packet); err != nil {
+		if err := qconn.SendDatagramOwnedContext(s.ctx, packet); err != nil {
+			quiccarrier.ReleaseDatagramSendBuffer(packet)
 			if s.ctx.Err() == nil {
 				reason, class, message := quiccarrier.ClassifyConnectionError(err)
 				s.setCloseCause(reason, class, errors.New(message))
@@ -2160,15 +2170,6 @@ func (s *session) sendLoop() {
 			}
 		}
 		return true
-	}
-	// flushPending emits any in-flight FEC groups so a priority datagram and
-	// its duplicate land in separate groups and survive the same burst.
-	flushPending := func() bool {
-		if s.fecEncoder == nil {
-			return true
-		}
-		packets, err := s.fecEncoder.Flush()
-		return err == nil && sendPackets(packets)
 	}
 	stopTimer := func() {
 		if timerActive && !timer.Stop() {
@@ -2287,42 +2288,12 @@ func (s *session) sendLoop() {
 		default:
 		}
 		select {
-		case control := <-s.control:
-			if !sendPacket(control) {
-				return
-			}
 		case policy := <-s.fecPolicyUpdates:
 			if !applyFECPolicy(policy) {
 				return
 			}
-			continue
-		default:
-		}
-		select {
-		case packet := <-s.priority:
-			if !sendWGPacket(packet) {
-				return
-			}
-			if !flushPending() {
-				return
-			}
-			continue
-		default:
-		}
-		select {
-		case packet := <-s.priority:
-			if !sendWGPacket(packet) {
-				return
-			}
-			if !flushPending() {
-				return
-			}
 		case packet := <-s.send:
 			if !sendWGPacket(packet) {
-				return
-			}
-		case control := <-s.control:
-			if !sendPacket(control) {
 				return
 			}
 		case <-timer.C:

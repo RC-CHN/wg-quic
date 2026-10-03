@@ -120,9 +120,13 @@ func (d *ReceivedDatagram) Release() {
 }
 
 type datagramQueue struct {
-	sendMx    sync.Mutex
-	sendQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
-	sendBytes int
+	sendMx        sync.Mutex
+	sendQueue     ringbuffer.RingBuffer[*wire.DatagramFrame]
+	priorityQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
+	prioritySent  chan struct{}
+	peeked        *wire.DatagramFrame
+	peekPriority  bool
+	sendBytes     int
 	// sendBudget is installed before the connection is published. It reads
 	// atomic transport observations, never the controller's mutable state.
 	sendBudget func() int
@@ -150,11 +154,12 @@ type datagramQueue struct {
 
 func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 	queue := &datagramQueue{
-		hasData: hasData,
-		rcvd:    make(chan struct{}, 1),
-		sent:    make(chan struct{}, 1),
-		closed:  make(chan struct{}),
-		logger:  logger,
+		hasData:      hasData,
+		rcvd:         make(chan struct{}, 1),
+		sent:         make(chan struct{}, 1),
+		prioritySent: make(chan struct{}, 1),
+		closed:       make(chan struct{}),
+		logger:       logger,
 	}
 	queue.rcvCap = currentMaxDatagramRcvQueueLen()
 	queue.rcvQueue.Init(queue.rcvCap)
@@ -165,20 +170,37 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 // Up to maxDatagramSendQueueLen DATAGRAM frames will be queued.
 // Once that limit is reached, Add blocks until the queue size has reduced.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
+	return h.addContext(context.Background(), f, false)
+}
+
+func (h *datagramQueue) addContext(ctx context.Context, f *wire.DatagramFrame, priority bool) error {
 	h.sendMx.Lock()
+	wake := h.sent
+	if priority {
+		wake = h.prioritySent
+	}
 
 	for {
 		select {
 		case <-h.closed:
 			h.sendMx.Unlock()
 			return h.closeErr
+		case <-ctx.Done():
+			h.sendMx.Unlock()
+			return ctx.Err()
 		default:
 		}
 		budget := maxDatagramSendQueueLen * DatagramSendBufferSize
 		if h.sendBudget != nil {
 			budget = h.sendBudget()
 		}
-		if h.sendQueue.Len() < maxDatagramSendQueueLen && (h.sendQueue.Empty() || h.sendBytes+len(f.Data) <= budget) {
+		if priority && h.priorityQueue.Len() < 8 {
+			h.priorityQueue.PushBack(f)
+			h.sendMx.Unlock()
+			h.hasData()
+			return nil
+		}
+		if !priority && h.sendQueue.Len() < maxDatagramSendQueueLen && (h.sendQueue.Empty() || h.sendBytes+len(f.Data) <= budget) {
 			h.sendQueue.PushBack(f)
 			h.sendBytes += len(f.Data)
 			h.sendMx.Unlock()
@@ -186,14 +208,16 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 			return nil
 		}
 		select {
-		case <-h.sent: // drain the queue so we don't loop immediately
+		case <-wake: // drain the queue so we don't loop immediately
 		default:
 		}
 		h.sendMx.Unlock()
 		select {
 		case <-h.closed:
 			return h.closeErr
-		case <-h.sent:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wake:
 		}
 		h.sendMx.Lock()
 	}
@@ -204,19 +228,35 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 func (h *datagramQueue) Peek() *wire.DatagramFrame {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()
-	if h.sendQueue.Empty() {
-		return nil
+	// Pin the selection until Pop: an arriving priority frame must not
+	// replace a data frame that the packet packer has already inspected.
+	if h.peeked != nil {
+		return h.peeked
 	}
-	return h.sendQueue.PeekFront()
+	if !h.priorityQueue.Empty() {
+		h.peeked, h.peekPriority = h.priorityQueue.PeekFront(), true
+	} else if !h.sendQueue.Empty() {
+		h.peeked, h.peekPriority = h.sendQueue.PeekFront(), false
+	}
+	return h.peeked
 }
 
 func (h *datagramQueue) Pop() {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()
-	f := h.sendQueue.PopFront()
-	h.sendBytes -= len(f.Data)
+	if (h.peeked != nil && h.peekPriority) || (h.peeked == nil && !h.priorityQueue.Empty()) {
+		h.priorityQueue.PopFront()
+	} else {
+		f := h.sendQueue.PopFront()
+		h.sendBytes -= len(f.Data)
+	}
+	h.peeked = nil
 	select {
 	case h.sent <- struct{}{}:
+	default:
+	}
+	select {
+	case h.prioritySent <- struct{}{}:
 	default:
 	}
 }
@@ -224,7 +264,7 @@ func (h *datagramQueue) Pop() {
 func (h *datagramQueue) Len() int {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()
-	return h.sendQueue.Len()
+	return h.sendQueue.Len() + h.priorityQueue.Len()
 }
 
 // RcvQueueLen returns the number of received DATAGRAMs waiting for the
@@ -387,6 +427,12 @@ func (h *datagramQueue) CloseWithError(e error) {
 		frame.Data = nil
 	}
 	h.sendBytes = 0
+	for !h.priorityQueue.Empty() {
+		frame := h.priorityQueue.PopFront()
+		releaseDatagramSendBuffer(frame.Data)
+		frame.Data = nil
+	}
+	h.peeked = nil
 	for !h.rcvQueue.Empty() {
 		datagram := h.rcvQueue.PopFront()
 		datagram.Release()

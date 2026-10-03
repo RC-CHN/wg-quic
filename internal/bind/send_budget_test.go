@@ -2,6 +2,7 @@ package armorbind
 
 import (
 	"bytes"
+	"encoding/binary"
 	quiccarrier "github.com/RC-CHN/wg-quic/internal/transport/quic"
 	"net"
 	"strconv"
@@ -10,6 +11,22 @@ import (
 	"testing"
 	"time"
 )
+
+func TestControlPriorityNeverDuplicatesHandshake(t *testing.T) {
+	for kind, size := range map[uint32]int{1: 148, 2: 92, 3: 64, 4: 32} {
+		packet := make([]byte, size)
+		binary.LittleEndian.PutUint32(packet, kind)
+		if !controlWireGuardDatagram(packet) {
+			t.Fatalf("control type %d lacks priority", kind)
+		}
+		if priorityWireGuardDatagram(packet) != (kind == 4) {
+			t.Fatalf("unsafe duplicate policy for type %d", kind)
+		}
+		if controlWireGuardDatagram(append(packet, 0)) {
+			t.Fatalf("wrong-size type %d classified as control", kind)
+		}
+	}
+}
 
 func TestExpiredDataIsDiscardedBeforeFECWithoutClosingSession(t *testing.T) {
 	a, b := New(DefaultConfig()), New(DefaultConfig())

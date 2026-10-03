@@ -76,6 +76,26 @@ func writeFragmentHeader(frame []byte, packetID uint64, index, count uint16, tot
 	binary.BigEndian.PutUint32(frame[17:21], total)
 }
 
+// controlWireGuardDatagram recognizes only WireGuard's fixed-size control
+// messages. Handshakes get priority but MUST NOT be duplicated: duplicate
+// Noise state transitions can break authentication. Only empty keepalives
+// retain the existing safe duplication behavior.
+func controlWireGuardDatagram(packet []byte) bool {
+	if len(packet) < 4 {
+		return false
+	}
+	switch binary.LittleEndian.Uint32(packet[:4]) {
+	case 1:
+		return len(packet) == 148
+	case 2:
+		return len(packet) == 92
+	case 3:
+		return len(packet) == 64
+	default:
+		return priorityWireGuardDatagram(packet)
+	}
+}
+
 func priorityWireGuardDatagram(packet []byte) bool {
 	if len(packet) < 4 {
 		return false

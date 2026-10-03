@@ -162,6 +162,14 @@ func (c *Connection) SendDatagramOwned(packet []byte) error {
 	return c.conn.SendDatagramOwned(packet)
 }
 
+func (c *Connection) SendDatagramOwnedContext(ctx context.Context, packet []byte) error {
+	return c.conn.SendDatagramOwnedContext(ctx, packet)
+}
+
+func (c *Connection) SendPriorityDatagramOwned(ctx context.Context, packet []byte) error {
+	return c.conn.SendPriorityDatagramOwned(ctx, packet)
+}
+
 func (c *Connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 	return c.conn.ReceiveDatagram(ctx)
 }
