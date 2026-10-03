@@ -91,7 +91,7 @@ jobs:
           go test -c -o platform.test.exe ./internal/platform
           if ($LASTEXITCODE -ne 0) { throw 'Compile Windows platform integration tests failed.' }
           $env:WG_QUIC_TEST_WINDOWS_NETWORK = '1'
-          & .\platform.test.exe @('-test.v', '-test.timeout', '8m', '-test.run', '^TestWindows(NetworkRollbackNativeIntegration|DNSResetNativeIntegration|NetworkApplyNativeIntegration)$')
+          & .\platform.test.exe @('-test.v', '-test.timeout', '8m', '-test.run', '^TestWindows(NetworkRollbackNativeIntegration|DNSResetNativeIntegration|DNSApplyNativeIntegration|NetworkApplyNativeIntegration)$')
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows network policy integration failed.' }
       - name: Cross-build Windows arm64 CLIs
         shell: pwsh
