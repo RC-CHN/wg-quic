@@ -19,8 +19,23 @@ The binary directory must contain matching `wg-quic.exe`,
 `wgqsoak`; import intentionally refuses to overwrite an existing configuration.
 Use a split tunnel with test-only addresses and no hooks or DNS overrides.
 
+Add `-UseDesktopBroker` to exercise the desktop's `desktop-client import/up/down`
+path. In that mode `BinDirectory` must be the installation used by the running
+`wg-quic-manager` service. Stop the service before replacing its binaries and
+restart it before testing; a running broker must match the binaries being
+reported. This mode can run with a normal desktop user's token if the test
+configuration is readable and the output directory is writable by that user.
+Emergency fixture repair still uses the direct administrative CLI; if a
+limited-token run needs repair, finish cleanup from an elevated shell before
+starting another test.
+
 `cycles.json` records startup, first successful ping after startup, shutdown,
-and failures. Three more pings verify continuing delivery. Per-command logs
+and failures. Three more pings verify continuing delivery. The naturally
+selected source address and route must both belong to the dedicated tunnel,
+so a reachable LAN address or another VPN cannot produce a false pass. Route
+inspection runs after ping timing and is recorded separately as
+`route_check_ms`; it adds a pause before shutdown, so this fixture is not an
+immediate-start/stop timing test. Per-command logs
 and `environment.json` retain the exact binaries and Windows build. A first
 startup may include driver installation and should be reported separately.
 On failures the fixture captures address and route state and attempts repair
