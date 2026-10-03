@@ -412,7 +412,10 @@ func (m *modelSender) recordBandwidthSample(sample Bandwidth) {
 	m.bandwidthSamples[m.bandwidthSampleIndex] = sample
 	m.bandwidthSampleIndex = (m.bandwidthSampleIndex + 1) % len(m.bandwidthSamples)
 	m.bandwidthSampleCount = min(m.bandwidthSampleCount+1, len(m.bandwidthSamples))
-	estimate := m.bandwidthEstimate
+	// Only the samples still in the window may contribute. Seeding this with
+	// the previous estimate retains a historical peak forever, even after
+	// every new capacity-limited sample measures a slower path.
+	var estimate Bandwidth
 	for i := 0; i < m.bandwidthSampleCount; i++ {
 		estimate = max(estimate, m.bandwidthSamples[i])
 	}
