@@ -106,12 +106,18 @@ writes `intervals.csv` and samples controller state into `controller.csv`
 (0.5-second cadence by default), making rate collapse, protection changes, and
 recovery visible instead of only as one run-wide average.
 
-Iperf reports quarter-second intervals by default
-(`IPERF_INTERVAL_SECONDS=0.25`). `summary.csv` derives the first nonzero
-delivery interval, longest and total zero-throughput stall, and stall count.
+Iperf's client reports quarter-second intervals by default
+(`IPERF_INTERVAL_SECONDS=0.25`). The existing summary fields `first_delivery_s`,
+`longest_stall_s`, `total_stall_s`, and `stall_count` use those client intervals.
+For a TCP sender these describe application writes into the local socket,
+not bytes delivered to the receiver: buffered data may continue arriving while
+the sender reports zero writes. Analyze `iperf-server.json` or the client's
+`server_output_json` for receive-side delivery gaps, and report its actual
+interval duration (the server may report one-second intervals).
 Set `STALL_BPS_THRESHOLD` to treat very-low-throughput intervals as stalls.
-These values have interval resolution; `first_delivery_s` is an upper bound,
-not a packet-level latency measurement.
+These values have interval resolution; the legacy `first_delivery_s` field is
+an upper bound on the first client-observed write interval, not a packet-level
+latency measurement.
 
 `events.csv` puts fixture lifecycle events and controller samples on the same
 monotonic trial-relative timeline. For occasional TCP diagnosis, set
@@ -299,8 +305,8 @@ Stop any retained fixture:
 - local queue drops, peak ArmorBind/QUIC DATAGRAM send queue depth, and
   quic-go application DATAGRAM receive queue drops/high-water marks on both
   endpoints;
-- actual measured workload duration, first-delivery bound, and
-  zero/low-throughput stall measurements;
+- actual measured workload duration, first-write bound, and
+  zero/low-throughput application-write stalls at the sender;
 - Go allocation bytes/objects and per-second rates, peak live heap objects, GC
   cycles, and GC pause CPU consumed during the measured workload;
 - core process CPU seconds and final RSS;
