@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/netip"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/peerendpoint"
@@ -45,6 +47,7 @@ type Supervisor struct {
 	activePeerSet string
 	wg            sync.WaitGroup
 	extraLeases   []RouteLease
+	status        atomic.Pointer[[]Status]
 	// Retired leases are no longer used by the core and may be retried while
 	// running. extraLeases may still serve an unfinalized generation, so those
 	// must stay installed until shutdown.
@@ -130,6 +133,7 @@ func NewSupervisor(
 		result.peers[spec.PublicKey] = state
 		result.order = append(result.order, spec.PublicKey)
 	}
+	result.publishStatusLocked()
 	return result, nil
 }
 
@@ -175,6 +179,7 @@ func withDefaults(options Options) Options {
 func (s *Supervisor) Initialize(ctx context.Context) (map[string]netip.AddrPort, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	defer s.publishStatusLocked()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -300,8 +305,21 @@ func (s *Supervisor) Selected() map[string]netip.AddrPort {
 }
 
 func (s *Supervisor) Status() []Status {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
+	snapshot := s.status.Load()
+	if snapshot == nil {
+		return nil
+	}
+	result := slices.Clone(*snapshot)
+	for index := range result {
+		result[index].DNSCandidates = slices.Clone(result[index].DNSCandidates)
+	}
+	return result
+}
+
+// Publish completed endpoint state while holding opMu. Status readers must
+// remain responsive while DNS, route commands, or candidate authentication
+// block the next transition; the last committed snapshot remains valid.
+func (s *Supervisor) publishStatusLocked() {
 	result := make([]Status, 0, len(s.order))
 	for _, publicKey := range s.order {
 		state := s.peers[publicKey]
@@ -321,7 +339,7 @@ func (s *Supervisor) Status() []Status {
 		}
 		result = append(result, status)
 	}
-	return result
+	s.status.Store(&result)
 }
 
 func (s *Supervisor) selectedLocked() map[string]netip.AddrPort {
@@ -351,6 +369,7 @@ func (s *Supervisor) RotatePeer(ctx context.Context, publicKey string) error {
 func (s *Supervisor) refreshPeer(ctx context.Context, publicKey string, rotate bool) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	defer s.publishStatusLocked()
 	s.mu.RLock()
 	closed := s.closed
 	s.mu.RUnlock()
@@ -610,6 +629,7 @@ func (s *Supervisor) refreshLoop(ctx context.Context, publicKey string) {
 	dnsDelay := func() (time.Duration, bool) {
 		s.opMu.Lock()
 		defer s.opMu.Unlock()
+		defer s.publishStatusLocked()
 		state := s.peers[publicKey]
 		if state == nil {
 			return 0, false

@@ -74,6 +74,7 @@ func (s *Supervisor) PreparePeerSet(
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	defer s.publishStatusLocked()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -311,6 +312,7 @@ func (p *preparedEndpointPeerSet) Commit(ctx context.Context) error {
 	s := p.supervisor
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	defer s.publishStatusLocked()
 	for _, publicKey := range p.affected {
 		transition := p.transitions[publicKey]
 		if transition.before != nil || transition.after == nil || transition.after.spec.Endpoint == "" {
@@ -346,6 +348,7 @@ func (p *preparedEndpointPeerSet) Rollback(ctx context.Context) error {
 	s := p.supervisor
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	defer s.publishStatusLocked()
 	var rollbackErrors []error
 	for index := len(p.affected) - 1; index >= 0; index-- {
 		transition := p.transitions[p.affected[index]]
