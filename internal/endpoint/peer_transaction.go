@@ -91,9 +91,12 @@ func (s *Supervisor) PreparePeerSet(
 		if current == nil || current.spec.Endpoint != state.spec.Endpoint {
 			continue
 		}
-		clone := *current
-		clone.spec = state.spec
-		desired[publicKey] = &clone
+		// Unchanged peers are not reserved: their DNS workers may migrate
+		// while this transaction is prepared or awaiting finalization. Keep
+		// their live state in both projections, including route ownership.
+		// Restoring a clone here would rewind a successful unrelated refresh.
+		before[publicKey] = s.peers[publicKey]
+		desired[publicKey] = s.peers[publicKey]
 	}
 	affected := changedEndpointPeerKeys(before, desired)
 	for _, publicKey := range affected {
