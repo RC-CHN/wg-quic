@@ -40,15 +40,31 @@ func TestConnectionEventsCaptureTypedControllerTransitions(t *testing.T) {
 
 func TestConnectionEventHistoryIsBounded(t *testing.T) {
 	var stats ConnectionStats
-	for range maxConnectionEvents + 5 {
+	const total = 3*maxConnectionEvents + 5
+	for range total {
 		stats.RecordEvent("pto", "test")
 	}
-	stats.events.mu.Lock()
-	defer stats.events.mu.Unlock()
-	if len(stats.events.events) != maxConnectionEvents ||
-		stats.events.events[0].Sequence != 6 ||
-		stats.events.events[len(stats.events.events)-1].Sequence != maxConnectionEvents+5 {
-		t.Fatalf("bounded connection event history = %#v", stats.events.events)
+	var observed []ConnectionEvent
+	stats.SetEventObserver(func(event ConnectionEvent) { observed = append(observed, event) })
+	if len(observed) != maxConnectionEvents {
+		t.Fatalf("retained %d events, want %d", len(observed), maxConnectionEvents)
+	}
+	for i, event := range observed {
+		want := uint64(total - maxConnectionEvents + i + 1)
+		if event.Sequence != want {
+			t.Fatalf("event %d sequence = %d, want %d", i, event.Sequence, want)
+		}
+	}
+	stats.RecordEvent("pto", "live")
+	if len(observed) != maxConnectionEvents+1 || observed[len(observed)-1].Sequence != total+1 {
+		t.Fatalf("live event after history replay = %#v", observed)
+	}
+	stats.SetEventObserver(nil)
+	stats.RecordEvent("pto", "detached")
+	observed = nil
+	stats.SetEventObserver(func(event ConnectionEvent) { observed = append(observed, event) })
+	if len(observed) != maxConnectionEvents || observed[0].Sequence != total-maxConnectionEvents+3 || observed[len(observed)-1].Sequence != total+2 {
+		t.Fatalf("reattached observer history = %#v", observed)
 	}
 }
 
@@ -100,5 +116,22 @@ func BenchmarkControllerSnapshotNoEvent(b *testing.B) {
 	for b.Loop() {
 		stats.BytesInFlight.Add(1)
 		stats.RecordControllerSnapshot("packet_sent")
+	}
+}
+
+func BenchmarkControllerSnapshotLossEvent(b *testing.B) {
+	var stats ConnectionStats
+	stats.CongestionWindow.Store(12000)
+	stats.RecordControllerSnapshot("initial")
+	stats.SetEventObserver(func(ConnectionEvent) {})
+	for range maxConnectionEvents {
+		stats.PacketsLost.Add(1)
+		stats.RecordControllerSnapshot("loss_detection")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		stats.PacketsLost.Add(1)
+		stats.RecordControllerSnapshot("loss_detection")
 	}
 }

@@ -40,6 +40,7 @@ type connectionEventJournal struct {
 	origin      time.Time
 	sequence    uint64
 	events      []ConnectionEvent
+	eventHead   int
 	observer    func(ConnectionEvent)
 	lastMetrics ConnectionEventMetrics
 	hasMetrics  bool
@@ -136,10 +137,14 @@ func (j *connectionEventJournal) recordLocked(
 		WallTime: now, MonotonicElapsedNS: now.Sub(j.origin).Nanoseconds(),
 		Before: before, After: after,
 	}
-	j.events = append(j.events, event)
-	if len(j.events) > maxConnectionEvents {
-		copy(j.events, j.events[len(j.events)-maxConnectionEvents:])
-		j.events = j.events[:maxConnectionEvents]
+	if len(j.events) < maxConnectionEvents {
+		j.events = append(j.events, event)
+	} else {
+		// Keep event recording constant-time when a busy or lossy connection
+		// has filled its history. Copying the entire journal on every loss or
+		// RTT event otherwise adds work to the packet-processing loop.
+		j.events[j.eventHead] = event
+		j.eventHead = (j.eventHead + 1) % maxConnectionEvents
 	}
 	if j.observer != nil {
 		j.observer(event)
@@ -153,8 +158,8 @@ func (s *ConnectionStats) SetEventObserver(observer func(ConnectionEvent)) {
 	j.mu.Lock()
 	j.observer = observer
 	if observer != nil {
-		for _, event := range j.events {
-			observer(event)
+		for i := range len(j.events) {
+			observer(j.events[(j.eventHead+i)%len(j.events)])
 		}
 	}
 	j.mu.Unlock()
