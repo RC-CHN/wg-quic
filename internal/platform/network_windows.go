@@ -23,6 +23,18 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 	}
 	base := windowsPowerShellBase(name)
 	var operations []windowsOperation
+	// Wintun is a point-to-point interface, so duplicate-address probes cannot
+	// discover another host on a shared link. Disable DAD before adding either
+	// address family; otherwise Windows leaves new addresses Tentative for
+	// several seconds after quick has reported the interface ready.
+	// Wintun's CreateTUN MTU controls the userspace view. Mirror the centrally
+	// chosen value onto both Windows IP interfaces in the same operation.
+	mtu := cfg.EffectiveMTU()
+	operations = append(operations, windowsOperation{
+		apply: base +
+			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +
+			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv6 -DadTransmits 0 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop",
+	})
 	for _, prefix := range cfg.Interface.Addresses {
 		address := prefix.Addr().String()
 		operations = append(operations, windowsOperation{
@@ -35,15 +47,6 @@ func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperati
 				" -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
 		})
 	}
-	// Wintun's CreateTUN MTU controls the userspace device view. Windows also
-	// exposes per-family IP-interface MTUs, so mirror the same centrally chosen
-	// value here without owning a second fallback policy.
-	mtu := cfg.EffectiveMTU()
-	operations = append(operations, windowsOperation{
-		apply: base +
-			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop;" +
-			"Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv6 -NlMtuBytes " + fmt.Sprint(mtu) + " -ErrorAction Stop",
-	})
 	if table != "off" {
 		for _, prefix := range uniqueAllowedPrefixes(cfg) {
 			operation, err := windowsPeerRouteOperation(name, cfg, prefix)
