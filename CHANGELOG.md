@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.4.2 - 2026-10-03
+
+Adaptive transport stability and native Windows network setup and cleanup.
+Existing automatic settings require no additional configuration.
+
 - Bound Reed–Solomon recovery-cache growth during long lossy sessions, and
   expire abandoned fragment assemblies without blocking completion of packets
   already being reassembled.
