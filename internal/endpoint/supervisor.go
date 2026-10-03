@@ -88,6 +88,13 @@ type candidateFailure struct {
 	retryAfter time.Time
 }
 
+// Failed cleanup must retain its ownership tokens, but repeated DNS changes
+// must not create an unlimited route backlog. Pause automatic migrations at
+// this bound; refreshes still retry retired leases and resume when they clear.
+const maxPendingMigrationLeases = 64
+
+var errMigrationCleanupPending = errors.New("endpoint migration paused until pending route cleanup completes")
+
 func NewSupervisor(
 	specs []PeerSpec,
 	resolver Resolver,
@@ -417,6 +424,11 @@ func (s *Supervisor) refreshPeer(ctx context.Context, publicKey string, rotate b
 			return nil
 		} else {
 			candidateErrors = append(candidateErrors, err)
+			if errors.Is(err, errMigrationCleanupPending) {
+				// This is a local cleanup problem, not evidence against a DNS
+				// candidate. Avoid delaying recovery with candidate backoff.
+				break
+			}
 			if state.failedCandidates == nil {
 				state.failedCandidates = make(map[netip.Addr]candidateFailure)
 			}
@@ -450,6 +462,9 @@ func (s *Supervisor) RefreshAll(ctx context.Context) error {
 }
 
 func (s *Supervisor) switchPeer(ctx context.Context, state *peerState, address netip.Addr) error {
+	if len(s.retiredLeases)+len(s.extraLeases) >= maxPendingMigrationLeases {
+		return errMigrationCleanupPending
+	}
 	lease, err := s.routes.AcquireEndpointRoute(ctx, address)
 	if err != nil {
 		return err
