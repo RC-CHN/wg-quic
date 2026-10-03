@@ -239,7 +239,7 @@
     "parity_over_wire_datagrams_pct": "sent FEC parity shards divided by all wire datagrams, not bytes; partial-group parity/data is reported separately and must not be mistaken for total overhead",
     "fec_unrecovered": "receiver FEC source frames still missing; off-mode zero means no FEC measurement, not zero link loss",
     "steady_pacing_mbit_mean": "mean controller pacing target after the first 5 seconds; not the average actual wire transmit rate",
-    "longest_stall_s": "longest contiguous zero-delivery interval in 250 ms iperf client intervals, not proof of an equivalent tunnel disconnection",
+    "longest_sender_write_stall_s": "longest contiguous zero-byte sender application-write interval in the 250 ms iperf client series; this is not a receiver delivery gap or a tunnel disconnection",
     "qdisc_dropped_a": "forward endpoint netem counter; inspect separately from clsact policer counter",
     "send_queue_drops": "bounded local send-queue overflow, distinct from network impairment and from QUIC receive-queue overflow"
   },
