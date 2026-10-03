@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "production_source": {
+    "source_commit": "86254f076e05ca6363a6327c41ffa32a451d5e41",
+    "source_mode": "immutable git archive, -buildvcs=false",
+    "archive_sha256": "77cee8806bfe77499a4761801c40133384e2aec6ef005b4b13a81d8d2e355df4",
+    "version": "0.4.1-stability-86254f0",
+    "go": "go version go1.26.3 linux/amd64",
+    "sha256": {
+      "wg-quic.exe": "0c5d19b1736408fb2282e3fc5e5ff5a076ee8e5c9ebdc1ebe6971f3ae9b036af",
+      "wg-quic-quick.exe": "a0396fc506a9d834e6432f212b275c897458658fee6614bb4f76189933860a6f"
+    }
+  },
+  "operating_system": "Windows 10 Enterprise LTSC 2021 Evaluation 21H2, 19044.7725",
+  "result": "passed",
+  "configuration": {
+    "mtu": 1420,
+    "dns_server": "10.91.0.2",
+    "peer_allowed_prefix_count": 2,
+    "congestion": "model",
+    "fec": "auto",
+    "obfs": "salamander",
+    "desktop_broker": false
+  },
+  "native_api_comparison": {
+    "cases": [
+      {
+        "case": "mixed_order_suffix",
+        "native_duration": "2.3915ms",
+        "powershell_duration": "3.1284814s",
+        "result": "passed"
+      },
+      {
+        "case": "ipv4_only_preserves_suffix",
+        "native_duration": "1.2337ms",
+        "powershell_duration": "1.5160252s",
+        "result": "passed"
+      },
+      {
+        "case": "ipv6_only_preserves_suffix",
+        "native_duration": "630.8\u00b5s",
+        "powershell_duration": "1.5899582s",
+        "result": "passed"
+      },
+      {
+        "case": "suffix_only_preserves_servers",
+        "native_duration": "752.1\u00b5s",
+        "powershell_duration": "1.5730046s",
+        "result": "passed"
+      }
+    ],
+    "test_executable_sha256": "241162b4488fd7ea83234e88ceb4158066b5347e01efeb2dcc18b8db43fd35d9",
+    "raw_result_sha256": "422dc0a680338433391124ddc32ada07db70f4480eb197122d74ec2dbab0dd69",
+    "full_platform_unit_suite_passed": true,
+    "full_unit_result_sha256": "46d4512a67f4d52e7933d02d67757bc1afe141177674a8cc871f9b2a594f876e",
+    "assertions": [
+      "Ordered IPv4/IPv6 lists, suffix, SearchList and registration policy equal the existing cmdlets from seeded nonempty state.",
+      "An omitted address family remains unchanged; servers-only preserves suffix, suffix-only preserves both server lists.",
+      "The second adapter remains unchanged during native application.",
+      "Only trailing NUL padding in NameServer registry strings is normalized; interior NUL and nonzero suffix differences remain significant. Raw snapshots remain unmodified.",
+      "Partial native success followed by error/cancellation retains cleanup ownership; unavailable API alone falls back to PowerShell."
+    ]
+  },
+  "baseline": {
+    "environment": {
+      "quick_sha256": "32B78E851CA9F1B7890CDBA147EA3DC9B7C526748ACA9974F1D302BED4EA07C2",
+      "build": "19044",
+      "quick_version": "wg-quic-quick 0.4.1-stability-6d48e0a",
+      "version": "10.0.19044",
+      "desktop_broker": false,
+      "core_version": "wg-quic 0.4.1-stability-6d48e0a",
+      "broker_executable": "",
+      "caption": "Microsoft Windows 10 Enterprise LTSC Evaluation",
+      "broker_sha256": null,
+      "core_sha256": "FC6CE4C4E3AD482B77F3972AF95D4F423743D8234BE27F3CB5D676D655ECA98A"
+    },
+    "cycles": [
+      {
+        "cycle": 1,
+        "up_ms": 7856,
+        "first_ping_ms": 99,
+        "ping_attempts": 1,
+        "route_check_ms": 1847,
+        "down_ms": 554,
+        "success": true,
+        "error": ""
+      }
+    ],
+    "dns_queries": [
+      {
+        "cycle": 1,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "7fe507c7837746f7ac3fd89d63538eb2.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 656
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "7fe507c7837746f7ac3fd89d63538eb2.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:53839",
+            "type": 1,
+            "utc": "2026-10-03T05:33:28.975592818Z"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "up_ms": {
+        "median": 7856,
+        "min": 7856,
+        "max": 7856
+      },
+      "down_ms": {
+        "median": 554,
+        "min": 554,
+        "max": 554
+      },
+      "first_ping_ms": {
+        "median": 99,
+        "min": 99,
+        "max": 99
+      }
+    },
+    "raw_sha256": {
+      "cycles.json": "ca76e062c31fd3cf487bd9c0305edf05902ed9c4b6c77a4a24cf13b7e275ffde",
+      "cycle-1-dns.json": "5e0a4e107d99e0d0e4fc2bf9e89dde209a72a84128ad9a883dd5414a2db2a796",
+      "environment.json": "ab9411ebd596961a17749bbca6e4309f9ec3ff708b4d1fbad7df57cf5372317d",
+      "command-0001.command.json": "315fb7652889fc0bfe53fb9273860683bbbb92833881590a033bedbcc8c482bd",
+      "command-0003.command.json": "44bf62721c4d40d2100b6363d38888e4b8d2f609c57ec90c2fb2d6ca7de7cb5c",
+      "command-0002.command.json": "8a734af854a1d2369e4674515a6c917b993db320f4fdee78272e169e98a0b9ad"
+    }
+  },
+  "native": {
+    "environment": {
+      "quick_sha256": "A0396FC506A9D834E6432F212B275C897458658FEE6614BB4F76189933860A6F",
+      "build": "19044",
+      "quick_version": "wg-quic-quick 0.4.1-stability-86254f0",
+      "version": "10.0.19044",
+      "desktop_broker": false,
+      "core_version": "wg-quic 0.4.1-stability-86254f0",
+      "broker_executable": "",
+      "caption": "Microsoft Windows 10 Enterprise LTSC Evaluation",
+      "broker_sha256": null,
+      "core_sha256": "0C5D19B1736408FB2282E3FC5E5FF5A076EE8E5C9EBDC1EBE6971F3AE9B036AF"
+    },
+    "cycles": [
+      {
+        "cycle": 1,
+        "up_ms": 4714,
+        "first_ping_ms": 45,
+        "ping_attempts": 1,
+        "route_check_ms": 1831,
+        "down_ms": 591,
+        "success": true,
+        "error": ""
+      },
+      {
+        "cycle": 2,
+        "up_ms": 4590,
+        "first_ping_ms": 8,
+        "ping_attempts": 1,
+        "route_check_ms": 37,
+        "down_ms": 482,
+        "success": true,
+        "error": ""
+      },
+      {
+        "cycle": 3,
+        "up_ms": 4930,
+        "first_ping_ms": 4,
+        "ping_attempts": 1,
+        "route_check_ms": 40,
+        "down_ms": 450,
+        "success": true,
+        "error": ""
+      },
+      {
+        "cycle": 4,
+        "up_ms": 4676,
+        "first_ping_ms": 4,
+        "ping_attempts": 1,
+        "route_check_ms": 40,
+        "down_ms": 448,
+        "success": true,
+        "error": ""
+      },
+      {
+        "cycle": 5,
+        "up_ms": 4641,
+        "first_ping_ms": 4,
+        "ping_attempts": 1,
+        "route_check_ms": 38,
+        "down_ms": 377,
+        "success": true,
+        "error": ""
+      }
+    ],
+    "dns_queries": [
+      {
+        "cycle": 1,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "72c6b92a794c4daaa3ea41527d428c53.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 726
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "72c6b92a794c4daaa3ea41527d428c53.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:52982",
+            "type": 1,
+            "utc": "2026-10-03T05:36:25.77682769Z"
+          }
+        ]
+      },
+      {
+        "cycle": 2,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "64541dfaf4734895b76e20072546bf97.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 9
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "64541dfaf4734895b76e20072546bf97.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:63179",
+            "type": 1,
+            "utc": "2026-10-03T05:36:31.162235051Z"
+          }
+        ]
+      },
+      {
+        "cycle": 3,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "3fd15942d6f9431787c69b598c5df69a.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 9
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "3fd15942d6f9431787c69b598c5df69a.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:59668",
+            "type": 1,
+            "utc": "2026-10-03T05:36:36.669526128Z"
+          }
+        ]
+      },
+      {
+        "cycle": 4,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "446ba3dd05984533943674cb59505eda.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 9
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "446ba3dd05984533943674cb59505eda.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:54392",
+            "type": 1,
+            "utc": "2026-10-03T05:36:41.982709091Z"
+          }
+        ]
+      },
+      {
+        "cycle": 5,
+        "client": {
+          "addresses": [
+            "203.0.113.73"
+          ],
+          "name": "fd34947fb19a4e88b27542cde9bb24c7.wgq-native.test.invalid",
+          "explicit_server": false,
+          "expected_address": "203.0.113.73",
+          "elapsed_ms": 8
+        },
+        "server": [
+          {
+            "answers": 1,
+            "matched": true,
+            "name": "fd34947fb19a4e88b27542cde9bb24c7.wgq-native.test.invalid.",
+            "rcode": 0,
+            "remote": "10.91.0.1:52981",
+            "type": 1,
+            "utc": "2026-10-03T05:36:47.163469736Z"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "up_ms": {
+        "median": 4676,
+        "min": 4590,
+        "max": 4930
+      },
+      "down_ms": {
+        "median": 450,
+        "min": 377,
+        "max": 591
+      },
+      "first_ping_ms": {
+        "median": 4,
+        "min": 4,
+        "max": 45
+      }
+    },
+    "raw_sha256": {
+      "command-0010.command.json": "1c877e737c374d8c03e259c1940d2bb0b7c79beb9c9d1a1e389a17659cb74447",
+      "cycles.json": "dc0200582a6d64f16c14d626720ba6a53271a180cffc7fae9a4e87958e57ff1c",
+      "cycle-1-dns.json": "a10bc7df4505c93ce105c8bfa5ed42629f8209380788d1c0f03d9bd33d88e352",
+      "cycle-4-dns.json": "773a1d7eec2cae61cc3ac49798f7c17de6e0eabf7581a180314b5a19759d108f",
+      "cycle-2-dns.json": "9bd8c60882333f4dc28d8db346defc7812c84c6f56f51845072fedda8675e4a7",
+      "command-0007.command.json": "0cf99cec63ddce7cbabe68d06aaa70bc7f5f9358d89c279bb5c8739d2c203412",
+      "environment.json": "74c86d22803321cfc9d1ac339c7541c0702bed757ad9cf15410b649880d2139c",
+      "cycle-5-dns.json": "7753b342439c3c8a31ce046d79fdb8a62648ca1b177b4a9a39dacbcb81a74c56",
+      "command-0001.command.json": "dfd13617e283c5a737ee5a4c7e38003a8f60ae69a1c51cfc148910e361e028ac",
+      "command-0004.command.json": "8b43a117e829d9753cdf83ddad348673a76b1e9ff00048d5183202f392b6ffc5",
+      "command-0003.command.json": "eae63b9c4d369ad74061f09dab833e7768f3b6e6605d8f5f73ef45caff93bde3",
+      "command-0005.command.json": "b74ddd2728b6cf648d2de1a80695ad80600b7eafc815bd3612bee7cfdddb1886",
+      "command-0011.command.json": "25f188384c5cdefec39fa3aae9ebc83ef1f873fc0ad771a76e74548620efc71a",
+      "command-0008.command.json": "b6af144fdee0a7da52d538f9116b63338ac6a3e6acde1d30ab806beda7e8a767",
+      "command-0002.command.json": "00493c07017070f63cde1260bfbaafab174bd9d96d29f75b0e733b4bb287b6ea",
+      "cycle-3-dns.json": "16cd43994ab8f390fbd61d9eacad29bf08a1d9ad5d7becdc5bfb34eb07086d28",
+      "command-0006.command.json": "74e0072c39b93d32b0fbf96752e0d790c3b1758d3805482290d5444139c0f010",
+      "command-0009.command.json": "91a8e13b81efb85bcfba8dd62d3c6f4036a37c772a23ef8af9c1f6fed7d1ff69"
+    }
+  },
+  "dns_responder": {
+    "source_commit": "94e9406",
+    "binary_sha256": "292db2c157e79d6f3909d00eed0ba37d99c5e5521b89f0126db5d4432b8b45d8",
+    "source_sha256": "6dc1ec2ec705b10b1b1d94af6529c9c54527d928ad8822b766d7e50433b6bbab",
+    "build_mode": "Working-tree test fixture with source identical to the recorded commit; executable bytes fixed by hash.",
+    "query": "Fresh nonce.wgq-native.test.invalid through the system resolver, without an explicit DNS server.",
+    "expected_address": "203.0.113.73"
+  },
+  "limits": [
+    "One old-path baseline and five new-path cycles in a local VM; sequential observations are not a hardware-independent speedup ratio.",
+    "The native API comparison excludes adapter creation, reference queries and total startup latency.",
+    "Windows amd64 runtime verified; ARM64 and 386 native calling conventions were cross-compiled only.",
+    "The first candidate cleared unspecified DNS families and failed this comparison; the behavior was corrected before the production commit. Its original failure is retained in the local raw archive."
+  ]
+}
