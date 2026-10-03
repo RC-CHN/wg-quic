@@ -31,6 +31,7 @@ type Encoder struct {
 	nextGroupID   uint64
 	maxData       int
 	interleave    int
+	minInterleave int
 	controller    *Controller
 	codecs        map[codecDimensions]reedsolomon.Encoder
 	groups        []*encoderGroup
@@ -65,7 +66,7 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 	}
 	controller.SetDataShards(maxData)
 	encoder := &Encoder{
-		epoch: 1, maxData: maxData, controller: controller, interleave: 1,
+		epoch: 1, maxData: maxData, controller: controller, interleave: 1, minInterleave: 1,
 		codecs: make(map[codecDimensions]reedsolomon.Encoder), lastParity: -1,
 		bypass: make([][]byte, 1),
 	}
@@ -74,11 +75,12 @@ func NewEncoder(maxData int, controller *Controller) *Encoder {
 	return encoder
 }
 
-// SetInterleave sets the number of concurrently emitted groups. A value of 1
-// (the default) preserves sequential emission order. It is used during
+// SetInterleave sets the configured minimum number of concurrently emitted
+// groups. Automatic burst protection may increase it. It is used during
 // construction, where no groups are in flight yet.
 func (e *Encoder) SetInterleave(n int) error {
-	_, err := e.setInterleave(n)
+	e.minInterleave = min(MaxInterleave, max(1, n))
+	_, err := e.setInterleave(max(e.minInterleave, e.controller.CurrentInterleave()))
 	return err
 }
 
@@ -99,8 +101,9 @@ func (e *Encoder) Reconfigure(maxData, interleave int) ([][]byte, error) {
 	}
 	e.maxData = maxData
 	e.controller.SetDataShards(maxData)
-	e.interleave = interleave
-	e.initGroups(interleave)
+	e.minInterleave = interleave
+	e.interleave = max(e.minInterleave, e.controller.CurrentInterleave())
+	e.initGroups(e.interleave)
 	return flushed, nil
 }
 
@@ -138,7 +141,7 @@ func (e *Encoder) Add(frame []byte) ([][]byte, error) {
 		return nil, errors.New("invalid FEC data frame length")
 	}
 	var output [][]byte
-	if target := e.controller.CurrentInterleave(); target != e.interleave {
+	if target := max(e.minInterleave, e.controller.CurrentInterleave()); target != e.interleave {
 		flushed, err := e.setInterleave(target)
 		if err != nil {
 			return nil, err
