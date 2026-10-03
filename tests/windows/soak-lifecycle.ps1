@@ -30,9 +30,20 @@ if ($UseDesktopBroker) {
         throw 'Cannot determine the desktop management service executable.'
     }
     $brokerPath = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
-    if ([IO.Path]::GetFullPath($brokerPath.Replace('\\?\', '')) -ine
-        [IO.Path]::GetFullPath($quick.Replace('\\?\', ''))) {
+    $normalizedBroker = [IO.Path]::GetFullPath($brokerPath.Replace('\\?\', ''))
+    $normalizedQuick = [IO.Path]::GetFullPath($quick.Replace('\\?\', ''))
+    $installedManager = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($normalizedQuick))) 'wg-quic-manager.exe'
+    $installedLayout = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($normalizedQuick)) -ieq 'bin' -and
+        $normalizedBroker -ieq $installedManager
+    if ($normalizedBroker -ine $normalizedQuick -and -not $installedLayout) {
         throw 'BinDirectory must point to the running desktop management service installation.'
+    }
+    # The MSI installs a renamed copy of quick at the application root. The
+    # manager copies its own image into each tunnel runtime, so updating only
+    # bin\quick would otherwise test an older privileged implementation.
+    if ((Get-FileHash -Algorithm SHA256 $normalizedBroker).Hash -ine
+        (Get-FileHash -Algorithm SHA256 $normalizedQuick).Hash) {
+        throw 'The desktop management service and quick executable must have identical content.'
     }
     $lifecyclePrefix = @('desktop-client')
 }
@@ -89,9 +100,12 @@ function Invoke-Recorded {
 $os = Get-CimInstance Win32_OperatingSystem
 @{ caption = $os.Caption; version = $os.Version; build = $os.BuildNumber;
    core_version = (& $core version); quick_version = (& $quick version);
-   desktop_broker = [bool]$UseDesktopBroker; broker_executable = $brokerPath } |
+   desktop_broker = [bool]$UseDesktopBroker; broker_executable = $brokerPath;
+   quick_sha256 = (Get-FileHash -Algorithm SHA256 $quick).Hash;
+   core_sha256 = (Get-FileHash -Algorithm SHA256 $core).Hash;
+   broker_sha256 = $(if ($UseDesktopBroker) { (Get-FileHash -Algorithm SHA256 $brokerPath).Hash } else { $null }) } |
     ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'environment.json')
-$importArguments = if ($UseDesktopBroker) { @('desktop-client', 'import') } else { @('desktop-import') }
+[string[]] $importArguments = if ($UseDesktopBroker) { @('desktop-client', 'import') } else { @('desktop-import') }
 $null = Invoke-Recorded $quick ($importArguments + @($TunnelName, (Resolve-Path $ConfigPath).Path))
 $ping = [Net.NetworkInformation.Ping]::new()
 $failed = $false
@@ -156,7 +170,7 @@ try {
                 } catch { $row.error += '; repair: ' + $_.Exception.Message }
             }
             $results.Add([pscustomobject]$row)
-            $results.ToArray() | ConvertTo-Json -Depth 6 |
+            ConvertTo-Json -InputObject $results.ToArray() -Depth 6 |
                 Set-Content (Join-Path $OutputDirectory 'cycles.json')
             Write-Host ($row | ConvertTo-Json -Compress)
         }
