@@ -1,0 +1,425 @@
+[
+  {
+    "batch": "flight-results",
+    "profile": "cellular",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        2.4674268868257263,
+        2.5165501881575914
+      ],
+      "mean_goodput_mbps": 2.491988537491659,
+      "longest_receiver_zero_interval_s": [
+        3.001719117164612,
+        9.000446796417236
+      ],
+      "max_inner_tcp_rtt_ms": [
+        6756.805,
+        10679.444
+      ],
+      "core_cpu_percent": [
+        6.8240527837701865,
+        7.339191772631024
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        27.89981955878512,
+        20.16556427417514
+      ],
+      "mean_goodput_mbps": 24.03269191648013,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        787.683,
+        800.338
+      ],
+      "core_cpu_percent": [
+        36.65851110836554,
+        27.53508569999259
+      ]
+    },
+    "mean_goodput_change_pct": 864.3981725803011
+  },
+  {
+    "batch": "flight-results",
+    "profile": "clean",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        42.506539415838276,
+        42.287833975738266
+      ],
+      "mean_goodput_mbps": 42.39718669578827,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        313.543,
+        328.71
+      ],
+      "core_cpu_percent": [
+        44.24064796347535,
+        45.22518336711052
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        42.53277231362447,
+        42.2442840589913
+      ],
+      "mean_goodput_mbps": 42.38852818630788,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        317.588,
+        318.824
+      ],
+      "core_cpu_percent": [
+        45.25667709542712,
+        43.82648403669107
+      ]
+    },
+    "mean_goodput_change_pct": -0.020422367980488243
+  },
+  {
+    "batch": "flight-results",
+    "profile": "random",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        31.29849393214102,
+        31.403084722759424
+      ],
+      "mean_goodput_mbps": 31.350789327450222,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        127.667,
+        305.502
+      ],
+      "core_cpu_percent": [
+        46.71516987322426,
+        44.195251248350566
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        29.87825103952005,
+        32.00060757973614
+      ],
+      "mean_goodput_mbps": 30.939429309628096,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        92.071,
+        250.702
+      ],
+      "core_cpu_percent": [
+        45.783435373538964,
+        46.15829910809774
+      ]
+    },
+    "mean_goodput_change_pct": -1.3121201304553631
+  },
+  {
+    "batch": "flight-results",
+    "profile": "policer",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        18.51167407878282,
+        20.083083504131192
+      ],
+      "mean_goodput_mbps": 19.297378791457007,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        25.393,
+        26.185
+      ],
+      "core_cpu_percent": [
+        19.15304183114272,
+        20.35184780788282
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        20.118194218357,
+        22.42275791420649
+      ],
+      "mean_goodput_mbps": 21.270476066281745,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        28.046,
+        79.611
+      ],
+      "core_cpu_percent": [
+        19.552608341269295,
+        19.55204499568406
+      ]
+    },
+    "mean_goodput_change_pct": 10.22469059734803
+  },
+  {
+    "batch": "flight-results",
+    "profile": "short-rtt",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        30.999806083168362,
+        31.06603779112426
+      ],
+      "mean_goodput_mbps": 31.032921937146313,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        352.392,
+        204.113
+      ],
+      "core_cpu_percent": [
+        43.551921430085045,
+        45.78098133569307
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        30.905995179138056,
+        31.17829329847377
+      ],
+      "mean_goodput_mbps": 31.04214423880591,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        357.277,
+        207.848
+      ],
+      "core_cpu_percent": [
+        43.35033512061014,
+        44.73335147831972
+      ]
+    },
+    "mean_goodput_change_pct": 0.0297177999489584
+  },
+  {
+    "batch": "flight-results",
+    "profile": "step",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        30.9752775946226,
+        30.704140164986175
+      ],
+      "mean_goodput_mbps": 30.839708879804387,
+      "longest_receiver_zero_interval_s": [
+        0.9999939799308777,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        1377.905,
+        1383.325
+      ],
+      "core_cpu_percent": [
+        32.829944530198965,
+        33.77471679590107
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        30.89492418827408,
+        30.88053235303344
+      ],
+      "mean_goodput_mbps": 30.88772827065376,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.9997339844703674
+      ],
+      "max_inner_tcp_rtt_ms": [
+        1380.155,
+        1381.946
+      ],
+      "core_cpu_percent": [
+        32.759559564643375,
+        32.93804805727441
+      ]
+    },
+    "mean_goodput_change_pct": 0.15570636881341304
+  },
+  {
+    "batch": "flight-results",
+    "profile": "ten",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        8.46686196374011,
+        8.45033165611176
+      ],
+      "mean_goodput_mbps": 8.458596809925936,
+      "longest_receiver_zero_interval_s": [
+        1.0000449419021606,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        1384.637,
+        1385.155
+      ],
+      "core_cpu_percent": [
+        16.085173235233,
+        11.47582271414103
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        8.451360909805715,
+        8.41338128499228
+      ],
+      "mean_goodput_mbps": 8.432371097398997,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        2.00061297416687
+      ],
+      "max_inner_tcp_rtt_ms": [
+        1384.343,
+        1397.56
+      ],
+      "core_cpu_percent": [
+        10.896911573464704,
+        10.644889800776253
+      ]
+    },
+    "mean_goodput_change_pct": -0.3100480270694983
+  },
+  {
+    "batch": "long-results",
+    "profile": "cellular",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        2.266486806771477,
+        2.6579637663933875
+      ],
+      "mean_goodput_mbps": 2.4622252865824326,
+      "longest_receiver_zero_interval_s": [
+        8.999656975269318,
+        14.00004780292511
+      ],
+      "max_inner_tcp_rtt_ms": [
+        9198.256,
+        9583.263
+      ],
+      "core_cpu_percent": [
+        6.590719137237746,
+        6.727556022262056
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        26.21812086510307,
+        25.47524892268591
+      ],
+      "mean_goodput_mbps": 25.84668489389449,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        805.254,
+        1319.99
+      ],
+      "core_cpu_percent": [
+        34.76265448162179,
+        33.50357936289413
+      ]
+    },
+    "mean_goodput_change_pct": 949.7286757122731
+  },
+  {
+    "batch": "transition-results",
+    "profile": "transition",
+    "baseline_variant": "baseline",
+    "candidate_variant": "flight-fix",
+    "before": {
+      "n": 2,
+      "goodput_mbps": [
+        24.377396574660384,
+        25.763829188770167
+      ],
+      "mean_goodput_mbps": 25.070612881715277,
+      "longest_receiver_zero_interval_s": [
+        1.0000309944152832,
+        1.001160979270935
+      ],
+      "max_inner_tcp_rtt_ms": [
+        5833.852,
+        6325.884
+      ],
+      "core_cpu_percent": [
+        16.72640862830706,
+        16.532041446138994
+      ]
+    },
+    "after": {
+      "n": 2,
+      "goodput_mbps": [
+        45.02133026455482,
+        38.73062944208688
+      ],
+      "mean_goodput_mbps": 41.87597985332085,
+      "longest_receiver_zero_interval_s": [
+        0.0,
+        0.0
+      ],
+      "max_inner_tcp_rtt_ms": [
+        964.555,
+        1116.127
+      ],
+      "core_cpu_percent": [
+        35.99731500027114,
+        33.73662160049166
+      ]
+    },
+    "mean_goodput_change_pct": 67.03213459876049
+  }
+]

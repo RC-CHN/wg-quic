@@ -1,0 +1,386 @@
+[
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 1,
+    "phase": "initial_50",
+    "nominal_range_s": [
+      5,
+      14
+    ],
+    "receiver_measured_seconds": 8.999937772750854,
+    "receiver_goodput_mbps": 42.75889475204411,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 60.3421485,
+    "max_send_queue": 948,
+    "median_path_rtt_ms": 20.166
+  },
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 1,
+    "phase": "reduced_10",
+    "nominal_range_s": [
+      20,
+      29
+    ],
+    "receiver_measured_seconds": 9.0,
+    "receiver_goodput_mbps": 7.456540444444444,
+    "longest_receiver_zero_interval_s": 0.9999939799308777,
+    "median_pacing_mbps": 12.89889,
+    "max_send_queue": 1017,
+    "median_path_rtt_ms": 20.166
+  },
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 1,
+    "phase": "restored_50",
+    "nominal_range_s": [
+      35,
+      44
+    ],
+    "receiver_measured_seconds": 9.000072002410889,
+    "receiver_goodput_mbps": 42.87476454595405,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 51.459953,
+    "max_send_queue": 939,
+    "median_path_rtt_ms": 20.166
+  },
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 2,
+    "phase": "initial_50",
+    "nominal_range_s": [
+      5,
+      14
+    ],
+    "receiver_measured_seconds": 8.999842047691345,
+    "receiver_goodput_mbps": 42.7593495486642,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 53.2011605,
+    "max_send_queue": 1000,
+    "median_path_rtt_ms": 20.164
+  },
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 2,
+    "phase": "reduced_10",
+    "nominal_range_s": [
+      20,
+      29
+    ],
+    "receiver_measured_seconds": 8.998637855052948,
+    "receiver_goodput_mbps": 8.506403883896448,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 12.939942,
+    "max_send_queue": 967,
+    "median_path_rtt_ms": 20.164
+  },
+  {
+    "batch": "flight-results",
+    "case": "baseline-step",
+    "repeat": 2,
+    "phase": "restored_50",
+    "nominal_range_s": [
+      35,
+      44
+    ],
+    "receiver_measured_seconds": 9.000202059745789,
+    "receiver_goodput_mbps": 42.64113332704887,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 55.549419,
+    "max_send_queue": 797,
+    "median_path_rtt_ms": 20.164
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 1,
+    "phase": "initial_50",
+    "nominal_range_s": [
+      5,
+      14
+    ],
+    "receiver_measured_seconds": 8.999900996685028,
+    "receiver_goodput_mbps": 42.75906947662481,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 64.261529,
+    "max_send_queue": 1015,
+    "median_path_rtt_ms": 20.146
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 1,
+    "phase": "reduced_10",
+    "nominal_range_s": [
+      20,
+      29
+    ],
+    "receiver_measured_seconds": 8.999978959560394,
+    "receiver_goodput_mbps": 7.456557876583964,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 14.0703405,
+    "max_send_queue": 1009,
+    "median_path_rtt_ms": 20.146
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 1,
+    "phase": "restored_50",
+    "nominal_range_s": [
+      35,
+      44
+    ],
+    "receiver_measured_seconds": 8.999957025051117,
+    "receiver_goodput_mbps": 42.75880328415394,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 65.473672,
+    "max_send_queue": 514,
+    "median_path_rtt_ms": 20.146
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 2,
+    "phase": "initial_50",
+    "nominal_range_s": [
+      5,
+      14
+    ],
+    "receiver_measured_seconds": 8.999970018863678,
+    "receiver_goodput_mbps": 42.87525038319184,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 72.9659165,
+    "max_send_queue": 985,
+    "median_path_rtt_ms": 20.162
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 2,
+    "phase": "reduced_10",
+    "nominal_range_s": [
+      20,
+      29
+    ],
+    "receiver_measured_seconds": 9.000314891338348,
+    "receiver_goodput_mbps": 7.106766460088672,
+    "longest_receiver_zero_interval_s": 0.9997339844703674,
+    "median_pacing_mbps": 11.927062,
+    "max_send_queue": 1012,
+    "median_path_rtt_ms": 20.162
+  },
+  {
+    "batch": "flight-results",
+    "case": "flight-fix-step",
+    "repeat": 2,
+    "phase": "restored_50",
+    "nominal_range_s": [
+      35,
+      44
+    ],
+    "receiver_measured_seconds": 9.000491917133331,
+    "receiver_goodput_mbps": 42.7562621624539,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 72.172795,
+    "max_send_queue": 931,
+    "median_path_rtt_ms": 20.162
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 1,
+    "phase": "initial_fiber",
+    "nominal_range_s": [
+      5,
+      19
+    ],
+    "receiver_measured_seconds": 13.999644041061401,
+    "receiver_goodput_mbps": 92.80133553320692,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 241.8734905,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.394
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 1,
+    "phase": "cellular",
+    "nominal_range_s": [
+      30,
+      159
+    ],
+    "receiver_measured_seconds": 128.99999356269836,
+    "receiver_goodput_mbps": 3.1619851500360636,
+    "longest_receiver_zero_interval_s": 1.0000309944152832,
+    "median_pacing_mbps": 4.1066935,
+    "max_send_queue": 665,
+    "median_path_rtt_ms": 52.139
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 1,
+    "phase": "restored_fiber",
+    "nominal_range_s": [
+      165,
+      179
+    ],
+    "receiver_measured_seconds": 13.999795019626617,
+    "receiver_goodput_mbps": 103.06155011393027,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 273.5579075,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.926
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 2,
+    "phase": "initial_fiber",
+    "nominal_range_s": [
+      5,
+      19
+    ],
+    "receiver_measured_seconds": 13.999720752239227,
+    "receiver_goodput_mbps": 88.00724113035838,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 226.019028,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.167
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 2,
+    "phase": "cellular",
+    "nominal_range_s": [
+      30,
+      159
+    ],
+    "receiver_measured_seconds": 129.00074911117554,
+    "receiver_goodput_mbps": 2.958755407467121,
+    "longest_receiver_zero_interval_s": 1.001160979270935,
+    "median_pacing_mbps": 5.918088,
+    "max_send_queue": 638,
+    "median_path_rtt_ms": 56.151
+  },
+  {
+    "batch": "transition-results",
+    "case": "baseline-transition",
+    "repeat": 2,
+    "phase": "restored_fiber",
+    "nominal_range_s": [
+      165,
+      179
+    ],
+    "receiver_measured_seconds": 13.999304115772247,
+    "receiver_goodput_mbps": 117.44634979017329,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 284.593117,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.184
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 1,
+    "phase": "initial_fiber",
+    "nominal_range_s": [
+      5,
+      19
+    ],
+    "receiver_measured_seconds": 13.998232960700989,
+    "receiver_goodput_mbps": 103.14795846401562,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 256.697012,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.934
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 1,
+    "phase": "cellular",
+    "nominal_range_s": [
+      30,
+      159
+    ],
+    "receiver_measured_seconds": 128.99999994039536,
+    "receiver_goodput_mbps": 23.597024258965057,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 59.557986,
+    "max_send_queue": 881,
+    "median_path_rtt_ms": 50.472
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 1,
+    "phase": "restored_fiber",
+    "nominal_range_s": [
+      165,
+      179
+    ],
+    "receiver_measured_seconds": 13.9998260140419,
+    "receiver_goodput_mbps": 110.55124359743117,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 238.83153,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.5255
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 2,
+    "phase": "initial_fiber",
+    "nominal_range_s": [
+      5,
+      19
+    ],
+    "receiver_measured_seconds": 13.999929904937744,
+    "receiver_goodput_mbps": 96.09498169883747,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 270.5807845,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.807
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 2,
+    "phase": "cellular",
+    "nominal_range_s": [
+      30,
+      159
+    ],
+    "receiver_measured_seconds": 128.99919766187668,
+    "receiver_goodput_mbps": 24.182426375834073,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 60.742343,
+    "max_send_queue": 886,
+    "median_path_rtt_ms": 49.561
+  },
+  {
+    "batch": "transition-results",
+    "case": "flight-fix-transition",
+    "repeat": 2,
+    "phase": "restored_fiber",
+    "nominal_range_s": [
+      165,
+      179
+    ],
+    "receiver_measured_seconds": 14.000000894069672,
+    "receiver_goodput_mbps": 91.00141133131415,
+    "longest_receiver_zero_interval_s": 0.0,
+    "median_pacing_mbps": 237.6838755,
+    "max_send_queue": 0,
+    "median_path_rtt_ms": 8.435
+  }
+]

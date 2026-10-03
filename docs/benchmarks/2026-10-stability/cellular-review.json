@@ -1,0 +1,70 @@
+{
+  "purpose": "Investigate seconds of inner TCP delivery interruption under the cellular phase of the 40-minute changing-path soak, then test the minimum proven controller correction.",
+  "source": {
+    "baseline_source": "bba728edf6eff415f9cc62d24a533c5a62763afe",
+    "baseline_image": "wg-quic-stability-long:20261003",
+    "baseline_image_id": "sha256:20c1a4fa9ae3b42df3a0ac0fd61bfb04671312a985c034531bc6c9a2b260f5c2",
+    "candidate_image": "wg-quic-qos:cellular-flight-bba728e",
+    "patch_sha256": "a96d89d8e1160e3fd83aaf70c3adf3e0446b330bb323acadbf7777f80fb7b6df",
+    "changes": "Shared packet flight boundary and feedback interval for queue and loss model reduction; no RTT threshold or gain changes.",
+    "core_sha256": "50b1933549e0b42bc41e36d777afdd3d97f3a15c090af43f39f2eb73cde78e88",
+    "quick_sha256": "6e9723dc9d3fda3d9e240a2beaf435e9a8c34ddcabcd8ae7ce60d5250e3365cf",
+    "candidate_image_id": "sha256:7737fb67e4b2ab11dbd6be5364137691e92be115cc457369d24b607105e0b990",
+    "regression_before": "Same-flight loss burst and shared ACK/loss tests fail on bba728e; 80 Mbps reduced to 1.024 Mbps after 100 packet loss callbacks.",
+    "regression_after": "go test -race ./internal/congestion ./internal/ackhandler passes with flight boundary fix.",
+    "merged_commit": "34bb3dfd588961b4322d471274e4138ef8373e8f"
+  },
+  "hypothesis_and_boundaries": {
+    "proven_bug": "Every individual queued loss callback reduced the model by 15%, so multiple losses from one outstanding packet flight were treated as independent evidence before feedback from any reduction was possible. ACK-based persistent-queue reduction could also compound the same event.",
+    "fix": "A shared sent-packet watermark and minimum model-RTT interval for both loss and ACK queue responses. Existing flight feedback cannot reduce again, including losses discovered after a timer crosses an RTT; newly sent flight feedback can still reduce. Explicit ECN is unchanged.",
+    "not_changed": [
+      "RTT queue thresholds and low-tail path estimator",
+      "model pacing gain",
+      "FEC policy",
+      "delivery bandwidth estimator"
+    ],
+    "remaining_limit": "Jitter can still make the low-tail path RTT underestimate typical propagation and look like queueing. The fix limits repeated responses; it does not classify cellular networks or prove all jitter is distinguishable from real queueing."
+  },
+  "fixture": {
+    "gso": "Both device offloads and QUIC_GO_DISABLE_GSO=1 disabled on both ends.",
+    "resources": "Each endpoint 1 CPU quota, separate CPU affinity, 512 MiB memory, GOMAXPROCS=1, GOMEMLIMIT=192MiB.",
+    "cellular": {
+      "fwd_mbps": 50,
+      "rev_mbps": 15,
+      "delay_each_direction_ms": 35,
+      "normal_jitter_each_direction_ms": 15,
+      "random_loss_each_direction_pct": 1,
+      "explicit_reorder_each_direction_pct": 0.2,
+      "reorder_correlation_pct": 25,
+      "queue_limit_packets": 1000,
+      "inner_mtu": 1280
+    },
+    "instrumentation": "Full status and cgroup CPU/core CPU ticks/qdisc JSON sampled approximately every 2 s; timestamps record actual elapsed time. Inner receiver intervals are the complete embedded iperf server JSON, 1 s buckets.",
+    "decomposition_limit": "The first four valid decomposition trials have full status but their additional cgroup sampler failed because jq was unavailable inside the frozen image. They cannot exclude CPU based on cgroup evidence. Formal flight comparisons use a pure-shell sampler successfully.",
+    "invalid_setup": "An earlier decomposition attempt using generic REORDER_PCT did not configure directional reorder and was discarded; excluded from all reported results.",
+    "repetitions": "Two repetitions with variant order reversed on the second repetition; decomposition has one repetition only. Small sample, not confidence intervals or a broad network guarantee.",
+    "comparison_trials": {
+      "jitter_reorder_decomposition_60s": 4,
+      "cellular_90s": 4,
+      "clean_random_policer_shortRTT_step": 20,
+      "cellular_300s": 4,
+      "fiber_cellular_fiber_180s": 4,
+      "additional_static_10mbps": 4
+    },
+    "fiber_transition_limit": "With socket/device GSO disabled and one CPU, the 500 Mbps configured fiber phases deliver about 90\u2013120 Mbps and may be endpoint CPU limited. They verify recovery relative to their own initial/baseline phases, not 500 Mbps capacity."
+  },
+  "metrics": {
+    "goodput_mbps": "Inner receiver sum_received bits_per_second / 1e6.",
+    "longest_sender_write_stall_s": "Zero-byte consecutive 0.25 s client application-write intervals; not receiver delivery.",
+    "longest_receiver_zero_interval_s": "Consecutive zero-byte 1 s intervals from complete server_output_json. Not subsecond packet timing.",
+    "resource_cpu_percent": "Delta core /proc CPU ticks / measured elapsed seconds; Linux USER_HZ=100.",
+    "throttled_ms": "Delta cgroup cpu.stat throttled_usec /1000 over recorded resource samples."
+  },
+  "technical_reference": {
+    "url": "https://www.rfc-editor.org/rfc/rfc9002.html#section-7.3.2",
+    "relevance": "RFC 9002 recovery bounds repeated window reductions using feedback from packets sent after recovery began. This supports the flight-boundary principle; the project uses its own model, not the RFC NewReno algorithm."
+  },
+  "raw_artifacts": "dist/stability-2026-10-03/qos-cellular (ignored local experiment snapshots, full iperf JSON, resource series and packet captures)",
+  "acceptance": "Accepted the proved duplicate-feedback correction after package race tests, 24 controlled boundary trials, four 300-second cellular trials, four fiber/cellular/fiber trials and four follow-up 10 Mbps trials. Four additional decomposition trials identify the jitter-dependent trigger.",
+  "remaining_low_rate_limit": "The 20\u201329 s reduced-rate part of the bandwidth step averaged 7.99\u21927.29 Mbps with only two repeats, while the whole run and restored-rate throughput were unchanged. Follow-up static 10 Mbps averaged 8.458\u21928.432 Mbps. Both versions still reached about 1.4 s inner TCP RTT; longest 1 s receiver zero buckets were baseline 1/0 s and candidate 0/2 s. Existing buffering and inner TCP stalls are not generally eliminated by this fix."
+}

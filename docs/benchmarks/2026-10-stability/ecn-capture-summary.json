@@ -1,0 +1,154 @@
+[
+  {
+    "case": "ecn-fix-marks",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r1-rate50-50-delay10-10-loss2-2-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 226364,
+      "ce": 4545,
+      "ce_fraction": 0.01968307861538528
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 192663,
+      "ce": 3995,
+      "ce_fraction": 0.020314454535284607
+    }
+  },
+  {
+    "case": "ecn-fix-marks",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r2-rate50-50-delay10-10-loss2-2-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 226302,
+      "ce": 4600,
+      "ce_fraction": 0.019921871616529956
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 192380,
+      "ce": 3928,
+      "ce_fraction": 0.020009373026061088
+    }
+  },
+  {
+    "case": "flight-fix-marks",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r1-rate50-50-delay10-10-loss2-2-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 209948,
+      "ce": 4328,
+      "ce_fraction": 0.020198248987287424
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 184093,
+      "ce": 3753,
+      "ce_fraction": 0.01997913184204082
+    }
+  },
+  {
+    "case": "flight-fix-marks",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r2-rate50-50-delay10-10-loss2-2-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 208770,
+      "ce": 4273,
+      "ce_fraction": 0.020056983801392207
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 182917,
+      "ce": 3632,
+      "ce_fraction": 0.019469415542297197
+    }
+  },
+  {
+    "case": "flight-fix-clean",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r1-rate50-50-delay10-10-loss0-0-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 155630,
+      "ce": 0,
+      "ce_fraction": 0.0
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 132325,
+      "ce": 0,
+      "ce_fraction": 0.0
+    }
+  },
+  {
+    "case": "flight-fix-clean",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r2-rate50-50-delay10-10-loss0-0-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 153676,
+      "ce": 0,
+      "ce_fraction": 0.0
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 131690,
+      "ce": 0,
+      "ce_fraction": 0.0
+    }
+  },
+  {
+    "case": "ecn-fix-clean",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r1-rate50-50-delay10-10-loss0-0-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 156443,
+      "ce": 0,
+      "ce_fraction": 0.0
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 132292,
+      "ce": 0,
+      "ce_fraction": 0.0
+    }
+  },
+  {
+    "case": "ecn-fix-clean",
+    "trial_id": "fec-obfs-auto-none-custom-static-tcp-r2-rate50-50-delay10-10-loss0-0-p1",
+    "capture_kernel_drops": 0,
+    "a": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 156794,
+      "ce": 0,
+      "ce_fraction": 0.0
+    },
+    "b": {
+      "not_ect": 0,
+      "ect1": 0,
+      "ect0": 132949,
+      "ce": 0,
+      "ce_fraction": 0.0
+    }
+  }
+]

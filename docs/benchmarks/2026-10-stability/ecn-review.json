@@ -1,0 +1,33 @@
+{
+  "source": {
+    "baseline_source": "bba728edf6eff415f9cc62d24a533c5a62763afe + flight patch a96d89d8e1160e3fd83aaf70c3adf3e0446b330bb323acadbf7777f80fb7b6df",
+    "baseline_image": "wg-quic-qos:cellular-flight-bba728e",
+    "baseline_image_id": "sha256:7737fb67e4b2ab11dbd6be5364137691e92be115cc457369d24b607105e0b990",
+    "candidate_image": "wg-quic-qos:cellular-ecn-bba728e",
+    "candidate_image_id": "sha256:272857ed661793abd829cf76dbcc9b668ac126356eca7910aacb408abd161533",
+    "candidate_patch_sha256": "99e222cc7eb5dce54fd2a256dd3786b853c9425805e6b8b03e3e25aa7ecc06e9",
+    "core_sha256": "46578d672c6a3ab04ac861eaad95ddd5a80ad7864018cb3d827f5d666d167dad",
+    "quick_sha256": "772b439d61a28d717b999e0f416050f6dab4d2a5838b1cd7c6319ac5b82abdb0",
+    "changes": "ECN shares the flight recovery boundary with ACK queue pressure and loss, without requiring the queue predicate or waiting for a stale path RTT. Queue/loss behavior unchanged.",
+    "merged_commit": "0b79b972cc59c40cf55fd7e759ab453406770c1a"
+  },
+  "scope": "Separate correctness fix for explicit ECN feedback, layered on the queued-loss flight fix. No changes to queue inference, rate estimator, FEC, or gain.",
+  "regression": {
+    "before": "After the actual ecnTracker validates capability with ten ECT(0) acknowledgements, one flight of 100 individually reported CE increases reduces 7.68 Mbps to the 0.96 Mbps minimum.",
+    "after": "The flight reduces once to 5.76 Mbps; old-flight late CE feedback cannot compound. New-flight CE still reduces without queue evidence or a stale path RTT delay. Packet-loss counters remain unchanged.",
+    "tests": "go test -race ./internal/congestion ./internal/ackhandler passed in isolated snapshot and main tree."
+  },
+  "fixture": {
+    "source_baseline": "The same fixed flight image in both ECN-mark and clean cases.",
+    "repeat": 2,
+    "order": "Reversed on second repetition.",
+    "ecn_cases": "45 s TCP through 50 Mbps / 20 ms RTT netem loss random 2% ecn in both directions, applied to ECT-capable outer UDP.",
+    "clean_cases": "30 s at identical rate/delay without loss or CE marking.",
+    "packet_evidence": "64-byte UDP header pcap on the isolated bridge. Marks are inspected in the IPv4 TOS ECN bits, and captures report zero kernel capture drops.",
+    "resources": "Same one CPU/512 MiB/GOMAXPROCS=1/GOMEMLIMIT=192MiB and both socket/device GSO disabled as cellular controls."
+  },
+  "interpretation": "The confirmed repeated reduction bug is a recovery-semantics issue. In these real 2% CE trials ACK delivery samples replenished the baseline bandwidth estimate enough to sustain about 42 Mbps; results do not show a material throughput collapse from CE or prove a broad performance improvement. Small n=2 and rate-independent random CE are not a model of an operator AQM policy.",
+  "technical_reference": "https://www.rfc-editor.org/rfc/rfc9002.html#section-7.3.2",
+  "raw_artifacts": "dist/stability-2026-10-03/qos-cellular (ignored local experiment snapshots, full iperf JSON, resource series and packet captures)",
+  "acceptance": "Accepted explicit-CE recovery semantics after the real tracker regression, race suite, four ECN-mark trials and four clean trials. Per-capture CE fraction and zero capture drops are preserved in ecn-capture-summary.json."
+}
