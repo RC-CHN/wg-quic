@@ -51,7 +51,13 @@
       "fiber_cellular_fiber_180s": 4,
       "additional_static_10mbps": 4
     },
-    "fiber_transition_limit": "The short 20-second fiber phases delivered about 90\u2013117 Mbps and verify recovery relative to their own initial/baseline phases, not the configured 500 Mbps capacity. Phase resource samples show core CPU about 42\u201354% and cgroup CPU about 53\u201364% with no throttling; CPU saturation is not supported as an explanation. Short duration and controller/FEC history differ from the original five-minute fiber phases."
+    "fiber_transition_limit": "The short 20-second fiber phases delivered about 90\u2013117 Mbps and verify recovery relative to their own initial/baseline phases, not the configured 500 Mbps capacity. Phase resource samples show core CPU about 42\u201354% and cgroup CPU about 53\u201364% with no throttling; CPU saturation is not supported as an explanation. Short duration and controller/FEC history differ from the original five-minute fiber phases.",
+    "transport_policy": {
+      "benchmark_mode": "fec-obfs",
+      "congestion": "auto",
+      "fec": "auto",
+      "obfs": "salamander"
+    }
   },
   "metrics": {
     "goodput_mbps": "Inner receiver sum_received bits_per_second / 1e6.",

@@ -47,7 +47,15 @@ For sustained traffic, loss and peer restart tests, use
 Always report the actual Windows version; Windows 10 or Windows Server results
 do not establish Windows 11 behavior.
 
-## Native network cleanup integration
+For real DNS policy validation, run the isolated
+[`DNS responder`](../network/dns-probe/README.md) on the configured tunnel DNS
+peer and add `-DnsProbeSuffix wgq-native.test.invalid` to the lifecycle fixture.
+Each cycle uses a fresh name with the default Windows resolver, records its
+answer and elapsed time, and requires the expected test address. Pair that
+record with the responder's query log. Omitting the option retains the usual
+lifecycle-only checks.
+
+## Native network policy integration
 
 Cross-compile the platform tests with `GOOS=windows GOARCH=amd64 go test -c
 ./internal/platform`, copy `platform.test.exe` beside the signed `wintun.dll`,
@@ -55,20 +63,26 @@ and run in an elevated shell on the disposable Windows machine:
 
 ```powershell
 $env:WG_QUIC_TEST_WINDOWS_NETWORK='1'
-.\platform.test.exe -test.v -test.timeout 8m `
-  -test.run 'TestWindows(NetworkRollback|NetworkApply|NativeStartup|NativeAddressDelete|DNS)'
+$arguments = @(
+  '-test.v', '-test.timeout', '8m', '-test.run',
+  'TestWindows(NetworkRollback|NetworkApply|NativeStartup|NativeAddressDelete|DNS)'
+)
+& .\platform.test.exe @arguments
 ```
 
 The opt-in tests create and remove their own two Wintun adapters. Address and
 route tests verify exact interface ownership and repeated cleanup while both
-adapters remain open. DNS tests compare native reset with the existing
-PowerShell reset for mixed IPv4/IPv6 servers plus a suffix, a suffix alone,
-and IPv4 servers alone. They compare effective server/suffix settings and
+adapters remain open. DNS tests compare native apply and reset with the existing
+PowerShell operations for mixed IPv4/IPv6 servers plus a suffix, a suffix alone,
+and each server family alone. They compare effective server/suffix settings and
 the corresponding per-interface registry strings, preserve an unrelated
 search-list value, and verify that the second adapter's DNS does not change.
 Absent and empty registry strings are compared as the same reset value.
+PowerShell can pad a `NameServer` registry string with extra trailing NULs;
+the apply comparison trims only that padding and retains the original raw
+snapshots in its output. Interior NULs and nonzero suffixes remain differences.
 
-Native DNS reset uses version 1 of Microsoft's
+Native DNS apply and reset use version 1 of Microsoft's
 [`SetInterfaceDnsSettings`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setinterfacednssettings),
 documented for Windows 10 build 19041 and later. The implementation probes the
 API at runtime and retains PowerShell only if the entry point is missing.
@@ -76,6 +90,13 @@ Other native failures remain errors. `DNS_SETTING_DOMAIN` corresponds to the
 existing connection-specific suffix reset; `DNS_SETTING_SEARCHLIST` is a
 different setting and is not changed. See Microsoft's
 [`DNS_INTERFACE_SETTINGS`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-dns_interface_settings).
+Applying servers preserves the listed order within each address family and
+leaves any absent family unchanged, matching `Set-DnsClientServerAddress`.
+A suffix-only apply preserves both server lists; a servers-only apply preserves
+the existing suffix. Every successfully applied native step retains cleanup
+ownership if a later step fails or is canceled. The integration comparison
+starts from existing dual-stack DNS, suffix and search-list values so these
+preservation rules cannot pass merely because the initial settings were empty.
 The empty-string reset and architecture-specific GUID calling conventions
 were checked against upstream WireGuard's
 [`SetDNS`/`FlushDNS`](https://git.zx2c4.com/wireguard-windows/tree/tunnel/winipcfg/luid.go)
@@ -84,8 +105,8 @@ Windows amd64 passes the GUID indirectly; ARM64 passes two 64-bit words.
 Compilation for both architectures is required; an amd64 guest does not
 establish ARM64 runtime behavior.
 
-Startup uses native IP Helper calls for MTU/DAD, temporary addresses and
-active routes; DNS apply retains its existing PowerShell command. The
+Startup uses native IP Helper calls for MTU/DAD, temporary addresses,
+active routes and DNS, with the existing DNS cmdlets as a missing-API fallback. The
 startup comparison first records fresh Wintun state, then checks native
 versus PowerShell DHCP, DAD, MTU, address origins, source-address selection,
 route metrics and policy-store behavior. A native address must be Preferred

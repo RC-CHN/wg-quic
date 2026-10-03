@@ -24,7 +24,13 @@
     "ecn_cases": "45 s TCP through 50 Mbps / 20 ms RTT netem loss random 2% ecn in both directions, applied to ECT-capable outer UDP.",
     "clean_cases": "30 s at identical rate/delay without loss or CE marking.",
     "packet_evidence": "64-byte UDP header pcap on the isolated bridge. Marks are inspected in the IPv4 TOS ECN bits, and captures report zero kernel capture drops.",
-    "resources": "Same one CPU/512 MiB/GOMAXPROCS=1/GOMEMLIMIT=192MiB and both socket/device GSO disabled as cellular controls."
+    "resources": "Same one CPU/512 MiB/GOMAXPROCS=1/GOMEMLIMIT=192MiB and both socket/device GSO disabled as cellular controls.",
+    "transport_policy": {
+      "benchmark_mode": "fec-obfs",
+      "congestion": "auto",
+      "fec": "auto",
+      "obfs": "salamander"
+    }
   },
   "interpretation": "The confirmed repeated reduction bug is a recovery-semantics issue. In these real 2% CE trials ACK delivery samples replenished the baseline bandwidth estimate enough to sustain about 42 Mbps; results do not show a material throughput collapse from CE or prove a broad performance improvement. Small n=2 and rate-independent random CE are not a model of an operator AQM policy.",
   "technical_reference": "https://www.rfc-editor.org/rfc/rfc9002.html#section-7.3.2",
