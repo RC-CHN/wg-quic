@@ -292,5 +292,10 @@
     "status-after.json": "929fdefc7c6b2aa89466c2ef547ded4a8aa5b400352e660e6d83364769acecf9",
     "error.txt": "ae80fcf61b36d1bca7dfa42e7b8429fba7d6406f7777ddd47ea6b2871cbcad7e",
     "traffic.jsonl": "0f6580aa6bd9131050b8504aeda796eb3f2bb2660c259668f29a18386bcb975c"
+  },
+  "build_provenance": {
+    "source_mode": "working tree build",
+    "vcs_modified": true,
+    "source_revision_semantics": "Git base revision recorded in binary metadata; this was not an immutable archived-source build. Exact tested executable SHA-256 values are recorded below."
   }
 }
