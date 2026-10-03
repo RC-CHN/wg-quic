@@ -1,0 +1,322 @@
+--- a/third_party/quic-go/internal/congestion/model_sender.go
++++ b/third_party/quic-go/internal/congestion/model_sender.go
+@@ -33,6 +33,8 @@
+ // alone is not proof of congestion. This avoids a Reno-style multiplicative
+ // collapse while preserving one budget for data and parity packets.
+ type modelSender struct {
++	pressure pressureProbe
++
+ 	clock     Clock
+ 	rttStats  *utils.RTTStats
+ 	connStats *utils.ConnectionStats
+@@ -127,6 +129,7 @@
+ 	bytes protocol.ByteCount,
+ 	isRetransmittable bool,
+ ) {
++	m.observePressureSend(sentTime, isRetransmittable)
+ 	m.pacer.SentPacket(sentTime, bytes)
+ 	if isRetransmittable {
+ 		m.largestSent = max(m.largestSent, packetNumber)
+@@ -155,6 +158,7 @@
+ 	m.updateRound(packetNumber, priorInFlight >= m.congestionWindow/2)
+ 	m.respondToPersistentQueue(eventTime)
+ 	m.updateCongestionWindow(ackedBytes, priorInFlight)
++	m.observePressure(eventTime, ackedBytes, 0)
+ }
+ 
+ func (m *modelSender) OnCongestionEvent(
+@@ -165,6 +169,7 @@
+ 	if lostBytes > 0 {
+ 		m.connStats.PacketsLost.Add(1)
+ 		m.connStats.BytesLost.Add(uint64(lostBytes))
++		m.observePressure(m.clock.Now(), 0, lostBytes)
+ 	}
+ 	m.updateFECSignal()
+ 
+@@ -182,6 +187,7 @@
+ 	if !packetsRetransmitted {
+ 		return
+ 	}
++	m.resetPressure(m.clock.Now(), false)
+ 	m.congestionWindow = m.minCongestionWindow()
+ 	rtt := m.windowRTT()
+ 	m.bandwidthEstimate = BandwidthFromDelta(m.congestionWindow, rtt)
+@@ -349,6 +355,9 @@
+ 
+ func (m *modelSender) pacingRate() Bandwidth {
+ 	rate := Bandwidth(float64(m.bandwidthEstimate) * m.pacingGain())
++	if cap := m.pressureCap(m.clock.Now()); cap > 0 {
++		rate = min(rate, m.bandwidthEstimate, cap)
++	}
+ 	if rate == 0 {
+ 		return BitsPerSecond
+ 	}
+--- a/third_party/quic-go/internal/congestion/model_pressure_probe.go
++++ b/third_party/quic-go/internal/congestion/model_pressure_probe.go
+@@ -0,0 +1,160 @@
++package congestion
++
++// Isolated experiment, not production policy or a policer classifier.
++import (
++	"time"
++
++	"github.com/quic-go/quic-go/internal/monotime"
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++type pressureSample struct {
++	start                        monotime.Time
++	acked, lost                  protocol.ByteCount
++	packets, losses, lossWindows int
++	lastLossWindow               int64
++}
++
++func (s *pressureSample) observe(now monotime.Time, acked, lost protocol.ByteCount) {
++	if now < s.start {
++		return
++	}
++	if acked > 0 {
++		s.acked += acked
++		s.packets++
++	}
++	if lost > 0 {
++		s.lost += lost
++		s.losses++
++		window := int64(now.Sub(s.start) / (250 * time.Millisecond))
++		if window != s.lastLossWindow {
++			s.lossWindows++
++			s.lastLossWindow = window
++		}
++	}
++}
++
++func (s pressureSample) lossRate() float64 {
++	if s.acked+s.lost == 0 {
++		return 0
++	}
++	return float64(s.lost) / float64(s.acked+s.lost)
++}
++
++type pressureProbe struct {
++	// 0 collects evidence, 1 explores, 2 retains a successful short experiment.
++	state                        int
++	lastSent, next, expires      monotime.Time
++	cap, entryRate, baselineRate Bandwidth
++	baselineLoss                 float64
++	rtt                          time.Duration
++	spurious                     uint64
++	sample                       pressureSample
++}
++
++func (m *modelSender) pressureCap(now monotime.Time) Bandwidth {
++	p := &m.pressure
++	if p.state == 0 || now >= p.expires {
++		return 0
++	}
++	return p.cap
++}
++
++func (m *modelSender) resetPressure(now monotime.Time, record bool) {
++	lastSent := m.pressure.lastSent
++	if record && m.pressure.state != 0 {
++		m.connStats.RecordEvent("pressure_probe", "release")
++	}
++	m.pressure = pressureProbe{lastSent: lastSent, next: now.Add(time.Second)}
++}
++
++func (m *modelSender) observePressureSend(now monotime.Time, active bool) {
++	if !active {
++		return
++	}
++	if !m.pressure.lastSent.IsZero() && now.Sub(m.pressure.lastSent) > max(300*time.Millisecond, 2*m.modelRTT()) {
++		m.resetPressure(now, true)
++	}
++	m.pressure.lastSent = now
++}
++
++func (m *modelSender) pressureValid(now monotime.Time) bool {
++	if m.state != modelStateProbe || m.modelRTT() <= 0 {
++		return false
++	}
++	// A temporarily suppressed queue signal is unknown, not a low-queue path.
++	if now < m.queueSignalResume || !m.lowerRTTSince.IsZero() || !m.higherRTTSince.IsZero() {
++		return false
++	}
++	if m.pressure.lastSent.IsZero() || now.Sub(m.pressure.lastSent) > max(300*time.Millisecond, 2*m.modelRTT()) {
++		return false
++	}
++	queue := max(m.rttStats.SmoothedRTT(), m.rttStats.LatestRTT()) - m.modelRTT()
++	if queue > max(2*time.Millisecond, m.modelRTT()/8) {
++		return false
++	}
++	p := &m.pressure
++	if p.rtt > 0 && (m.modelRTT()*4 > p.rtt*5 || m.modelRTT()*5 < p.rtt*4) {
++		return false
++	}
++	return p.sample.start.IsZero() || m.connStats.SpuriousLossPackets.Load() == p.spurious
++}
++
++func (m *modelSender) beginPressureSample(now monotime.Time) {
++	p := &m.pressure
++	p.sample = pressureSample{start: now, lastLossWindow: -1}
++	p.rtt = m.modelRTT()
++	p.spurious = m.connStats.SpuriousLossPackets.Load()
++}
++
++func (m *modelSender) observePressure(now monotime.Time, acked, lost protocol.ByteCount) {
++	p := &m.pressure
++	if !m.pressureValid(now) {
++		m.resetPressure(now, true)
++		return
++	}
++	if p.state != 0 && now >= p.expires {
++		m.resetPressure(now, true)
++		return
++	}
++	if p.state == 2 || now < p.next {
++		return
++	}
++	if p.sample.start.IsZero() {
++		m.beginPressureSample(now)
++	}
++	p.sample.observe(now, acked, lost)
++	elapsed := now.Sub(p.sample.start)
++	if elapsed < max(time.Second, 8*m.modelRTT()) {
++		return
++	}
++	if p.state == 0 {
++		if p.sample.packets < 2000 || p.sample.losses < 16 || p.sample.lossWindows < 2 || p.sample.lossRate() < 0.002 {
++			if elapsed >= 4*time.Second {
++				m.beginPressureSample(now)
++			}
++			return
++		}
++		p.baselineRate = BandwidthFromDelta(p.sample.acked, elapsed)
++		p.baselineLoss = p.sample.lossRate()
++		p.entryRate = Bandwidth(float64(m.bandwidthEstimate) * modelProbePacingGain)
++		p.cap = p.entryRate * 10 / 11
++		p.state = 1
++		settle := max(100*time.Millisecond, 2*m.modelRTT())
++		p.expires = now.Add(settle + 2*time.Second)
++		m.beginPressureSample(now.Add(settle))
++		m.connStats.RecordEvent("pressure_probe", "explore")
++		return
++	}
++	if p.sample.packets < 2000 {
++		return
++	} // Hard timeout releases sparse trials.
++	rate := BandwidthFromDelta(p.sample.acked, elapsed)
++	if rate >= p.baselineRate*95/100 && p.sample.lossRate() <= p.baselineLoss*0.60 && m.pacingRate() <= p.entryRate*98/100 {
++		p.state = 2
++		p.expires = now.Add(3 * time.Second)
++		m.connStats.RecordEvent("pressure_probe", "temporary_hold")
++		return
++	}
++	m.resetPressure(now, true)
++}
+--- a/third_party/quic-go/internal/congestion/model_pressure_probe_test.go
++++ b/third_party/quic-go/internal/congestion/model_pressure_probe_test.go
+@@ -0,0 +1,103 @@
++package congestion
++
++import (
++	"testing"
++	"time"
++
++	"github.com/quic-go/quic-go/internal/protocol"
++	"github.com/stretchr/testify/require"
++)
++
++func pressureTraffic(m *modelSender, c *mockClock, packets int, interval time.Duration, loseEvery int) {
++	for i := 0; i < packets; i++ {
++		c.Advance(interval)
++		m.observePressureSend(c.Now(), true)
++		if loseEvery > 0 && i%loseEvery == 0 {
++			m.observePressure(c.Now(), 0, 1200)
++		}
++		m.observePressure(c.Now(), 1200, 0)
++	}
++}
++
++func TestPressureExperimentCapsActualRateAndAlwaysExpires(t *testing.T) {
++	m, c, _, _ := newTestModelSender()
++	m.state = modelStateProbe
++	m.bandwidthEstimate = 80_000_000
++	pressureTraffic(m, c, 2200, 500*time.Microsecond, 100)
++	cap := m.pressureCap(c.Now())
++	require.NotZero(t, cap)
++	m.bandwidthEstimate = 160_000_000 // ACK compression must not undo the intervention.
++	require.LessOrEqual(t, m.pacingRate(), cap)
++	pressureTraffic(m, c, 2200, 500*time.Microsecond, 0)
++	require.Equal(t, 2, m.pressure.state)
++	c.Advance(4 * time.Second) // No ACK or loss callback is required to remove the cap.
++	require.Zero(t, m.pressureCap(c.Now()))
++	require.Greater(t, m.pacingRate(), cap)
++}
++
++func TestPressureExperimentRejectsAmbiguousSignals(t *testing.T) {
++	for _, reason := range []string{"startup", "queue_grace", "queue", "one_ack_batch", "sparse_loss"} {
++		t.Run(reason, func(t *testing.T) {
++			m, c, rtt, _ := newTestModelSender()
++			m.state = modelStateProbe
++			m.bandwidthEstimate = 80_000_000
++			interval := 500 * time.Microsecond
++			loseEvery := 100
++			switch reason {
++			case "startup":
++				m.state = modelStateStartup
++			case "queue_grace":
++				m.queueSignalResume = c.Now().Add(3 * time.Second)
++			case "queue":
++				for range 20 {
++					rtt.UpdateRTT(80*time.Millisecond, 0)
++				}
++			case "one_ack_batch":
++				interval = 0
++			case "sparse_loss":
++				loseEvery = 1000
++			}
++			pressureTraffic(m, c, 2200, interval, loseEvery)
++			require.Zero(t, m.pressureCap(c.Now()))
++		})
++	}
++}
++
++func TestPressureExperimentReleasesOnIdleReorderingAndPathChange(t *testing.T) {
++	for _, reason := range []string{"idle", "spurious", "path"} {
++		t.Run(reason, func(t *testing.T) {
++			m, c, _, stats := newTestModelSender()
++			m.state = modelStateProbe
++			m.bandwidthEstimate = 80_000_000
++			pressureTraffic(m, c, 2200, 500*time.Microsecond, 100)
++			require.NotZero(t, m.pressureCap(c.Now()))
++			switch reason {
++			case "idle":
++				c.Advance(400 * time.Millisecond)
++			case "spurious":
++				stats.SpuriousLossPackets.Add(1)
++			case "path":
++				m.propagationRTT = 80 * time.Millisecond
++			}
++			m.observePressureSend(c.Now(), true)
++			m.observePressure(c.Now(), 1200, 0)
++			require.Zero(t, m.pressureCap(c.Now()))
++		})
++	}
++}
++
++func TestPressureExperimentDoesNotUseFlightAsDemandSignal(t *testing.T) {
++	m, c, _, _ := newTestModelSender()
++	m.state = modelStateProbe
++	m.congestionWindow = 270_000
++	m.bandwidthEstimate = 80_000_000
++	for i := 0; i < 2200; i++ {
++		c.Advance(500 * time.Microsecond)
++		m.OnPacketSent(c.Now(), 80_000, protocol.PacketNumber(i), 1200, true)
++		if i%100 == 0 {
++			m.OnCongestionEvent(protocol.PacketNumber(i), 1200, 80_000)
++		}
++		m.OnPacketAcked(protocol.PacketNumber(i), 1200, 80_000, c.Now())
++	}
++	require.NotZero(t, m.pressureCap(c.Now()))
++}
