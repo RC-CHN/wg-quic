@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "production_commit": "6d48e0a2dab96eb016f251de643a6ca854008171",
+  "operating_system": "Windows 10 Enterprise LTSC 2021 Evaluation 21H2, 19044.7725",
+  "test_executable_sha256": "62b54f2e9b96992446d3cf5fae5fdb05e4fdb3aafc7e2b7bbccb7cee097a3878",
+  "started_utc": "2026-10-03T04:59:44.363985+00:00",
+  "completed_utc": "2026-10-03T05:00:13.905012+00:00",
+  "result": "passed",
+  "native_apply_ms": 64.1553,
+  "reference_powershell_apply_ms": 3478.5827,
+  "scope": "DAD/MTU, two addresses and two routes on fresh Wintun devices; DNS apply excluded.",
+  "snapshots": {
+    "native_before": {
+      "addresses": [],
+      "interfaces": [
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 3,
+          "dhcp": "Disabled",
+          "family": 2,
+          "metric": 5,
+          "mtu": 65535,
+          "router_discovery": "ControlledByDHCP"
+        },
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 1,
+          "dhcp": "Disabled",
+          "family": 23,
+          "metric": 5,
+          "mtu": 65535,
+          "router_discovery": "Enabled"
+        }
+      ],
+      "persistent_addresses": 0,
+      "persistent_routes": 0,
+      "routes": []
+    },
+    "powershell_before": {
+      "addresses": [],
+      "interfaces": [
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 3,
+          "dhcp": "Disabled",
+          "family": 2,
+          "metric": 5,
+          "mtu": 65535,
+          "router_discovery": "ControlledByDHCP"
+        },
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 1,
+          "dhcp": "Disabled",
+          "family": 23,
+          "metric": 5,
+          "mtu": 65535,
+          "router_discovery": "Enabled"
+        }
+      ],
+      "persistent_addresses": 0,
+      "persistent_routes": 0,
+      "routes": []
+    },
+    "native_after": {
+      "addresses": [
+        {
+          "dad_state": "Preferred",
+          "family": 2,
+          "prefix_length": 32,
+          "prefix_origin": "Manual",
+          "skip_as_source": false,
+          "suffix_origin": "Manual"
+        },
+        {
+          "dad_state": "Preferred",
+          "family": 23,
+          "prefix_length": 128,
+          "prefix_origin": "Manual",
+          "skip_as_source": false,
+          "suffix_origin": "Manual"
+        }
+      ],
+      "interfaces": [
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 0,
+          "dhcp": "Disabled",
+          "family": 2,
+          "metric": 5,
+          "mtu": 1420,
+          "router_discovery": "ControlledByDHCP"
+        },
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 0,
+          "dhcp": "Disabled",
+          "family": 23,
+          "metric": 5,
+          "mtu": 1420,
+          "router_discovery": "Enabled"
+        }
+      ],
+      "persistent_addresses": 0,
+      "persistent_routes": 0,
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "next_hop": "0.0.0.0",
+          "protocol": "NetMgmt",
+          "publish": "No",
+          "route_metric": 0
+        },
+        {
+          "destination": "2001:db8:88::/64",
+          "next_hop": "::",
+          "protocol": "NetMgmt",
+          "publish": "No",
+          "route_metric": 0
+        }
+      ]
+    },
+    "powershell_after": {
+      "addresses": [
+        {
+          "dad_state": "Preferred",
+          "family": 2,
+          "prefix_length": 32,
+          "prefix_origin": "Manual",
+          "skip_as_source": false,
+          "suffix_origin": "Manual"
+        },
+        {
+          "dad_state": "Preferred",
+          "family": 23,
+          "prefix_length": 128,
+          "prefix_origin": "Manual",
+          "skip_as_source": false,
+          "suffix_origin": "Manual"
+        }
+      ],
+      "interfaces": [
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 0,
+          "dhcp": "Disabled",
+          "family": 2,
+          "metric": 5,
+          "mtu": 1420,
+          "router_discovery": "ControlledByDHCP"
+        },
+        {
+          "automatic_metric": "Enabled",
+          "dad_transmits": 0,
+          "dhcp": "Disabled",
+          "family": 23,
+          "metric": 5,
+          "mtu": 1420,
+          "router_discovery": "Enabled"
+        }
+      ],
+      "persistent_addresses": 0,
+      "persistent_routes": 0,
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "next_hop": "0.0.0.0",
+          "protocol": "NetMgmt",
+          "publish": "No",
+          "route_metric": 0
+        },
+        {
+          "destination": "2001:db8:88::/64",
+          "next_hop": "::",
+          "protocol": "NetMgmt",
+          "publish": "No",
+          "route_metric": 0
+        }
+      ]
+    }
+  },
+  "verified": [
+    "Both addresses immediately Preferred when queried natively after creation, before reference PowerShell or later snapshots.",
+    "DHCP, MTU, DAD, address origins, source address eligibility, route metrics and stores match the previous PowerShell path.",
+    "Both adapters remain open during comparison; native rollback leaves unrelated adapter state intact.",
+    "Partial apply ownership, cancellation before mutation, foreign compartment rejection and confirmed DNS apply followed by process failure regressions passed."
+  ],
+  "raw_result_sha256": "322c5bdf29811ad30ef3d12fa759140457c3dc2e0f903ef64387c9318912c95a",
+  "limits": [
+    "Single API timing comparison excludes adapter creation, status, PowerShell state queries and total service startup.",
+    "Test exe built from the final production files before their commit; executable hash fixes its identity.",
+    "Runtime verification is Windows amd64; other architectures are compile-checked separately."
+  ]
+}
