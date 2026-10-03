@@ -590,6 +590,14 @@ func (s *Supervisor) resolve(ctx context.Context, state *peerState) (Resolution,
 		state.lastResolutionError = err.Error()
 		return Resolution{}, err
 	}
+	// Backoff belongs to the current DNS candidate set. Long-lived services
+	// must not accumulate every unreachable address ever published by DDNS.
+	// Preserve candidates still present, including their attempt counters.
+	for address := range state.failedCandidates {
+		if _, present := seen[address]; !present {
+			delete(state.failedCandidates, address)
+		}
+	}
 	state.dnsCandidates = append(state.dnsCandidates[:0], resolution.Addresses...)
 	state.lastResolvedAt = time.Now()
 	state.lastResolutionError = ""
