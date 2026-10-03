@@ -322,8 +322,11 @@ func TestServerAcceptQueueOverflow(t *testing.T) {
 
 	// next connection should be rejected
 	conn, err := dialer.Dial(ctx, server.Addr(), getTLSClientConfig(), getQuicConfig(nil))
-	require.NoError(t, err)
-	_, err = conn.AcceptStream(ctx)
+	// The refusal can arrive before Dial reports handshake completion, or
+	// afterward and surface through the first stream operation.
+	if err == nil {
+		_, err = conn.AcceptStream(ctx)
+	}
 	var transportErr *quic.TransportError
 	require.ErrorAs(t, err, &transportErr)
 	require.Equal(t, quic.ConnectionRefused, transportErr.ErrorCode)
@@ -340,8 +343,9 @@ func TestServerAcceptQueueOverflow(t *testing.T) {
 
 	// but next connection should be rejected again
 	conn3, err := dialer.Dial(ctx, server.Addr(), getTLSClientConfig(), getQuicConfig(nil))
-	require.NoError(t, err)
-	_, err = conn3.AcceptStream(ctx)
+	if err == nil {
+		_, err = conn3.AcceptStream(ctx)
+	}
 	require.ErrorAs(t, err, &transportErr)
 	require.Equal(t, quic.ConnectionRefused, transportErr.ErrorCode)
 }
