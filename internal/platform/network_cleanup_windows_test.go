@@ -54,6 +54,13 @@ func (f *fakeWindowsNetworkSystem) DeleteAddress(ctx context.Context, compartmen
 	return errors.Join(ctx.Err(), f.failures[call])
 }
 
+func (f *fakeWindowsNetworkSystem) ResetDNS(ctx context.Context, compartment uint32, luid uint64) error {
+	f.luids = append(f.luids, luid)
+	f.compartments = append(f.compartments, compartment)
+	f.calls = append(f.calls, "dns")
+	return errors.Join(ctx.Err(), f.failures["dns"])
+}
+
 func TestWindowsNetworkRollbackNativeDualStack(t *testing.T) {
 	cfg := &config.Config{
 		Interface: config.Interface{Addresses: []netip.Prefix{

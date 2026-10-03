@@ -15,6 +15,7 @@ type windowsOperation struct {
 	// The interface identity is captured separately before any apply runs.
 	address netip.Addr
 	route   netip.Prefix
+	dns     bool
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
@@ -129,7 +130,7 @@ func windowsDNSOperation(base string, values []string) (windowsOperation, error)
 	undo := base +
 		"Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue;" +
 		"Set-DnsClient -InterfaceIndex $ifIndex -ResetConnectionSpecificSuffix -ErrorAction SilentlyContinue"
-	return windowsOperation{apply: apply.String(), undo: undo}, nil
+	return windowsOperation{apply: apply.String(), undo: undo, dns: true}, nil
 }
 
 func windowsPowerShellBase(name string) string {

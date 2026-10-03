@@ -46,3 +46,41 @@ For sustained traffic, loss and peer restart tests, use
 [`soak-probe`](../network/soak-probe/README.md) while leaving the tunnel running.
 Always report the actual Windows version; Windows 10 or Windows Server results
 do not establish Windows 11 behavior.
+
+## Native network cleanup integration
+
+Cross-compile the platform tests with `GOOS=windows GOARCH=amd64 go test -c
+./internal/platform`, copy `platform.test.exe` beside the signed `wintun.dll`,
+and run in an elevated shell on the disposable Windows machine:
+
+```powershell
+$env:WG_QUIC_TEST_WINDOWS_NETWORK='1'
+.\platform.test.exe -test.v -test.timeout 6m `
+  -test.run 'TestWindows(NetworkRollback|NativeAddressDelete|DNS)'
+```
+
+The opt-in tests create and remove their own two Wintun adapters. Address and
+route tests verify exact interface ownership and repeated cleanup while both
+adapters remain open. DNS tests compare native reset with the existing
+PowerShell reset for mixed IPv4/IPv6 servers plus a suffix, a suffix alone,
+and IPv4 servers alone. They compare effective server/suffix settings and
+the corresponding per-interface registry strings, preserve an unrelated
+search-list value, and verify that the second adapter's DNS does not change.
+Absent and empty registry strings are compared as the same reset value.
+
+Native DNS reset uses version 1 of Microsoft's
+[`SetInterfaceDnsSettings`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setinterfacednssettings),
+documented for Windows 10 build 19041 and later. The implementation probes the
+API at runtime and retains PowerShell only if the entry point is missing.
+Other native failures remain errors. `DNS_SETTING_DOMAIN` corresponds to the
+existing connection-specific suffix reset; `DNS_SETTING_SEARCHLIST` is a
+different setting and is not changed. See Microsoft's
+[`DNS_INTERFACE_SETTINGS`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-dns_interface_settings).
+The empty-string reset and architecture-specific GUID calling conventions
+were checked against upstream WireGuard's
+[`SetDNS`/`FlushDNS`](https://git.zx2c4.com/wireguard-windows/tree/tunnel/winipcfg/luid.go)
+and [API binding](https://git.zx2c4.com/wireguard-windows/tree/tunnel/winipcfg/winipcfg.go).
+Windows amd64 passes the GUID indirectly; ARM64 passes two 64-bit words.
+Compilation for both architectures is required; an amd64 guest does not
+establish ARM64 runtime behavior. Network startup still uses its existing
+PowerShell batch.

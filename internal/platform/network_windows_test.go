@@ -50,7 +50,7 @@ func TestWindowsNetworkPlanLeavesEndpointRoutingToManager(t *testing.T) {
 	last := operations[len(operations)-1]
 	if !strings.Contains(last.apply, "Set-DnsClientServerAddress") ||
 		!strings.Contains(last.apply, "Set-DnsClient") ||
-		last.undo == "" {
+		last.undo == "" || !last.dns {
 		t.Fatalf("DNS operation is incomplete: %#v", last)
 	}
 }

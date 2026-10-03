@@ -13,6 +13,7 @@ type windowsNetworkSystem interface {
 	RunBatch(context.Context, string, uint64, []string, bool) ([]int, error)
 	DeleteRoute(context.Context, windowsRouteKey) error
 	DeleteAddress(context.Context, uint32, uint64, netip.Addr) error
+	ResetDNS(context.Context, uint32, uint64) error
 }
 
 type windowsNativeNetworkSystem struct{ windowsNativeRouteSystem }
@@ -63,9 +64,17 @@ func (s *windowsNetworkState) rollback(ctx context.Context, system windowsNetwor
 			if err != nil {
 				err = fmt.Errorf("remove Windows tunnel address %s: %w", operation.address, err)
 			}
+		case operation.dns:
+			err = system.ResetDNS(ctx, s.compartmentID, s.interfaceLUID)
+			if errors.Is(err, errWindowsDNSAPIUnavailable) {
+				_, err = system.RunBatch(ctx, s.name, s.interfaceLUID, []string{operation.undo}, true)
+			}
+			if err != nil {
+				err = fmt.Errorf("reset Windows tunnel DNS: %w", err)
+			}
 		default:
-			// DNS still needs its Windows policy cmdlets. Resolve the captured
-			// LUID, never the alias: a replacement with the same name is not ours.
+			// Resolve the captured LUID, never the alias: a replacement with
+			// the same name is not ours.
 			_, err = system.RunBatch(ctx, s.name, s.interfaceLUID, []string{operation.undo}, true)
 		}
 		if err != nil {
