@@ -616,7 +616,10 @@ func (b *Bind) retainClosedSession(observation telemetry.ClosedSessionObservatio
 	b.telemetryMu.Unlock()
 }
 
-func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
+// The caller holds state.mu. A missing closed record needs a pending link only
+// while the old session can still publish its final observation; an evicted
+// record will never be finalized again.
+func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64, oldStillActive bool) {
 	if oldSessionID == 0 || newSessionID == 0 {
 		return
 	}
@@ -628,7 +631,9 @@ func (b *Bind) recordSessionReplacement(oldSessionID, newSessionID uint64) {
 			return
 		}
 	}
-	b.replacements[oldSessionID] = newSessionID
+	if oldStillActive {
+		b.replacements[oldSessionID] = newSessionID
+	}
 	b.telemetryMu.Unlock()
 }
 
@@ -1617,7 +1622,7 @@ func (b *Bind) newSessionLocked(
 		_ = sess.fecEncoder.SetInterleave(profile.interleave)
 	}
 	state.sessions[sess.id] = sess
-	b.recordSessionReplacement(replacesSessionID, sess.id)
+	b.recordSessionReplacement(replacesSessionID, sess.id, state.sessions[replacesSessionID] != nil)
 	b.stats.activeSessions.Add(1)
 	if role == "outbound" {
 		b.recordSessionEventAt(
@@ -2030,6 +2035,10 @@ func (s *session) close() {
 		}
 		s.mu.Unlock()
 		s.state.mu.Lock()
+		// Publish before removal under the same lock used by replacement
+		// registration. There must be no gap where the old session is absent
+		// from both the active set and the final-observation history.
+		s.endpoint.owner.retainClosedSession(final)
 		delete(s.state.sessions, s.id)
 		if s.role == "inbound" {
 			s.state.inboundSessions--
@@ -2060,7 +2069,6 @@ func (s *session) close() {
 			}
 		}
 		s.endpoint.mu.Unlock()
-		s.endpoint.owner.retainClosedSession(final)
 		s.endpoint.owner.recordSessionEventAt(
 			s.id, s.generation, telemetry.SessionEventClosed, final.CloseReason,
 			closedAt, nil,
