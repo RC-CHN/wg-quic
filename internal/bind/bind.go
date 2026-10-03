@@ -107,6 +107,7 @@ type receivedPacket struct {
 type outboundPacket struct {
 	preparedFrame []byte
 	id            uint64
+	queuedAt      time.Time // data only; priority messages have reserved admission
 }
 
 type runState struct {
@@ -1383,12 +1384,22 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 				preparedFrame: preparedFrame,
 				id:            b.nextPacket.Add(1),
 			}
+			if queue == sess.send {
+				packet.queuedAt = time.Now()
+				if !sess.reserveSendBytes(len(preparedFrame)) {
+					quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
+					sess.recordSendDrop("send_queue_budget")
+					break
+				}
+			}
 			select {
 			case queue <- packet:
 			case <-state.ctx.Done():
+				sess.releaseSendBytes(packet)
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 				return net.ErrClosed
 			default:
+				sess.releaseSendBytes(packet)
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
 				b.stats.queueDrops.Add(1)
 				sess.stats.queueDrops.Add(1)
@@ -1717,6 +1728,9 @@ type session struct {
 	cancel             context.CancelFunc
 	ready              chan struct{}
 	send               chan outboundPacket
+	sendBytes          atomic.Int64
+	sendBudgetBytes    atomic.Int64
+	sendAgeNanos       atomic.Int64
 	priority           chan outboundPacket
 	control            chan []byte
 	mu                 sync.Mutex
@@ -2110,6 +2124,7 @@ func (s *session) sendLoop() {
 	}
 	timerActive := false
 	defer timer.Stop()
+	var budgetUpdated time.Time
 
 	sendPacket := func(packet []byte) bool {
 		packetBytes := len(packet)
@@ -2228,6 +2243,18 @@ func (s *session) sendLoop() {
 		return true
 	}
 	sendWGPacket := func(packet outboundPacket) bool {
+		now := time.Now()
+		if now.Sub(budgetUpdated) >= 10*time.Millisecond {
+			stats := qconn.Stats()
+			s.updateSendBudget(stats.BandwidthEstimate, stats.PacingRate, s.state.cfg.CongestionMode == "model" && stats.CongestionModelState == 0)
+			budgetUpdated = now
+		}
+		s.releaseSendBytes(packet)
+		if !packet.queuedAt.IsZero() && now.Sub(packet.queuedAt) > s.sendMaxAge() {
+			quiccarrier.ReleaseDatagramSendBuffer(packet.preparedFrame)
+			s.recordSendDrop("send_queue_expired")
+			return true
+		}
 		fragmentData := qconn.MaxDatagramPayloadSize() - frameHeaderSize
 		if s.fecEncoder != nil {
 			fragmentData -= fec.DataPacketOverhead

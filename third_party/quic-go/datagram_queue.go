@@ -122,7 +122,11 @@ func (d *ReceivedDatagram) Release() {
 type datagramQueue struct {
 	sendMx    sync.Mutex
 	sendQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
-	sent      chan struct{} // used to notify Add that a datagram was dequeued
+	sendBytes int
+	// sendBudget is installed before the connection is published. It reads
+	// atomic transport observations, never the controller's mutable state.
+	sendBudget func() int
+	sent       chan struct{} // used to notify Add that a datagram was dequeued
 
 	rcvMx    sync.Mutex
 	rcvQueue ringbuffer.RingBuffer[ReceivedDatagram]
@@ -170,8 +174,13 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 			return h.closeErr
 		default:
 		}
-		if h.sendQueue.Len() < maxDatagramSendQueueLen {
+		budget := maxDatagramSendQueueLen * DatagramSendBufferSize
+		if h.sendBudget != nil {
+			budget = h.sendBudget()
+		}
+		if h.sendQueue.Len() < maxDatagramSendQueueLen && (h.sendQueue.Empty() || h.sendBytes+len(f.Data) <= budget) {
 			h.sendQueue.PushBack(f)
+			h.sendBytes += len(f.Data)
 			h.sendMx.Unlock()
 			h.hasData()
 			return nil
@@ -204,7 +213,8 @@ func (h *datagramQueue) Peek() *wire.DatagramFrame {
 func (h *datagramQueue) Pop() {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()
-	_ = h.sendQueue.PopFront()
+	f := h.sendQueue.PopFront()
+	h.sendBytes -= len(f.Data)
 	select {
 	case h.sent <- struct{}{}:
 	default:
@@ -376,6 +386,7 @@ func (h *datagramQueue) CloseWithError(e error) {
 		releaseDatagramSendBuffer(frame.Data)
 		frame.Data = nil
 	}
+	h.sendBytes = 0
 	for !h.rcvQueue.Empty() {
 		datagram := h.rcvQueue.PopFront()
 		datagram.Release()

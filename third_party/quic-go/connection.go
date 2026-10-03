@@ -566,6 +566,9 @@ func (c *Conn) preSetup() {
 	c.receivedPacketHandler = *ackhandler.NewReceivedPacketHandler(c.logger)
 
 	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.logger)
+	c.datagramQueue.sendBudget = func() int {
+		return datagramSendBudget(c.connStats.BandwidthEstimate.Load(), c.connStats.PacingRate.Load())
+	}
 	c.connState.Version = c.version
 }
 
