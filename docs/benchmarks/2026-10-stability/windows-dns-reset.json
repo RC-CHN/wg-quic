@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-03",
+  "production_commit": "3612627938ef2cbe9082bdc45aea405aa1bc464a",
+  "test_executable_sha256": "90b5a86d40dc296f4176cc5d8e0ceec0ac5713d5357d593757701a08238abda4",
+  "result": "passed",
+  "operating_system": "Windows 10 Enterprise LTSC 2021 Evaluation 21H2, 19044.7725",
+  "started_utc": "2026-10-03T04:45:02.898573+00:00",
+  "completed_utc": "2026-10-03T04:47:56.369298+00:00",
+  "cases": [
+    {
+      "case": "dual_stack_suffix",
+      "native_duration": "1.6762ms",
+      "legacy_duration": "5.2598703s"
+    },
+    {
+      "case": "suffix_only",
+      "native_duration": "1.4938ms",
+      "legacy_duration": "5.3894011s"
+    },
+    {
+      "case": "ipv4_only",
+      "native_duration": "2.3795ms",
+      "legacy_duration": "6.0389834s"
+    }
+  ],
+  "verified": [
+    "Native and PowerShell reset start from identical effective DNS and registry state.",
+    "DNS servers and connection-specific suffix match the existing reset behavior for both address families.",
+    "An unrelated SearchList sentinel and the second interface remain unchanged.",
+    "Suffix-only comparison begins with no inherited SearchList sentinel.",
+    "Repeated native reset succeeds; cancellation, permission errors and missing-API fallback are separately covered."
+  ],
+  "raw_result_sha256": "bcd1e7d0f5dc328cb3cc9ff444a3f866aa9bef7f9c599cda4d3231d91625d5c8",
+  "limits": [
+    "amd64 Windows runtime verified; ARM64 and 386 ABI paths cross-compiled, not executed.",
+    "Comparison queries use PowerShell and dominate fixture runtime; reported reset timings exclude those queries.",
+    "Previous fixture iterations had an overstrict inherited-suffix expectation and an insufficient three-minute query budget; these were test errors, not product failures."
+  ]
+}
