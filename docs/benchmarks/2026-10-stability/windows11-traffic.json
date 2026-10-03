@@ -1,0 +1,508 @@
+{
+  "schema_version": 1,
+  "collected_date": "2026-10-03",
+  "source_revision": "6d48e0a2dab96eb016f251de643a6ca854008171",
+  "platform": {
+    "display_version": "24H2",
+    "version": "10.0.26100",
+    "ubr": 1742,
+    "secure_boot": true,
+    "user": "WGQUIC-WIN11\\WgQuicTest",
+    "tpm_spec": "2.0, 0, 1.83",
+    "architecture": "64-bit",
+    "build": "26100",
+    "bootstrap_done": true,
+    "utc": "2026-10-03T04:21:11.1418827Z",
+    "tpm_ready": true,
+    "caption": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+    "tpm_present": true,
+    "administrator_enabled": true
+  },
+  "source_mode": "immutable git archive",
+  "source_archive_sha256": "91d6715e839be4ae170023980eaeff9131341d4bdc8d46b5aa4c4230a14965c5",
+  "executables": {
+    "wg-quic.exe": "84dd583c267d28c2656ae9c36d0ae7e899a264e166e36328c5f8870dadc39576",
+    "wg-quic-quick.exe": "0bdb8f61b0bdb9df5ce7a5b24cebc024ab1c98e15bda1882cccb55426c741d81",
+    "wintun.dll": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+  },
+  "traffic_probe_files": {
+    "windows": {
+      "file": "soak-probe.exe",
+      "sha256": "f0dfde602fe5199b658f090de26fbbcb7db79dd753a236c8456cae91cccaa01c"
+    },
+    "linux": {
+      "file": "soak-probe",
+      "sha256": "92c8622cb46b48bd41b168b392f6045c76460fa80996cab2915373207a9ce46f"
+    }
+  },
+  "peer": {
+    "image_id": "sha256:a47276453fa5a68c4f688135999d1f7097c244055b5b8f195e1d36fbdc2a8276",
+    "core_sha256": "c3ef02809a84b0df339a7859bd9facc3c8ea7cc71c3732c1462dd04f5d875dcd",
+    "source_baseline": {
+      "source_commit": "bd405b6e61b50846cd891e627d102bca52af85f7",
+      "source_version": "v0.4.1",
+      "binary_version": "0.1.0-dev (baseline benchmark build has no release ldflags)",
+      "image": "wg-quic-windows-soak:20261003-baseline",
+      "image_id": "sha256:a47276453fa5a68c4f688135999d1f7097c244055b5b8f195e1d36fbdc2a8276",
+      "core_sha256": "c3ef02809a84b0df339a7859bd9facc3c8ea7cc71c3732c1462dd04f5d875dcd",
+      "quick_sha256": "25e1da7933df804bfa1f02a02e781aaf1a5b0a094505a184311d0d4611153d4a",
+      "listen": "127.0.0.1:51891/udp",
+      "guest_endpoint": "10.0.2.2:51891",
+      "inner_address": "10.89.0.2/32"
+    }
+  },
+  "fixture": {
+    "profile": "DNS10.89.0.2, MTU1420, two allowed routes; desktop-client broker up/down",
+    "protocol": "64KiB sequenced TCP echo with every returned byte verified",
+    "payload_limit_bytes_per_second_per_direction": 2097152,
+    "fault_direction": "isolated Linux peer eth0 egress only",
+    "loss_phase": "netem loss 5% delay 10ms 3ms",
+    "outage_phase": "netem loss 100%",
+    "traffic_sample_interval_seconds": 1,
+    "resource_sample_interval_seconds": 5
+  },
+  "lifecycle_done": "passed",
+  "lifecycle_commands": [
+    {
+      "exit_code": 0,
+      "utc": "2026-10-03T05:05:09.5162520Z",
+      "arguments": [
+        "desktop-client",
+        "import",
+        "wgqsoakwin11traffic",
+        "C:\\WgQuicTest\\wgq\\userlike.conf"
+      ],
+      "elapsed_ms": 571
+    },
+    {
+      "exit_code": 0,
+      "utc": "2026-10-03T05:05:22.2289606Z",
+      "arguments": [
+        "desktop-client",
+        "up",
+        "wgqsoakwin11traffic"
+      ],
+      "elapsed_ms": 12404
+    },
+    {
+      "exit_code": 0,
+      "utc": "2026-10-03T05:15:49.3723699Z",
+      "arguments": [
+        "desktop-client",
+        "down",
+        "wgqsoakwin11traffic"
+      ],
+      "elapsed_ms": 796
+    }
+  ],
+  "traffic": {
+    "connections": 4,
+    "elapsed_seconds": 600.0049153,
+    "final": true,
+    "longest_delivery_gap_seconds": 40.9121307,
+    "seconds_since_delivery": 0.0221796,
+    "socket_errors": 31,
+    "utc": "2026-10-03T05:15:44.1332929Z",
+    "verified_bytes_per_direction": 1018036224,
+    "jsonl_samples": 601,
+    "total_verified_bytes_both_directions": 2036072448
+  },
+  "recovery": [
+    {
+      "previous_fault": "loss",
+      "clear_host_utc": "2026-10-03T05:08:15.409127+00:00",
+      "first_report_with_new_delivery_guest_utc": "2026-10-03T05:08:15.1315172Z",
+      "first_new_delivery_upper_bound_seconds": 0.600691,
+      "connections_at_report": 1,
+      "socket_errors_at_report": 0
+    },
+    {
+      "previous_fault": "outage",
+      "clear_host_utc": "2026-10-03T05:09:20.422041+00:00",
+      "first_report_with_new_delivery_guest_utc": "2026-10-03T05:09:22.129472Z",
+      "first_new_delivery_upper_bound_seconds": 2.585732,
+      "connections_at_report": 2,
+      "socket_errors_at_report": 3
+    },
+    {
+      "previous_fault": "outage",
+      "clear_host_utc": "2026-10-03T05:10:55.431636+00:00",
+      "first_report_with_new_delivery_guest_utc": "2026-10-03T05:10:56.1296568Z",
+      "first_new_delivery_upper_bound_seconds": 1.576321,
+      "connections_at_report": 3,
+      "socket_errors_at_report": 22
+    },
+    {
+      "previous_fault": "peer_restart_begin",
+      "clear_host_utc": "2026-10-03T05:11:38.059822+00:00",
+      "first_report_with_new_delivery_guest_utc": "2026-10-03T05:11:51.1294883Z",
+      "first_new_delivery_upper_bound_seconds": 13.947967,
+      "connections_at_report": 4,
+      "socket_errors_at_report": 29
+    },
+    {
+      "previous_fault": "loss",
+      "clear_host_utc": "2026-10-03T05:14:35.429193+00:00",
+      "first_report_with_new_delivery_guest_utc": "2026-10-03T05:14:35.1305194Z",
+      "first_new_delivery_upper_bound_seconds": 0.579627,
+      "connections_at_report": 4,
+      "socket_errors_at_report": 29
+    }
+  ],
+  "clock_offset_envelope_seconds": [
+    -0.878300666809082,
+    -0.848583459854126
+  ],
+  "clock_brackets": [
+    {
+      "phase": "clean_start",
+      "host_before_unix": 1791003945.3071237,
+      "guest": {
+        "time": 1791003944.4433079,
+        "monotonic": 2859.5101683,
+        "pid": 7468
+      },
+      "host_after_unix": 1791003945.3198092
+    },
+    {
+      "phase": "loss",
+      "host_before_unix": 1791004035.4006915,
+      "guest": {
+        "time": 1791004034.5434654,
+        "monotonic": 2949.6103673,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004035.421766
+    },
+    {
+      "phase": "clean",
+      "host_before_unix": 1791004095.4097805,
+      "guest": {
+        "time": 1791004094.561197,
+        "monotonic": 3009.6281062,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004095.4388592
+    },
+    {
+      "phase": "outage",
+      "host_before_unix": 1791004155.4179466,
+      "guest": {
+        "time": 1791004154.5519876,
+        "monotonic": 3069.6188495,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004155.426687
+    },
+    {
+      "phase": "clean",
+      "host_before_unix": 1791004160.4228127,
+      "guest": {
+        "time": 1791004159.5569484,
+        "monotonic": 3074.62381,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004160.430295
+    },
+    {
+      "phase": "outage",
+      "host_before_unix": 1791004215.4184682,
+      "guest": {
+        "time": 1791004214.5672665,
+        "monotonic": 3129.6341514,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004215.4408753
+    },
+    {
+      "phase": "clean",
+      "host_before_unix": 1791004255.4323916,
+      "guest": {
+        "time": 1791004254.5696304,
+        "monotonic": 3169.6365038,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004255.4419992
+    },
+    {
+      "phase": "peer_restart_begin",
+      "host_before_unix": 1791004295.3077173,
+      "guest": {
+        "time": 1791004294.4564185,
+        "monotonic": 3209.5233307,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004295.3298638
+    },
+    {
+      "phase": "peer_restart_ready",
+      "host_before_unix": 1791004298.0605943,
+      "guest": {
+        "time": 1791004297.1962821,
+        "monotonic": 3212.2631445,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004298.0675344
+    },
+    {
+      "phase": "loss",
+      "host_before_unix": 1791004375.4259355,
+      "guest": {
+        "time": 1791004374.5680733,
+        "monotonic": 3289.6349367,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004375.438294
+    },
+    {
+      "phase": "clean",
+      "host_before_unix": 1791004475.4299479,
+      "guest": {
+        "time": 1791004474.5763774,
+        "monotonic": 3389.6432743,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004475.4462404
+    },
+    {
+      "host_before_unix": 1791003905.5813498,
+      "guest": {
+        "time": 1791003904.729064,
+        "monotonic": 2819.7959253,
+        "pid": 7468
+      },
+      "host_after_unix": 1791003905.6068203
+    },
+    {
+      "host_before_unix": 1791004565.4882102,
+      "guest": {
+        "time": 1791004564.627595,
+        "monotonic": 3479.6944563,
+        "pid": 7468
+      },
+      "host_after_unix": 1791004565.4950116
+    }
+  ],
+  "fault_events": [
+    {
+      "elapsed_s": 0.0,
+      "utc": "2026-10-03T05:05:45.306641+00:00",
+      "phase": "clean_start"
+    },
+    {
+      "elapsed_s": 90.093,
+      "utc": "2026-10-03T05:07:15.399900+00:00",
+      "phase": "loss"
+    },
+    {
+      "elapsed_s": 150.102,
+      "utc": "2026-10-03T05:08:15.409127+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 210.111,
+      "utc": "2026-10-03T05:09:15.417145+00:00",
+      "phase": "outage"
+    },
+    {
+      "elapsed_s": 215.115,
+      "utc": "2026-10-03T05:09:20.422041+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 270.111,
+      "utc": "2026-10-03T05:10:15.417695+00:00",
+      "phase": "outage"
+    },
+    {
+      "elapsed_s": 310.125,
+      "utc": "2026-10-03T05:10:55.431636+00:00",
+      "phase": "clean"
+    },
+    {
+      "elapsed_s": 350.0,
+      "utc": "2026-10-03T05:11:35.306772+00:00",
+      "phase": "peer_restart_begin"
+    },
+    {
+      "elapsed_s": 352.753,
+      "utc": "2026-10-03T05:11:38.059822+00:00",
+      "phase": "peer_restart_ready"
+    },
+    {
+      "elapsed_s": 430.119,
+      "utc": "2026-10-03T05:12:55.425146+00:00",
+      "phase": "loss"
+    },
+    {
+      "elapsed_s": 530.123,
+      "utc": "2026-10-03T05:14:35.429193+00:00",
+      "phase": "clean"
+    }
+  ],
+  "resources": {
+    "wg-quic": {
+      "samples": 120,
+      "pids": [
+        5592
+      ],
+      "first_utc": "2026-10-03T05:05:44.0038918Z",
+      "last_utc": "2026-10-03T05:15:43.3480882Z",
+      "WorkingSet64": {
+        "first": 74903552,
+        "last": 56946688,
+        "min": 49201152,
+        "max": 88076288
+      },
+      "PrivateMemorySize64": {
+        "first": 69079040,
+        "last": 84086784,
+        "min": 69079040,
+        "max": 84086784
+      },
+      "HandleCount": {
+        "first": 236,
+        "last": 249,
+        "min": 236,
+        "max": 249
+      },
+      "CPU": {
+        "first": 0.546875,
+        "last": 516.296875,
+        "min": 0.546875,
+        "max": 516.296875
+      }
+    },
+    "wg-quic-manager": {
+      "samples": 120,
+      "pids": [
+        4272
+      ],
+      "first_utc": "2026-10-03T05:05:44.0038918Z",
+      "last_utc": "2026-10-03T05:15:43.3480882Z",
+      "WorkingSet64": {
+        "first": 14979072,
+        "last": 14856192,
+        "min": 14786560,
+        "max": 14979072
+      },
+      "PrivateMemorySize64": {
+        "first": 49369088,
+        "last": 49311744,
+        "min": 49311744,
+        "max": 49377280
+      },
+      "HandleCount": {
+        "first": 232,
+        "last": 226,
+        "min": 226,
+        "max": 232
+      },
+      "CPU": {
+        "first": 0.359375,
+        "last": 0.359375,
+        "min": 0.359375,
+        "max": 0.359375
+      }
+    },
+    "wg-quic-quick": {
+      "samples": 120,
+      "pids": [
+        7140
+      ],
+      "first_utc": "2026-10-03T05:05:44.0038918Z",
+      "last_utc": "2026-10-03T05:15:43.3480882Z",
+      "WorkingSet64": {
+        "first": 53579776,
+        "last": 19488768,
+        "min": 19324928,
+        "max": 53579776
+      },
+      "PrivateMemorySize64": {
+        "first": 50880512,
+        "last": 50814976,
+        "min": 50692096,
+        "max": 50880512
+      },
+      "HandleCount": {
+        "first": 310,
+        "last": 304,
+        "min": 304,
+        "max": 310
+      },
+      "CPU": {
+        "first": 0.734375,
+        "last": 0.75,
+        "min": 0.734375,
+        "max": 0.75
+      }
+    }
+  },
+  "vpn_observation_id_before": "56230a1f624bbfd4be72ee67d38bf59f",
+  "vpn_observation_id_after": "56230a1f624bbfd4be72ee67d38bf59f",
+  "session_ids_before": [
+    1
+  ],
+  "session_ids_after": [
+    9
+  ],
+  "traffic_stderr": "",
+  "error_log": null,
+  "limits": [
+    "Windows 11 virtual machine; 10 minutes is not evidence of indefinite stability.",
+    "One-second delivery reports yield a conservative recovery upper bound using the observed host/guest clock-offset envelope, not exact first-packet timing.",
+    "Default payload cap is 2 MiB/s per direction; this is a corruption and recovery test, not maximum throughput.",
+    "Faults affect only the isolated Linux peer egress; the Windows tunnel is never manually restarted."
+  ],
+  "raw_artifact_root": "dist/stability-2026-10-03/windows11",
+  "application_reconnects": 3,
+  "vpn_restarted": false,
+  "socket_error_interpretation": {
+    "total": 31,
+    "observed_before_duration_deadline": 29,
+    "additional_in_final_deadline_report": 2,
+    "payload_mismatches": 0,
+    "note": "Two errors appeared only between the 600.000664s periodic report and 600.004915s final report, consistent with the configured I/O deadline and cancellation boundary; individual error strings were not retained."
+  },
+  "recent_sessions_after": [
+    {
+      "session_id": 6,
+      "state": "closed",
+      "close_reason": "handshake_timeout",
+      "error_class": "quic_handshake_timeout",
+      "established_at": null,
+      "closed_at": "2026-10-03T13:10:50.9612865+08:00",
+      "replaced_by_session_id": 7
+    },
+    {
+      "session_id": 7,
+      "state": "closed",
+      "close_reason": "handshake_timeout",
+      "error_class": "quic_handshake_timeout",
+      "established_at": null,
+      "closed_at": "2026-10-03T13:10:55.1658297+08:00",
+      "replaced_by_session_id": 8
+    },
+    {
+      "session_id": 8,
+      "state": "closed",
+      "close_reason": "idle_timeout",
+      "error_class": "quic_idle_timeout",
+      "established_at": "2026-10-03T13:10:55.3581271+08:00",
+      "closed_at": "2026-10-03T13:11:49.5904649+08:00",
+      "replaced_by_session_id": 9
+    }
+  ],
+  "final_quic_fec_counters": {
+    "queue_drops": 0,
+    "fec_data_tx": 1317,
+    "fec_parity_tx": 502,
+    "fec_raw_lost": 13254,
+    "fec_recovered": 11616,
+    "fec_unrecovered": 1638,
+    "active_sessions": 1,
+    "quic_packets_lost": 0,
+    "quic_spurious_loss_packets": 0,
+    "quic_pto_count": 1
+  }
+}
