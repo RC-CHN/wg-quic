@@ -2291,6 +2291,7 @@ func (s *session) sendLoop() {
 }
 
 func (s *session) receiveLoop() {
+	defer s.state.reassembly.discardSession(s.id)
 	select {
 	case <-s.ready:
 	case <-s.ctx.Done():
@@ -2383,6 +2384,7 @@ func (s *session) receiveLoop() {
 			}
 			handleDatagram(received.datagram)
 		case now := <-expiry.C:
+			s.state.reassembly.expire(now)
 			s.sendFECFeedback(s.fecDecoder.Expire(now))
 			continue
 		case <-s.ctx.Done():

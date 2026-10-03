@@ -1,6 +1,7 @@
 package armorbind
 
 import (
+	"container/heap"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ const (
 	maxFragments    = 128
 	maxDatagramSize = 65535
 	reassemblyTTL   = 3 * time.Second
+	maxReassemblies = 2048
 )
 
 var frameMagic = [4]byte{'W', 'G', 'Q', '1'}
@@ -123,15 +125,19 @@ type reassemblyKey struct {
 
 type reassembly struct {
 	created time.Time
+	key     reassemblyKey
+	index   int
 	total   uint32
 	count   uint16
 	seen    int
+	bytes   int
 	shards  [][]byte
 }
 
 type reassembler struct {
 	mu     sync.Mutex
 	groups map[reassemblyKey]*reassembly
+	expiry reassemblyExpiry
 }
 
 func newReassembler() *reassembler {
@@ -189,38 +195,92 @@ func (r *reassembler) add(now time.Time, sessionID uint64, f fragment, owned boo
 	// mutex per frame.
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for key, group := range r.groups {
-		if now.Sub(group.created) > reassemblyTTL {
-			delete(r.groups, key)
-		}
-	}
-	if len(r.groups) >= 2048 {
-		return nil, errors.New("too many incomplete datagrams")
-	}
+	r.expireLocked(now)
 	key := reassemblyKey{sessionID: sessionID, packetID: f.packetID}
 	group := r.groups[key]
 	if group == nil {
-		group = &reassembly{created: now, total: f.total, count: f.count, shards: make([][]byte, f.count)}
+		if len(r.groups) >= maxReassemblies {
+			return nil, errors.New("too many incomplete datagrams")
+		}
+		group = &reassembly{created: now, key: key, total: f.total, count: f.count, shards: make([][]byte, f.count)}
 		r.groups[key] = group
+		heap.Push(&r.expiry, group)
 	}
 	if group.total != f.total || group.count != f.count {
-		delete(r.groups, key)
+		r.removeLocked(group)
 		return nil, errors.New("inconsistent fragment metadata")
 	}
 	if group.shards[f.index] == nil {
+		// Every remaining fragment must contain at least one byte. Reject an
+		// impossible total before retaining payloads or allocating output.
+		if group.bytes+len(f.data)+int(group.count)-group.seen-1 > int(group.total) {
+			r.removeLocked(group)
+			return nil, errors.New("fragment payload exceeds total datagram size")
+		}
 		group.shards[f.index] = append([]byte(nil), f.data...)
 		group.seen++
+		group.bytes += len(f.data)
 	}
 	if group.seen != int(group.count) {
 		return nil, nil
+	}
+	r.removeLocked(group)
+	if group.bytes != int(group.total) {
+		return nil, errors.New("reassembled datagram length mismatch")
 	}
 	packet := acquireReassemblyBuffer(int(group.total))[:0]
 	for _, shard := range group.shards {
 		packet = append(packet, shard...)
 	}
-	delete(r.groups, key)
-	if len(packet) != int(group.total) {
-		return nil, errors.New("reassembled datagram length mismatch")
-	}
 	return packet, nil
+}
+
+// Expiry is ordered separately from the lookup map. Incomplete packets left
+// by loss must not make each subsequent fragment scan the whole table.
+type reassemblyExpiry []*reassembly
+
+func (q reassemblyExpiry) Len() int           { return len(q) }
+func (q reassemblyExpiry) Less(i, j int) bool { return q[i].created.Before(q[j].created) }
+func (q reassemblyExpiry) Swap(i, j int) {
+	q[i], q[j] = q[j], q[i]
+	q[i].index, q[j].index = i, j
+}
+func (q *reassemblyExpiry) Push(value any) {
+	group := value.(*reassembly)
+	group.index = len(*q)
+	*q = append(*q, group)
+}
+func (q *reassemblyExpiry) Pop() any {
+	last := len(*q) - 1
+	group := (*q)[last]
+	(*q)[last] = nil
+	*q = (*q)[:last]
+	return group
+}
+
+func (r *reassembler) removeLocked(group *reassembly) {
+	delete(r.groups, group.key)
+	heap.Remove(&r.expiry, group.index)
+}
+
+func (r *reassembler) expireLocked(now time.Time) {
+	for len(r.expiry) != 0 && now.Sub(r.expiry[0].created) > reassemblyTTL {
+		r.removeLocked(r.expiry[0])
+	}
+}
+
+func (r *reassembler) expire(now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.expireLocked(now)
+}
+
+func (r *reassembler) discardSession(sessionID uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, group := range r.groups {
+		if key.sessionID == sessionID {
+			r.removeLocked(group)
+		}
+	}
 }
