@@ -5,6 +5,7 @@ param(
     [string] $TunnelName = 'wgqsoak',
     [string] $TargetAddress = '10.89.0.2',
     [ValidateRange(1, 1000)][int] $Cycles = 20,
+    [string] $DnsProbeSuffix = '',
     [switch] $UseDesktopBroker
 )
 
@@ -12,6 +13,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($TunnelName -notmatch '^wgqsoak[a-zA-Z0-9_-]*$') {
     throw 'Use a dedicated tunnel name beginning with wgqsoak.'
+}
+if ($DnsProbeSuffix -and $DnsProbeSuffix -notmatch '^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.test\.invalid$') {
+    throw 'DNS probes must use an isolated name ending in .test.invalid.'
 }
 $quick = Join-Path (Resolve-Path $BinDirectory).Path 'wg-quic-quick.exe'
 $core = Join-Path (Resolve-Path $BinDirectory).Path 'wg-quic.exe'
@@ -145,6 +149,24 @@ try {
                 throw "The effective source address and route to $TargetAddress must belong to $TunnelName."
             }
             $row.route_check_ms = $routeWatch.ElapsedMilliseconds
+            if ($DnsProbeSuffix) {
+                # A unique name bypasses the cache. Deliberately omit -Server:
+                # the operating system must select the configured tunnel DNS.
+                $queryName = ([Guid]::NewGuid().ToString('N') + '.' + $DnsProbeSuffix)
+                $dnsWatch = [Diagnostics.Stopwatch]::StartNew()
+                $addresses = @()
+                try {
+                    $answers = @(Resolve-DnsName -Name $queryName -Type A -DnsOnly -NoHostsFile)
+                    $addresses = @($answers | Where-Object { $_.Type -eq 'A' } | ForEach-Object { $_.IPAddress })
+                } finally {
+                    @{ name = $queryName; elapsed_ms = $dnsWatch.ElapsedMilliseconds; addresses = $addresses;
+                       expected_address = '203.0.113.73'; explicit_server = $false } |
+                        ConvertTo-Json | Set-Content (Join-Path $OutputDirectory "cycle-$cycle-dns.json")
+                }
+                if ($addresses.Count -ne 1 -or $addresses[0] -ne '203.0.113.73') {
+                    throw "System DNS did not return the isolated responder address for $queryName."
+                }
+            }
             $row.success = $true
         } catch {
             $row.error = $_.Exception.Message
