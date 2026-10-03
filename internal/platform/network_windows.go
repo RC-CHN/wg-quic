@@ -13,10 +13,11 @@ type windowsOperation struct {
 	undo  string
 	// Native rollback keys describe only the object created by this operation.
 	// The interface identity is captured separately before any apply runs.
-	address netip.Prefix
-	route   netip.Prefix
-	dns     bool
-	mtu     uint32
+	address   netip.Prefix
+	route     netip.Prefix
+	dns       bool
+	dnsValues []string
+	mtu       uint32
 }
 
 func windowsNetworkOperations(name string, cfg *config.Config) ([]windowsOperation, error) {
@@ -132,7 +133,7 @@ func windowsDNSOperation(base string, values []string) (windowsOperation, error)
 	undo := base +
 		"Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue;" +
 		"Set-DnsClient -InterfaceIndex $ifIndex -ResetConnectionSpecificSuffix -ErrorAction SilentlyContinue"
-	return windowsOperation{apply: apply.String(), undo: undo, dns: true}, nil
+	return windowsOperation{apply: apply.String(), undo: undo, dns: true, dnsValues: append([]string(nil), values...)}, nil
 }
 
 func windowsPowerShellBase(name string) string {

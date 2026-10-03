@@ -14,6 +14,7 @@ type windowsNetworkSystem interface {
 	DeleteRoute(context.Context, windowsRouteKey) error
 	DeleteAddress(context.Context, uint32, uint64, netip.Addr) error
 	ResetDNS(context.Context, uint32, uint64) error
+	ApplyDNS(context.Context, uint32, uint64, []string) (bool, error)
 	ConfigureInterface(context.Context, uint32, uint64, uint32) error
 	CreateAddress(context.Context, uint32, uint64, netip.Prefix) error
 	CreateRoute(context.Context, windowsSelectedRoute) error
@@ -53,6 +54,12 @@ func (s *windowsNetworkState) apply(ctx context.Context, operations []windowsOpe
 				err = system.CreateRoute(ctx, windowsSelectedRoute{Key: key})
 			}
 			applied = err == nil
+		case operation.dns:
+			applied, err = system.ApplyDNS(ctx, s.compartmentID, s.interfaceLUID, operation.dnsValues)
+			if applied || !errors.Is(err, errWindowsDNSAPIUnavailable) {
+				break
+			}
+			fallthrough
 		default:
 			var completed []int
 			completed, err = system.RunBatch(ctx, s.name, s.interfaceLUID, []string{operation.apply}, false)

@@ -22,6 +22,7 @@ import (
 type fakeWindowsNetworkSystem struct {
 	completed    []int
 	applyErr     error
+	dnsApplied   bool
 	failures     map[string]error
 	calls        []string
 	luids        []uint64
@@ -59,6 +60,11 @@ func (f *fakeWindowsNetworkSystem) ResetDNS(ctx context.Context, compartment uin
 	f.compartments = append(f.compartments, compartment)
 	f.calls = append(f.calls, "dns")
 	return errors.Join(ctx.Err(), f.failures["dns"])
+}
+
+func (f *fakeWindowsNetworkSystem) ApplyDNS(ctx context.Context, compartment uint32, luid uint64, values []string) (bool, error) {
+	err := f.applyNative(ctx, compartment, luid, "apply-dns")
+	return f.dnsApplied || err == nil, err
 }
 
 func (f *fakeWindowsNetworkSystem) ConfigureInterface(ctx context.Context, compartment uint32, luid uint64, mtu uint32) error {

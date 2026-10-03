@@ -11,7 +11,8 @@ import (
 )
 
 func TestWindowsNetworkApplyPreservesConfirmedDNSOnProcessFailure(t *testing.T) {
-	system := &fakeWindowsNetworkSystem{completed: []int{0}, applyErr: context.DeadlineExceeded}
+	system := &fakeWindowsNetworkSystem{completed: []int{0}, applyErr: context.DeadlineExceeded,
+		failures: map[string]error{"apply-dns": errWindowsDNSAPIUnavailable}}
 	state := &windowsNetworkState{name: "wg0", interfaceLUID: 77, compartmentID: 9}
 	operations := []windowsOperation{
 		{mtu: 1280},
@@ -26,7 +27,7 @@ func TestWindowsNetworkApplyPreservesConfirmedDNSOnProcessFailure(t *testing.T) 
 	if err := state.rollback(t.Context(), system); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"configure:1280", "create-address:10.77.0.6/24", "apply", "dns", "address:10.77.0.6"}
+	want := []string{"configure:1280", "create-address:10.77.0.6/24", "apply-dns", "apply", "dns", "address:10.77.0.6"}
 	if !reflect.DeepEqual(system.calls, want) {
 		t.Fatalf("lost confirmed DNS ownership: %v", system.calls)
 	}
