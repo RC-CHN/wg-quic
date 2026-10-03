@@ -19,6 +19,7 @@ import (
 var (
 	windowsIPHLPAPI                    = windows.NewLazySystemDLL("iphlpapi.dll")
 	windowsProcConvertAliasToLUID      = windowsIPHLPAPI.NewProc("ConvertInterfaceAliasToLuid")
+	windowsProcConvertLUIDToIndex      = windowsIPHLPAPI.NewProc("ConvertInterfaceLuidToIndex")
 	windowsProcCreateRoute             = windowsIPHLPAPI.NewProc("CreateIpForwardEntry2")
 	windowsProcDeleteRoute             = windowsIPHLPAPI.NewProc("DeleteIpForwardEntry2")
 	windowsProcGetBestRoute            = windowsIPHLPAPI.NewProc("GetBestRoute2")
@@ -52,6 +53,26 @@ func windowsInterfaceLUID(alias string) (uint64, error) {
 		return 0, fmt.Errorf("resolve Windows interface %q LUID: empty LUID", alias)
 	}
 	return luid, nil
+}
+
+func windowsInterfaceIndex(alias string) (uint32, error) {
+	luid, err := windowsInterfaceLUID(alias)
+	if err != nil {
+		return 0, err
+	}
+	var index uint32
+	status, _, _ := syscall.SyscallN(
+		windowsProcConvertLUIDToIndex.Addr(),
+		uintptr(unsafe.Pointer(&luid)),
+		uintptr(unsafe.Pointer(&index)),
+	)
+	if status != 0 {
+		return 0, fmt.Errorf("resolve Windows interface %q index: %w", alias, syscall.Errno(status))
+	}
+	if index == 0 {
+		return 0, fmt.Errorf("resolve Windows interface %q index: empty index", alias)
+	}
+	return index, nil
 }
 
 func (windowsNativeRouteSystem) BestRoute(
