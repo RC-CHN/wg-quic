@@ -270,7 +270,7 @@
                   </section>
                   <section class="metric">
                     <span>Latency</span><strong id="detail-rtt">—</strong
-                    ><small>Round-trip time</small>
+                    ><small>QUIC round-trip time</small>
                   </section>
                 </div>
                 <section class="peer-panel">
@@ -326,7 +326,24 @@
                         <dt>Pacing rate</dt>
                         <dd id="detail-pacing">—</dd>
                       </div>
+                      <div>
+                        <dt>Queued to send</dt>
+                        <dd id="detail-send-queued">—</dd>
+                      </div>
+                      <div>
+                        <dt>Current transport queue wait</dt>
+                        <dd id="detail-quic-wait">—</dd>
+                      </div>
+                      <div>
+                        <dt>Peak data queue wait</dt>
+                        <dd id="detail-send-wait">—</dd>
+                      </div>
+                      <div>
+                        <dt>Expired queued packets</dt>
+                        <dd id="detail-send-expired">—</dd>
+                      </div>
                     </dl>
+                    <p class="field-hint">Queue waits are local. Peak wait and expired packets cover this connection.</p>
                   </section>
                   <section class="detail-card">
                     <h3>Adaptive FEC</h3>

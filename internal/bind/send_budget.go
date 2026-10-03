@@ -63,6 +63,10 @@ func (s *session) releaseSendBytes(packet outboundPacket) {
 
 func (s *session) recordSendDrop(reason string) {
 	b := s.endpoint.owner
+	if reason == "send_queue_expired" {
+		b.stats.sendQueueExpired.Add(1)
+		s.stats.sendQueueExpired.Add(1)
+	}
 	b.stats.queueDrops.Add(1)
 	s.stats.queueDrops.Add(1)
 	if s.claimQueueDropEvent(time.Now()) {

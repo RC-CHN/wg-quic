@@ -10,6 +10,7 @@ import {
   formatFECRecovery,
   formatHandshakeAge,
   formatRTT,
+  formatQueueWait,
   managementErrorMessage,
   managementServiceDisplay,
   tunnelDisplayState,
@@ -20,6 +21,13 @@ const tunnel = (name: string, running = false): TunnelView => ({
   name,
   running,
   configPath: `/etc/wg-quic/${name}.conf`,
+});
+
+test('queue wait distinguishes an empty queue from an unsupported observation', () => {
+  assert.equal(formatQueueWait(), '—');
+  assert.equal(formatQueueWait(0), '0 ms');
+  assert.equal(formatQueueWait(250_000), '250 ms');
+  assert.equal(formatQueueWait(Number.NaN), '—');
 });
 
 test('selection survives refresh and falls back deterministically', () => {

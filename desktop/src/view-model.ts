@@ -188,6 +188,13 @@ export function formatRTT(microseconds = 0): string {
     : "—";
 }
 
+// An empty local queue has a measured zero wait; an older core may not
+// expose this observation at all. Keep those two states distinguishable.
+export function formatQueueWait(microseconds?: number): string {
+  if (microseconds === undefined || !Number.isFinite(microseconds) || microseconds < 0) return '—';
+  return microseconds === 0 ? '0 ms' : formatRTT(microseconds);
+}
+
 export function formatHandshakeAge(
   timestamp?: number,
   now = Date.now(),

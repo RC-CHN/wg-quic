@@ -26,6 +26,7 @@ import {
   formatBytes,
   formatFECRecovery,
   formatRTT,
+  formatQueueWait,
   managementErrorMessage,
   managementServiceDisplay,
   tunnelDisplayState,
@@ -312,6 +313,11 @@ function renderDetail(tunnel?: TunnelView): void {
     formatBitRate(stats?.quic_bandwidth_estimate_bps),
   );
   setText('detail-pacing', formatBitRate(stats?.quic_pacing_rate_bps));
+  setText('detail-send-queued', stats?.send_queue_bytes !== undefined && stats.quic_datagram_send_queue_bytes !== undefined
+    ? formatBytes(stats.send_queue_bytes + stats.quic_datagram_send_queue_bytes) : '—');
+  setText('detail-quic-wait', formatQueueWait(stats?.quic_datagram_send_queue_age_us));
+  setText('detail-send-wait', formatQueueWait(stats?.send_queue_delay_max_us));
+  setText('detail-send-expired', stats?.send_queue_expired?.toLocaleString() ?? '—');
   setText(
     'detail-fec-recovered',
     stats ? (stats.fec_recovered || 0).toLocaleString() : '—',

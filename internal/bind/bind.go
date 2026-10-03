@@ -213,6 +213,8 @@ type bindStats struct {
 	wireRxPackets            atomic.Uint64
 	wireRxBytes              atomic.Uint64
 	queueDrops               atomic.Uint64
+	sendQueueExpired         atomic.Uint64
+	sendDelayMaxUs           atomic.Uint64
 	fecDataTx                atomic.Uint64
 	fecParityTx              atomic.Uint64
 	fecRawLost               atomic.Uint64
@@ -222,20 +224,21 @@ type bindStats struct {
 }
 
 type sessionCounters struct {
-	wgTxPackets    atomic.Uint64
-	wgTxBytes      atomic.Uint64
-	wgRxPackets    atomic.Uint64
-	wgRxBytes      atomic.Uint64
-	wireTxPackets  atomic.Uint64
-	wireTxBytes    atomic.Uint64
-	wireRxPackets  atomic.Uint64
-	wireRxBytes    atomic.Uint64
-	queueDrops     atomic.Uint64
-	fecDataTx      atomic.Uint64
-	fecParityTx    atomic.Uint64
-	fecRawLost     atomic.Uint64
-	fecRecovered   atomic.Uint64
-	fecUnrecovered atomic.Uint64
+	wgTxPackets      atomic.Uint64
+	wgTxBytes        atomic.Uint64
+	wgRxPackets      atomic.Uint64
+	wgRxBytes        atomic.Uint64
+	wireTxPackets    atomic.Uint64
+	wireTxBytes      atomic.Uint64
+	wireRxPackets    atomic.Uint64
+	wireRxBytes      atomic.Uint64
+	queueDrops       atomic.Uint64
+	sendQueueExpired atomic.Uint64
+	fecDataTx        atomic.Uint64
+	fecParityTx      atomic.Uint64
+	fecRawLost       atomic.Uint64
+	fecRecovered     atomic.Uint64
+	fecUnrecovered   atomic.Uint64
 }
 
 type EndpointSessionState string
@@ -478,7 +481,9 @@ func (b *Bind) Stats() telemetry.Stats {
 		WGRxPackets: b.stats.wgRxPackets.Load(), WGRxBytes: b.stats.wgRxBytes.Load(),
 		WireTxPackets: b.stats.wireTxPackets.Load(), WireTxBytes: b.stats.wireTxBytes.Load(),
 		WireRxPackets: b.stats.wireRxPackets.Load(), WireRxBytes: b.stats.wireRxBytes.Load(),
-		QueueDrops: b.stats.queueDrops.Load(), FECDataTx: b.stats.fecDataTx.Load(),
+		SendQueueExpired:    b.stats.sendQueueExpired.Load(),
+		SendQueueDelayMaxUs: b.stats.sendDelayMaxUs.Load(),
+		QueueDrops:          b.stats.queueDrops.Load(), FECDataTx: b.stats.fecDataTx.Load(),
 		FECParityTx: b.stats.fecParityTx.Load(), FECRawLost: b.stats.fecRawLost.Load(),
 		FECRecovered: b.stats.fecRecovered.Load(), FECUnrecovered: b.stats.fecUnrecovered.Load(),
 		ActiveSessions:           b.stats.activeSessions.Load(),
@@ -812,6 +817,9 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 	state.mu.Unlock()
 	for _, sess := range sessions {
 		stats.SendQueueDepth += uint64(len(sess.send))
+		stats.SendQueueBytes += uint64(max(0, sess.sendBytes.Load()))
+		stats.SendQueueBudgetBytes += uint64(sess.sendBudgetBytes.Load())
+		stats.SendQueueDelayMaxUs = max(stats.SendQueueDelayMaxUs, sess.sendDelayMaxUs.Load())
 		stats.PriorityQueueDepth += uint64(len(sess.priority))
 		stats.ControlQueueDepth += uint64(len(sess.control))
 		if sess.fecEncoder != nil {
@@ -857,6 +865,9 @@ func (b *Bind) addQUICStats(stats *telemetry.Stats) {
 			current.CongestionModelState,
 		)
 		stats.QUICDatagramSendQueueLen += current.DatagramSendQueueLen
+		stats.QUICDatagramSendQueueBytes += current.DatagramSendQueueBytes
+		stats.QUICDatagramSendQueueBudget += current.DatagramSendQueueBudget
+		stats.QUICDatagramSendQueueAgeUs = max(stats.QUICDatagramSendQueueAgeUs, uint64(current.DatagramSendQueueAge/time.Microsecond))
 		stats.QUICDatagramRcvQueueLen += current.DatagramRcvQueueLen
 		stats.QUICDatagramRcvQueueDrops += current.DatagramRcvQueueDrops
 		stats.QUICDatagramRcvQueueHighWater = max(
@@ -1740,6 +1751,7 @@ type session struct {
 	sendBytes          atomic.Int64
 	sendBudgetBytes    atomic.Int64
 	sendAgeNanos       atomic.Int64
+	sendDelayMaxUs     atomic.Uint64
 	priority           chan outboundPacket
 	control            chan []byte
 	mu                 sync.Mutex
@@ -1837,7 +1849,11 @@ func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
 		WGRxPackets: s.stats.wgRxPackets.Load(), WGRxBytes: s.stats.wgRxBytes.Load(),
 		WireTxPackets: s.stats.wireTxPackets.Load(), WireTxBytes: s.stats.wireTxBytes.Load(),
 		WireRxPackets: s.stats.wireRxPackets.Load(), WireRxBytes: s.stats.wireRxBytes.Load(),
-		QueueDrops: s.stats.queueDrops.Load(), FECDataTx: s.stats.fecDataTx.Load(),
+		SendQueueBytes:       uint64(max(0, s.sendBytes.Load())),
+		SendQueueBudgetBytes: uint64(s.sendBudgetBytes.Load()),
+		SendQueueDelayMaxUs:  s.sendDelayMaxUs.Load(),
+		SendQueueExpired:     s.stats.sendQueueExpired.Load(),
+		QueueDrops:           s.stats.queueDrops.Load(), FECDataTx: s.stats.fecDataTx.Load(),
 		FECParityTx: s.stats.fecParityTx.Load(), FECRawLost: s.stats.fecRawLost.Load(),
 		FECRecovered: s.stats.fecRecovered.Load(), FECUnrecovered: s.stats.fecUnrecovered.Load(),
 		SendQueueDepth: uint64(len(s.send)), PriorityQueueDepth: uint64(len(s.priority)),
@@ -1874,6 +1890,9 @@ func (s *session) telemetry(sampledAt time.Time) telemetry.SessionObservation {
 		stats.QUICFECResidualLossPPM = current.FECResidualLossPPM
 		stats.QUICCongestionModelState = current.CongestionModelState
 		stats.QUICDatagramSendQueueLen = current.DatagramSendQueueLen
+		stats.QUICDatagramSendQueueBytes = current.DatagramSendQueueBytes
+		stats.QUICDatagramSendQueueBudget = current.DatagramSendQueueBudget
+		stats.QUICDatagramSendQueueAgeUs = uint64(current.DatagramSendQueueAge / time.Microsecond)
 		stats.QUICDatagramRcvQueueLen = current.DatagramRcvQueueLen
 		stats.QUICDatagramRcvQueueDrops = current.DatagramRcvQueueDrops
 		stats.QUICDatagramRcvQueueHighWater = current.DatagramRcvQueueHighWater
@@ -2251,6 +2270,16 @@ func (s *session) sendLoop() {
 			budgetUpdated = now
 		}
 		s.releaseSendBytes(packet)
+		if !packet.queuedAt.IsZero() {
+			delay := uint64(max(0, now.Sub(packet.queuedAt).Microseconds()))
+			for _, counter := range []*atomic.Uint64{&s.sendDelayMaxUs, &s.endpoint.owner.stats.sendDelayMaxUs} {
+				for old := counter.Load(); delay > old; old = counter.Load() {
+					if counter.CompareAndSwap(old, delay) {
+						break
+					}
+				}
+			}
+		}
 		if !packet.queuedAt.IsZero() && now.Sub(packet.queuedAt) > s.sendMaxAge() {
 			quiccarrier.ReleaseDatagramSendBuffer(packet.preparedFrame)
 			s.recordSendDrop("send_queue_expired")

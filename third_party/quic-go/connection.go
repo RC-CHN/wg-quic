@@ -877,7 +877,10 @@ type ConnectionStats struct {
 	CongestionModelState uint64
 	// DatagramSendQueueLen is the number of application DATAGRAM frames waiting
 	// to be packed into QUIC packets.
-	DatagramSendQueueLen uint64
+	DatagramSendQueueLen    uint64
+	DatagramSendQueueBytes  uint64
+	DatagramSendQueueBudget uint64
+	DatagramSendQueueAge    time.Duration
 	// DatagramRcvQueueLen is the number of received application DATAGRAMs
 	// waiting for the application.
 	DatagramRcvQueueLen uint64
@@ -896,6 +899,7 @@ type ConnectionEventMetrics = utils.ConnectionEventMetrics
 type ConnectionEvent = utils.ConnectionEvent
 
 func (c *Conn) ConnectionStats() ConnectionStats {
+	queuedBytes, queueBudget, queueAge := c.datagramQueue.SendQueueObservation()
 	return ConnectionStats{
 		MinRTT:        c.rttStats.MinRTT(),
 		LatestRTT:     c.rttStats.LatestRTT(),
@@ -922,6 +926,9 @@ func (c *Conn) ConnectionStats() ConnectionStats {
 		FECResidualLossPPM:        c.connStats.FECResidualLossPPM.Load(),
 		CongestionModelState:      c.connStats.CongestionModelState.Load(),
 		DatagramSendQueueLen:      uint64(c.datagramQueue.Len()),
+		DatagramSendQueueBytes:    uint64(queuedBytes),
+		DatagramSendQueueBudget:   uint64(queueBudget),
+		DatagramSendQueueAge:      queueAge,
 		DatagramRcvQueueLen:       uint64(c.datagramQueue.RcvQueueLen()),
 		DatagramRcvQueueDrops:     c.datagramQueue.RcvQueueDrops(),
 		DatagramRcvQueueHighWater: c.datagramQueue.RcvQueueHighWater(),

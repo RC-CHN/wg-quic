@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
@@ -119,14 +120,20 @@ func (d *ReceivedDatagram) Release() {
 	d.buffer = nil
 }
 
+type queuedDatagram struct {
+	frame    *wire.DatagramFrame
+	queuedAt time.Time
+}
+
 type datagramQueue struct {
 	sendMx        sync.Mutex
-	sendQueue     ringbuffer.RingBuffer[*wire.DatagramFrame]
-	priorityQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
+	sendQueue     ringbuffer.RingBuffer[queuedDatagram]
+	priorityQueue ringbuffer.RingBuffer[queuedDatagram]
 	prioritySent  chan struct{}
 	peeked        *wire.DatagramFrame
 	peekPriority  bool
 	sendBytes     int
+	priorityBytes int
 	// sendBudget is installed before the connection is published. It reads
 	// atomic transport observations, never the controller's mutable state.
 	sendBudget func() int
@@ -195,13 +202,14 @@ func (h *datagramQueue) addContext(ctx context.Context, f *wire.DatagramFrame, p
 			budget = h.sendBudget()
 		}
 		if priority && h.priorityQueue.Len() < 8 {
-			h.priorityQueue.PushBack(f)
+			h.priorityQueue.PushBack(queuedDatagram{frame: f, queuedAt: time.Now()})
+			h.priorityBytes += len(f.Data)
 			h.sendMx.Unlock()
 			h.hasData()
 			return nil
 		}
 		if !priority && h.sendQueue.Len() < maxDatagramSendQueueLen && (h.sendQueue.Empty() || h.sendBytes+len(f.Data) <= budget) {
-			h.sendQueue.PushBack(f)
+			h.sendQueue.PushBack(queuedDatagram{frame: f, queuedAt: time.Now()})
 			h.sendBytes += len(f.Data)
 			h.sendMx.Unlock()
 			h.hasData()
@@ -234,9 +242,9 @@ func (h *datagramQueue) Peek() *wire.DatagramFrame {
 		return h.peeked
 	}
 	if !h.priorityQueue.Empty() {
-		h.peeked, h.peekPriority = h.priorityQueue.PeekFront(), true
+		h.peeked, h.peekPriority = h.priorityQueue.PeekFront().frame, true
 	} else if !h.sendQueue.Empty() {
-		h.peeked, h.peekPriority = h.sendQueue.PeekFront(), false
+		h.peeked, h.peekPriority = h.sendQueue.PeekFront().frame, false
 	}
 	return h.peeked
 }
@@ -245,10 +253,11 @@ func (h *datagramQueue) Pop() {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()
 	if (h.peeked != nil && h.peekPriority) || (h.peeked == nil && !h.priorityQueue.Empty()) {
-		h.priorityQueue.PopFront()
+		f := h.priorityQueue.PopFront()
+		h.priorityBytes -= len(f.frame.Data)
 	} else {
 		f := h.sendQueue.PopFront()
-		h.sendBytes -= len(f.Data)
+		h.sendBytes -= len(f.frame.Data)
 	}
 	h.peeked = nil
 	select {
@@ -422,13 +431,14 @@ func (h *datagramQueue) CloseWithError(e error) {
 	default:
 	}
 	for !h.sendQueue.Empty() {
-		frame := h.sendQueue.PopFront()
+		frame := h.sendQueue.PopFront().frame
 		releaseDatagramSendBuffer(frame.Data)
 		frame.Data = nil
 	}
 	h.sendBytes = 0
+	h.priorityBytes = 0
 	for !h.priorityQueue.Empty() {
-		frame := h.priorityQueue.PopFront()
+		frame := h.priorityQueue.PopFront().frame
 		releaseDatagramSendBuffer(frame.Data)
 		frame.Data = nil
 	}
@@ -439,4 +449,30 @@ func (h *datagramQueue) CloseWithError(e error) {
 	}
 	h.closeErr = e
 	close(h.closed)
+}
+
+// SendQueueObservation reports local application backlog, independently of
+// ACK-based RTT and the congestion controller's inferred path queue delay.
+func (h *datagramQueue) SendQueueObservation() (bytes, budget int, age time.Duration) {
+	h.sendMx.Lock()
+	defer h.sendMx.Unlock()
+	bytes = h.sendBytes + h.priorityBytes
+	budget = maxDatagramSendQueueLen * DatagramSendBufferSize
+	if h.sendBudget != nil {
+		budget = h.sendBudget()
+	}
+	var oldest time.Time
+	if !h.sendQueue.Empty() {
+		oldest = h.sendQueue.PeekFront().queuedAt
+	}
+	if !h.priorityQueue.Empty() {
+		t := h.priorityQueue.PeekFront().queuedAt
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	if !oldest.IsZero() {
+		age = time.Since(oldest)
+	}
+	return
 }

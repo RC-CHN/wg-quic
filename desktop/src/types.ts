@@ -25,6 +25,11 @@ export interface RuntimeStats {
   wire_rx_packets: number;
   wire_rx_bytes: number;
   queue_drops: number;
+  send_queue_bytes?: number;
+  send_queue_delay_max_us?: number;
+  send_queue_expired?: number;
+  quic_datagram_send_queue_bytes?: number;
+  quic_datagram_send_queue_age_us?: number;
   fec_data_tx: number;
   fec_parity_tx: number;
   fec_raw_lost: number;

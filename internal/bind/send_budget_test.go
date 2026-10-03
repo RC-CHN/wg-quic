@@ -68,6 +68,10 @@ func TestExpiredDataIsDiscardedBeforeFECWithoutClosingSession(t *testing.T) {
 	if s.stats.queueDrops.Load() != 1 || s.sendBytes.Load() != 0 || s.ctx.Err() != nil {
 		t.Fatalf("drop must release admission and retain session: drops=%d bytes=%d err=%v", s.stats.queueDrops.Load(), s.sendBytes.Load(), s.ctx.Err())
 	}
+	stats := a.Stats()
+	if stats.SendQueueExpired != 1 || stats.SendQueueDelayMaxUs < 3_000_000 || stats.SendQueueBytes != 0 {
+		t.Fatalf("missing expired backlog diagnostics: %+v", stats)
+	}
 }
 
 func TestSendBudgetTracksCapacityAndBoundsConcurrentAdmission(t *testing.T) {

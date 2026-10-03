@@ -7,7 +7,27 @@ import (
 	"github.com/stretchr/testify/require"
 	"testing"
 	"testing/synctest"
+	"time"
 )
+
+func TestQueueObservationIncludesReservedControlAndResetsWhenDrained(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		q := newDatagramQueue(func() {}, utils.DefaultLogger)
+		q.sendBudget = func() int { return 4800 }
+		require.NoError(t, q.Add(&wire.DatagramFrame{Data: []byte("data")}))
+		time.Sleep(25 * time.Millisecond)
+		require.NoError(t, q.addContext(context.Background(), &wire.DatagramFrame{Data: []byte("ctrl")}, true))
+		bytes, budget, age := q.SendQueueObservation()
+		require.Equal(t, 8, bytes)
+		require.Equal(t, 4800, budget)
+		require.Equal(t, 25*time.Millisecond, age)
+		q.Pop()
+		q.Pop()
+		bytes, _, age = q.SendQueueObservation()
+		require.Zero(t, bytes)
+		require.Zero(t, age)
+	})
+}
 
 func TestPriorityDatagramPassesBlockedDataAndPreservesPinnedPeek(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
