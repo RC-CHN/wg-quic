@@ -42,49 +42,7 @@ func (s *session) receiveLoop() {
 			}
 		}
 	}()
-	handleDatagram := func(datagram quiccarrier.ReceivedDatagram) {
-		defer datagram.Release()
-		now := time.Now()
-		wirePacket := datagram.Data
-		previousRemote := s.currentRemoteAddr()
-		if datagram.RemoteAddr != previousRemote {
-			nextRemote := datagram.RemoteAddr
-			s.remoteAddr.Store(&nextRemote)
-			if previousRemote.IsValid() {
-				s.endpoint.owner.recordSessionEventAt(
-					s.id, s.generation, telemetry.SessionEventEndpointMoved,
-					"authenticated_path_observed", now,
-					&telemetry.SessionEventMetrics{Endpoint: previousRemote.String()},
-					&telemetry.SessionEventMetrics{Endpoint: datagram.RemoteAddr.String()},
-				)
-			}
-		}
-		receiveEndpoint := s.endpointForAddrPort(datagram.RemoteAddr)
-		s.endpoint.owner.stats.wireRxPackets.Add(1)
-		s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
-		s.stats.wireRxPackets.Add(1)
-		s.stats.wireRxBytes.Add(uint64(len(wirePacket)))
-		result, err := s.fecDecoder.Handle(now, wirePacket)
-		if err != nil {
-			return
-		}
-		if result.Handled {
-			if result.ObservedFeedback != nil && s.fecEncoder != nil {
-				s.fecEncoder.Observe(*result.ObservedFeedback)
-				qconn.ObserveFECFeedback(
-					uint64(result.ObservedFeedback.Total),
-					uint64(result.ObservedFeedback.Missing),
-					uint64(result.ObservedFeedback.Recovered),
-				)
-			}
-			s.sendFECFeedback(result.SendFeedback)
-			for _, frame := range result.Frames {
-				s.deliverFrame(frame, true, receiveEndpoint, now)
-			}
-			return
-		}
-		s.deliverFrame(wirePacket, false, receiveEndpoint, now)
-	}
+
 	expiry := time.NewTicker(fecExpiryPoll)
 	defer expiry.Stop()
 	for {
@@ -102,7 +60,7 @@ func (s *session) receiveLoop() {
 				}
 				return
 			}
-			handleDatagram(received.datagram)
+			s.handleReceivedDatagram(qconn, received.datagram)
 		case now := <-expiry.C:
 			s.state.reassembly.expire(now)
 			s.sendFECFeedback(s.fecDecoder.Expire(now))
@@ -113,17 +71,23 @@ func (s *session) receiveLoop() {
 	}
 }
 
-// endpointForRemote snapshots the live QUIC path for the WireGuard packet
+// endpointForAddrPort snapshots the live QUIC path for the WireGuard packet
 // being delivered. quic-go can migrate an established connection after a NAT
 // rebinding, while the endpoint created by Accept retains the address of the
 // initial path. WireGuard must receive the new immutable address so an
 // authenticated packet updates its roaming state and status output without
 // changing the session's configured/reconnect identity.
 func (s *session) endpointForAddrPort(remote netip.AddrPort) *receiveEndpoint {
+	return s.endpointForIngress(remote, s.endpoint.owner.receiveSequence.Add(1))
+}
+
+// endpointForIngress materializes an immutable snapshot using the sequence
+// reserved before FEC decoding. Datagrams emitting no frame need no snapshot.
+func (s *session) endpointForIngress(remote netip.AddrPort, sequence uint64) *receiveEndpoint {
 	remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 	return &receiveEndpoint{
 		owner: s.endpoint.owner, addr: remote,
-		receiveSequence: s.endpoint.owner.receiveSequence.Add(1),
+		receiveSequence: sequence,
 		session:         s,
 		route:           s.receiveRoute,
 	}
@@ -197,4 +161,56 @@ func (s *session) deliverFrame(frame []byte, owned bool, endpoint *receiveEndpoi
 		}
 		rp.dispose()
 	}
+}
+
+// handleReceivedDatagram consumes one owned QUIC datagram.
+func (s *session) handleReceivedDatagram(qconn *quiccarrier.Connection, datagram quiccarrier.ReceivedDatagram) {
+	defer datagram.Release()
+	now := time.Now()
+	wirePacket := datagram.Data
+	previousRemote := s.currentRemoteAddr()
+	if datagram.RemoteAddr != previousRemote {
+		nextRemote := datagram.RemoteAddr
+		s.remoteAddr.Store(&nextRemote)
+		if previousRemote.IsValid() {
+			s.endpoint.owner.recordSessionEventAt(
+				s.id, s.generation, telemetry.SessionEventEndpointMoved,
+				"authenticated_path_observed", now,
+				&telemetry.SessionEventMetrics{Endpoint: previousRemote.String()},
+				&telemetry.SessionEventMetrics{Endpoint: datagram.RemoteAddr.String()},
+			)
+		}
+	}
+	// Reserve ingress identity before decoding: a concurrent configuration
+	// readiness barrier must still exclude this datagram. Feedback, duplicate,
+	// parity-only and invalid FEC packets need no heap-allocated endpoint.
+	sequence := s.endpoint.owner.receiveSequence.Add(1)
+	s.endpoint.owner.stats.wireRxPackets.Add(1)
+	s.endpoint.owner.stats.wireRxBytes.Add(uint64(len(wirePacket)))
+	s.stats.wireRxPackets.Add(1)
+	s.stats.wireRxBytes.Add(uint64(len(wirePacket)))
+	result, err := s.fecDecoder.Handle(now, wirePacket)
+	if err != nil {
+		return
+	}
+	if result.Handled {
+		if result.ObservedFeedback != nil && s.fecEncoder != nil {
+			s.fecEncoder.Observe(*result.ObservedFeedback)
+			qconn.ObserveFECFeedback(
+				uint64(result.ObservedFeedback.Total),
+				uint64(result.ObservedFeedback.Missing),
+				uint64(result.ObservedFeedback.Recovered),
+			)
+		}
+		s.sendFECFeedback(result.SendFeedback)
+		if len(result.Frames) == 0 {
+			return
+		}
+		receiveEndpoint := s.endpointForIngress(datagram.RemoteAddr, sequence)
+		for _, frame := range result.Frames {
+			s.deliverFrame(frame, true, receiveEndpoint, now)
+		}
+		return
+	}
+	s.deliverFrame(wirePacket, false, s.endpointForIngress(datagram.RemoteAddr, sequence), now)
 }
