@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.4.5 - 2026-11-03
+
+Reduce receive-path allocation overhead and update desktop build tooling.
+Existing configuration, wire formats and FEC defaults are unchanged.
+
+- Allocate an immutable receive endpoint only when FEC decoding emits frames.
+  Feedback, duplicates, insufficient parity and invalid FEC packets avoid one
+  64-byte endpoint allocation on amd64; normal data-frame allocation is unchanged.
+  Whole-program CPU and throughput improvements are not established.
+- Preserve ingress sequencing before decoding, immutable addresses across path
+  migration, and the shared snapshot for frames recovered from one datagram.
+  Add direct regression tests and receive-handler allocation benchmarks.
+- Update Vite from 7.3.6 to 7.3.7 to address security advisories and restore
+  the desktop dependency audit in Linux and Windows CI.
+
 ## v0.4.4 - 2026-10-20
 
 Simplify transport ownership and improve recovery under connection pressure.
