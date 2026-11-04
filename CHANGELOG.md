@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## v0.4.6 - 2026-11-04
+
+Improve UDP throughput under single-core overload. Existing configuration,
+wire formats, congestion control and FEC defaults are unchanged.
+
+- Apply bounded send backpressure with a shared 2 ms admission deadline per
+  WireGuard batch. Capacity release and budget increases wake waiting senders;
+  control traffic retains its independent queue. Session retirement cancels
+  waiting sends without preventing automatic reconnection.
+- Yield the QUIC socket reader when the receive queue reaches half capacity
+  with `GOMAXPROCS=1`, allowing the connection loop to process local bursts.
+  Return discarded packet buffers to the pool when that queue is full.
+- Add regressions for admission deadlines, concurrent wakeups, cancellation,
+  control traffic, receive-buffer ownership and single-P burst delivery.
+- Add benchmark controls for iperf socket buffers, UDP payload size and pacing,
+  and capture endpoint UDP counters to distinguish local socket overflow.
+- In a local Xeon 9470C/veth test with each daemon pinned to one core and iperf
+  on separate cores, automatic-FEC UDP goodput increased from 723 to 1125 Mbps
+  after the receive-scheduling fix, on top of the send-backpressure change.
+  Both 30-second trials offered 1200 Mbps with 1200-byte payloads and 4M iperf
+  buffers; loss decreased from 39.36% to 6.21%. A 60-second 1000 Mbps trial
+  received 980 Mbps with 2.02% loss. These are local processing measurements,
+  not a lossless physical-link guarantee. Extracted results are retained in
+  `docs/benchmarks/2026-11-single-core/measurements.json`.
+
 ## v0.4.5 - 2026-11-03
 
 Reduce receive-path allocation overhead and update desktop build tooling.

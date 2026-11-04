@@ -346,6 +346,8 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 	if err != nil {
 		return err
 	}
+	var admission sendAdmission
+	defer admission.stop()
 	for _, buf := range bufs {
 		if len(buf) == 0 || len(buf) > maxDatagramSize {
 			return fmt.Errorf("invalid WireGuard datagram size %d", len(buf))
@@ -375,18 +377,34 @@ func (b *Bind) Send(bufs [][]byte, endpoint conn.Endpoint) error {
 			}
 			if queue == sess.send {
 				packet.queuedAt = time.Now()
-				if !sess.reserveSendBytes(len(preparedFrame)) {
+				reason, err := sess.enqueueData(packet, &admission)
+				if err != nil || reason != "" {
 					quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
-					sess.recordSendDrop("send_queue_budget")
-					break
+					if err != nil {
+						if state.ctx.Err() != nil {
+							return net.ErrClosed
+						}
+						// A retiring session must wake blocked senders, but
+						// the bind remains usable while its peer reconnects.
+						reason = "send_session_closed"
+					}
+					// Queue rejection is silent: per-packet WireGuard error
+					// logging would itself amplify overload.
+					sess.recordSendDrop(reason)
+					admitted = false
 				}
+				continue
 			}
 			select {
 			case queue <- packet:
-			case <-state.ctx.Done():
+			case <-sess.ctx.Done():
 				sess.releaseSendBytes(packet)
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
-				return net.ErrClosed
+				if state.ctx.Err() != nil {
+					return net.ErrClosed
+				}
+				sess.recordSendDrop("send_session_closed")
+				admitted = false
 			default:
 				sess.releaseSendBytes(packet)
 				quiccarrier.ReleaseDatagramSendBuffer(preparedFrame)
