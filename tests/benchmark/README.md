@@ -210,6 +210,35 @@ values keep the default unrestricted CPU placement. CPU sets are recorded in
 `parameters.json`; compare versions with identical placement, and keep these
 results separate from measurements without affinity.
 
+For UDP ceiling measurements, place the traffic generator on a different
+physical core from the tunnel daemon at each endpoint. A container pinned to
+one CPU makes iperf and the daemon compete for that CPU; `GOMAXPROCS=1` alone
+does not pin a process. Record and verify every daemon thread's CPU affinity
+when claiming a single-core result.
+
+UDP application socket buffers can also limit the reported goodput. Set
+`IPERF_WINDOW=4M` to request larger iperf send and receive buffers, provided the
+host's socket-buffer limits permit it. The fixture does not change those host
+limits. `UDP_LENGTH` selects the UDP payload size (default 1200 bytes), and
+`IPERF_PACING_US` selects iperf's pacing interval (default 1000 microseconds).
+For example:
+
+```sh
+MODE=fec-plain WORKLOAD=udp LINK_PROFILE=unshaped \
+OFFERED_MBIT=1000 DURATION=30 IPERF_WINDOW=4M IPERF_PACING_US=100 \
+./tests/benchmark/run.sh trial
+```
+
+These settings are recorded in `parameters.json` and applied equally to the
+outer baseline and tunnel workload. Use a new `RUN_ID` when changing them.
+Compare the `Udp` counters in `snmp-{a,b}-{before,after}.txt`: an increase in
+`RcvbufErrors` indicates local UDP socket overflow, which is separate from
+FEC recovery and the application's reported loss. The counters cover all UDP
+sockets in each endpoint namespace. Always report received goodput together
+with offered rate and loss; an unlimited sender's rate is not delivered
+throughput. Unshaped veth results measure local processing capacity, not a
+physical gigabit link's usable payload rate after tunnel overhead.
+
 Use the existing CPU, RSS, allocation, GC, stall, and receive-queue metrics to
 judge results alongside goodput. A higher throughput with sustained queue loss
 or much longer stalls is not an improvement for this target.

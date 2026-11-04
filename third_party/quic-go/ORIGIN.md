@@ -55,3 +55,10 @@ A full DATAGRAM receive queue yields once to runnable consumers before one
 enqueue retry. Persistent overload still drops packets; queue capacity does
 not grow. Closing the queue synchronizes rejection of subsequent enqueues.
 Tests cover consumer progress, stalled-consumer drops, and closed queues.
+
+With one Go P, the socket reader yields after notifying a connection whose
+unprocessed-packet queue is at least half full. This prevents a continuous
+receive burst from starving the connection loop while preserving the bounded
+queue and ordinary multi-P scheduling. Packets discarded at the queue limit
+return their buffers to the pool. Tests cover single-P burst delivery and
+discarded-buffer ownership.

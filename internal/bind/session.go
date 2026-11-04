@@ -137,8 +137,9 @@ func (b *Bind) newSessionLocked(
 		role: role, configuredEndpoint: configuredEndpoint,
 		state: state, endpoint: ep, ctx: ctx, cancel: cancel,
 		ready: make(chan struct{}), send: make(chan outboundPacket, state.cfg.QueueSize),
-		priority: make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
-		control:  make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
+		sendSpace: make(chan struct{}, 1),
+		priority:  make(chan outboundPacket, max(64, state.cfg.QueueSize/8)),
+		control:   make(chan []byte, 64), reconnectAttempt: reconnectAttempt,
 		fecPolicyUpdates:   make(chan string, 1),
 		authenticatedPeers: make(map[string]uint64),
 		replacesSessionID:  replacesSessionID,
@@ -264,6 +265,7 @@ type session struct {
 	cancel             context.CancelFunc
 	ready              chan struct{}
 	send               chan outboundPacket
+	sendSpace          chan struct{} // coalesced notification of released data capacity
 	sendBytes          atomic.Int64
 	sendBudgetBytes    atomic.Int64
 	sendAgeNanos       atomic.Int64

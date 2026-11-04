@@ -1,10 +1,89 @@
 package armorbind
 
 import (
+	"net"
 	"time"
 
 	"github.com/RC-CHN/wg-quic/internal/telemetry"
 )
+
+// Bound backpressure across an entire Bind.Send batch. Waiting for capacity
+// stops an overloaded WireGuard producer from repeatedly encrypting packets
+// only to drop them, starving the QUIC reader and its ACK processing on one P.
+const sendAdmissionWait = 2 * time.Millisecond
+
+type sendAdmission struct {
+	deadline time.Time
+	timer    *time.Timer
+}
+
+func (a *sendAdmission) timeout() (<-chan time.Time, bool) {
+	if a.timer == nil {
+		a.deadline = time.Now().Add(sendAdmissionWait)
+		a.timer = time.NewTimer(sendAdmissionWait)
+	}
+	return a.timer.C, !time.Now().Before(a.deadline)
+}
+
+func (a *sendAdmission) stop() {
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+}
+
+// enqueueData transfers the packet to the send loop on success. On rejection
+// the caller still owns the buffer; any byte reservation is released here.
+// Priority traffic bypasses this wait and retains its independent queue.
+func (s *session) enqueueData(packet outboundPacket, admission *sendAdmission) (string, error) {
+	if s.ctx.Err() != nil {
+		return "", net.ErrClosed
+	}
+	waited := false
+	for !s.reserveSendBytes(len(packet.preparedFrame)) {
+		timeout, expired := admission.timeout()
+		if expired {
+			return "send_queue_budget", nil
+		}
+		select {
+		case <-s.sendSpace:
+			waited = true
+		case <-timeout:
+			return "send_queue_budget", nil
+		case <-s.ctx.Done():
+			return "", net.ErrClosed
+		}
+	}
+	if waited {
+		// Pass the notification to another waiter: one drain or a budget
+		// increase can make room for several concurrent Send calls.
+		s.notifySendSpace()
+	}
+	select {
+	case s.send <- packet:
+		return "", nil
+	default:
+	}
+	timeout, expired := admission.timeout()
+	if !expired {
+		select {
+		case s.send <- packet:
+			return "", nil
+		case <-s.ctx.Done():
+			s.releaseSendBytes(packet)
+			return "", net.ErrClosed
+		case <-timeout:
+		}
+	}
+	s.releaseSendBytes(packet)
+	return "send_queue_full", nil
+}
+
+func (s *session) notifySendSpace() {
+	select {
+	case s.sendSpace <- struct{}{}:
+	default:
+	}
+}
 
 // The bind and QUIC queues budget 20 ms and 5 ms of service respectively.
 // Packet floors tolerate scheduling jitter, while packet age also catches a
@@ -25,7 +104,10 @@ func (s *session) updateSendBudget(bandwidth, pacing uint64, startup bool) {
 	if startup {
 		budget = max(budget, 64*1024)
 	}
-	s.sendBudgetBytes.Store(int64(min(uint64(cap(s.send))*1500, budget)))
+	limit := int64(min(uint64(cap(s.send))*1500, budget))
+	if s.sendBudgetBytes.Swap(limit) < limit {
+		s.notifySendSpace()
+	}
 	age := max(100*time.Millisecond, time.Duration(min(uint64(2*time.Second), uint64(6000*8)*uint64(time.Second)/rate)))
 	s.sendAgeNanos.Store(int64(age))
 }
@@ -58,6 +140,7 @@ func (s *session) reserveSendBytes(n int) bool {
 func (s *session) releaseSendBytes(packet outboundPacket) {
 	if !packet.queuedAt.IsZero() {
 		s.sendBytes.Add(-int64(len(packet.preparedFrame)))
+		s.notifySendSpace()
 	}
 }
 

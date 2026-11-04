@@ -1,0 +1,399 @@
+{
+  "date": "2026-11-04",
+  "base_commit": "7ba429b62b319727454339fa6dc422c1463a5ddc",
+  "environment": {
+    "cpu": "Intel Xeon CPU Max 9470C",
+    "daemon_cpu_a": 2,
+    "daemon_cpu_b": 3,
+    "iperf_cpu_a": 4,
+    "iperf_cpu_b": 5,
+    "inner_mtu": 1280,
+    "udp_payload_bytes": 1200,
+    "link": "unshaped local Docker veth; no physical NIC line-rate claim",
+    "note": "Every daemon thread is pinned to one physical CPU; all four retained trials use GOMAXPROCS=1. Baseline includes send backpressure; after adds QUIC receive fairness and buffer release.",
+    "fec_data_shards": 32,
+    "fec_interleave": 1,
+    "final_runs_gomaxprocs": 1,
+    "final_runs_iperf_window": "4M requested; Linux reports 8 MiB actual buffer accounting"
+  },
+  "comparison_scope": "The before binary already includes the bounded send-backpressure change. The paired comparison isolates the additional QUIC receive-scheduling and buffer-release fix.",
+  "binary_sha256": {
+    "wg-quic-fixed": "160dadb4480e6b45cf36b384fcc9191c111c62365bec347cc6cb7cd2deb2b9bd",
+    "wg-quic-final": "79ed8166dfa68caff5e10ae63d89950de42cfb7d63b06406535cf41e2857a101"
+  },
+  "evidence_scope": "Extracted iperf client test settings, end statistics and fixture counters; full raw diagnostic runs are not included in this file.",
+  "runs": [
+    {
+      "run": "paired-before-1200",
+      "mode": "fec-plain",
+      "duration_s": 30.0,
+      "offered_mbps": 1200.0,
+      "received_mbps": 722.709497606173,
+      "lost_percent": 39.35503019804198,
+      "cpu_a_s": 29.12,
+      "cpu_b_s": 27.14,
+      "receiver_udp_rcvbuf_errors": 0,
+      "fec_parity_final": 8,
+      "iperf_client_sha256": "1889d9faab77c1c2e4cbbbd7b1ea0c136c8aa47c9126bf73977592f9503cecc2",
+      "iperf_test_start": {
+        "protocol": "UDP",
+        "num_streams": 1,
+        "blksize": 1200,
+        "omit": 0,
+        "duration": 30,
+        "bytes": 0,
+        "blocks": 0,
+        "reverse": 0,
+        "tos": 0,
+        "target_bitrate": 1200000000,
+        "bidir": 0,
+        "fqrate": 0,
+        "interval": 0.25
+      },
+      "iperf_end": {
+        "streams": [
+          {
+            "udp": {
+              "socket": 5,
+              "start": 0,
+              "end": 30.000149,
+              "seconds": 30.000149,
+              "bytes": 4499894400,
+              "bits_per_second": 1199965880.1694617,
+              "jitter_ms": 0.0024850795152220975,
+              "lost_packets": 1475779,
+              "packets": 3749912,
+              "lost_percent": 39.35503019804198,
+              "out_of_order": 0,
+              "sender": true
+            }
+          }
+        ],
+        "sum": {
+          "start": 0,
+          "end": 30.207696,
+          "seconds": 30.207696,
+          "bytes": 4499894400,
+          "bits_per_second": 1199965880.1694617,
+          "jitter_ms": 0.0024850795152220975,
+          "lost_packets": 1475779,
+          "packets": 3749912,
+          "lost_percent": 39.35503019804198,
+          "sender": true
+        },
+        "sum_sent": {
+          "start": 0,
+          "end": 30.000149,
+          "seconds": 30.000149,
+          "bytes": 4499894400,
+          "bits_per_second": 1199965880.1694617,
+          "jitter_ms": 0,
+          "lost_packets": 0,
+          "packets": 3749912,
+          "lost_percent": 0,
+          "sender": true
+        },
+        "sum_received": {
+          "start": 0,
+          "end": 30.207696,
+          "seconds": 30.207696,
+          "bytes": 2728923600,
+          "bits_per_second": 722709497.606173,
+          "jitter_ms": 0.0024850795152220975,
+          "lost_packets": 1475779,
+          "packets": 3749882,
+          "lost_percent": 39.35503019804198,
+          "sender": false
+        },
+        "cpu_utilization_percent": {
+          "host_total": 99.45427565010768,
+          "host_user": 31.480105440558432,
+          "host_system": 67.97416687653543,
+          "remote_total": 81.78016052456005,
+          "remote_user": 14.24166025936289,
+          "remote_system": 67.53850026519717
+        }
+      },
+      "iperf_pacing_us": 1000
+    },
+    {
+      "run": "paired-after-1200",
+      "mode": "fec-plain",
+      "duration_s": 30.0,
+      "offered_mbps": 1200.0,
+      "received_mbps": 1124.9495366878336,
+      "lost_percent": 6.20534892837428,
+      "cpu_a_s": 26.79,
+      "cpu_b_s": 27.41,
+      "receiver_udp_rcvbuf_errors": 0,
+      "fec_parity_final": 0,
+      "iperf_client_sha256": "3e6a4a5be7731ecc2712688f6bda1f3fb50f9abee7769b649391fb19a1433ad4",
+      "iperf_test_start": {
+        "protocol": "UDP",
+        "num_streams": 1,
+        "blksize": 1200,
+        "omit": 0,
+        "duration": 30,
+        "bytes": 0,
+        "blocks": 0,
+        "reverse": 0,
+        "tos": 0,
+        "target_bitrate": 1200000000,
+        "bidir": 0,
+        "fqrate": 0,
+        "interval": 0.25
+      },
+      "iperf_end": {
+        "streams": [
+          {
+            "udp": {
+              "socket": 5,
+              "start": 0,
+              "end": 30.000132,
+              "seconds": 30.000132,
+              "bytes": 4499892000,
+              "bits_per_second": 1199965920.1499512,
+              "jitter_ms": 0.002301424100533429,
+              "lost_packets": 232695,
+              "packets": 3749910,
+              "lost_percent": 6.20534892837428,
+              "out_of_order": 0,
+              "sender": true
+            }
+          }
+        ],
+        "sum": {
+          "start": 0,
+          "end": 30.011407,
+          "seconds": 30.011407,
+          "bytes": 4499892000,
+          "bits_per_second": 1199965920.1499512,
+          "jitter_ms": 0.002301424100533429,
+          "lost_packets": 232695,
+          "packets": 3749910,
+          "lost_percent": 6.20534892837428,
+          "sender": true
+        },
+        "sum_sent": {
+          "start": 0,
+          "end": 30.000132,
+          "seconds": 30.000132,
+          "bytes": 4499892000,
+          "bits_per_second": 1199965920.1499512,
+          "jitter_ms": 0,
+          "lost_packets": 0,
+          "packets": 3749910,
+          "lost_percent": 0,
+          "sender": true
+        },
+        "sum_received": {
+          "start": 0,
+          "end": 30.011407,
+          "seconds": 30.011407,
+          "bytes": 4220164800,
+          "bits_per_second": 1124949536.6878335,
+          "jitter_ms": 0.002301424100533429,
+          "lost_packets": 232695,
+          "packets": 3749499,
+          "lost_percent": 6.20534892837428,
+          "sender": false
+        },
+        "cpu_utilization_percent": {
+          "host_total": 99.71418550651815,
+          "host_user": 98.49786908986945,
+          "host_system": 1.216313083690546,
+          "remote_total": 86.89164662958724,
+          "remote_user": 15.74986247745568,
+          "remote_system": 71.14177415594445
+        }
+      },
+      "iperf_pacing_us": 1000
+    },
+    {
+      "run": "final-fec-obfs-1200",
+      "mode": "fec-obfs",
+      "duration_s": 30.0,
+      "offered_mbps": 1200.0,
+      "received_mbps": 1123.1645448256393,
+      "lost_percent": 6.339033827220874,
+      "cpu_a_s": 27.96,
+      "cpu_b_s": 27.78,
+      "receiver_udp_rcvbuf_errors": 0,
+      "fec_parity_final": 0,
+      "iperf_client_sha256": "19758a73b2caf41ebc6653acdbb99f2cf3bee7a3c57be68162e791e094980e0e",
+      "iperf_test_start": {
+        "protocol": "UDP",
+        "num_streams": 1,
+        "blksize": 1200,
+        "omit": 0,
+        "duration": 30,
+        "bytes": 0,
+        "blocks": 0,
+        "reverse": 0,
+        "tos": 0,
+        "target_bitrate": 1200000000,
+        "bidir": 0,
+        "fqrate": 0,
+        "interval": 0.25
+      },
+      "iperf_end": {
+        "streams": [
+          {
+            "udp": {
+              "socket": 5,
+              "start": 0,
+              "end": 30.000138,
+              "seconds": 30.000138,
+              "bytes": 4499890800,
+              "bits_per_second": 1199965360.1593432,
+              "jitter_ms": 0.0020944710148489676,
+              "lost_packets": 237708,
+              "packets": 3749909,
+              "lost_percent": 6.339033827220874,
+              "out_of_order": 0,
+              "sender": true
+            }
+          }
+        ],
+        "sum": {
+          "start": 0,
+          "end": 30.017486,
+          "seconds": 30.017486,
+          "bytes": 4499890800,
+          "bits_per_second": 1199965360.1593432,
+          "jitter_ms": 0.0020944710148489676,
+          "lost_packets": 237708,
+          "packets": 3749909,
+          "lost_percent": 6.339033827220874,
+          "sender": true
+        },
+        "sum_sent": {
+          "start": 0,
+          "end": 30.000138,
+          "seconds": 30.000138,
+          "bytes": 4499890800,
+          "bits_per_second": 1199965360.1593432,
+          "jitter_ms": 0,
+          "lost_packets": 0,
+          "packets": 3749909,
+          "lost_percent": 0,
+          "sender": true
+        },
+        "sum_received": {
+          "start": 0,
+          "end": 30.017486,
+          "seconds": 30.017486,
+          "bytes": 4214322000,
+          "bits_per_second": 1123164544.8256392,
+          "jitter_ms": 0.0020944710148489676,
+          "lost_packets": 237708,
+          "packets": 3749643,
+          "lost_percent": 6.339033827220874,
+          "sender": false
+        },
+        "cpu_utilization_percent": {
+          "host_total": 99.26559399124356,
+          "host_user": 98.12906635401836,
+          "host_system": 1.1365176380964672,
+          "remote_total": 86.68065561476027,
+          "remote_user": 15.1587643557063,
+          "remote_system": 71.52189125905397
+        }
+      },
+      "iperf_pacing_us": 1000
+    },
+    {
+      "run": "final-fec-1000-60s",
+      "mode": "fec-plain",
+      "duration_s": 60.0,
+      "offered_mbps": 1000.0,
+      "received_mbps": 979.7689909228553,
+      "lost_percent": 2.022144,
+      "cpu_a_s": 52.88,
+      "cpu_b_s": 54.51,
+      "receiver_udp_rcvbuf_errors": 0,
+      "fec_parity_final": 0,
+      "iperf_client_sha256": "fdb404a201d8051b2bb573ac0f9d3d1dc047af66784ecdccf6932f00e57ccb10",
+      "iperf_test_start": {
+        "protocol": "UDP",
+        "num_streams": 1,
+        "blksize": 1200,
+        "omit": 0,
+        "duration": 60,
+        "bytes": 0,
+        "blocks": 0,
+        "reverse": 0,
+        "tos": 0,
+        "target_bitrate": 1000000000,
+        "bidir": 0,
+        "fqrate": 0,
+        "interval": 0.25
+      },
+      "iperf_end": {
+        "streams": [
+          {
+            "udp": {
+              "socket": 5,
+              "start": 0,
+              "end": 60.000135,
+              "seconds": 60.000135,
+              "bytes": 7500000000,
+              "bits_per_second": 999997750.0050625,
+              "jitter_ms": 0.006459420364811624,
+              "lost_packets": 126384,
+              "packets": 6250000,
+              "lost_percent": 2.022144,
+              "out_of_order": 0,
+              "sender": true
+            }
+          }
+        ],
+        "sum": {
+          "start": 0,
+          "end": 60.000586,
+          "seconds": 60.000586,
+          "bytes": 7500000000,
+          "bits_per_second": 999997750.0050625,
+          "jitter_ms": 0.006459420364811624,
+          "lost_packets": 126384,
+          "packets": 6250000,
+          "lost_percent": 2.022144,
+          "sender": true
+        },
+        "sum_sent": {
+          "start": 0,
+          "end": 60.000135,
+          "seconds": 60.000135,
+          "bytes": 7500000000,
+          "bits_per_second": 999997750.0050625,
+          "jitter_ms": 0,
+          "lost_packets": 0,
+          "packets": 6250000,
+          "lost_percent": 0,
+          "sender": true
+        },
+        "sum_received": {
+          "start": 0,
+          "end": 60.000586,
+          "seconds": 60.000586,
+          "bytes": 7348339200,
+          "bits_per_second": 979768990.9228554,
+          "jitter_ms": 0.006459420364811624,
+          "lost_packets": 126384,
+          "packets": 6250000,
+          "lost_percent": 2.022144,
+          "sender": false
+        },
+        "cpu_utilization_percent": {
+          "host_total": 99.69329791701738,
+          "host_user": 10.485191429147545,
+          "host_system": 89.2081048212824,
+          "remote_total": 89.96175255105354,
+          "remote_user": 15.323497665515129,
+          "remote_system": 74.6382532188885
+        }
+      },
+      "iperf_pacing_us": 100
+    }
+  ]
+}

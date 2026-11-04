@@ -830,6 +830,23 @@ run_trial() {
 	validate_integer DURATION "$duration"
 	validate_integer PARALLEL "$parallel"
 	validate_number OFFERED_MBIT "$offered_mbit"
+	local udp_length=${UDP_LENGTH:-1200}
+	local iperf_window=${IPERF_WINDOW:-}
+	local iperf_pacing_us=${IPERF_PACING_US:-1000}
+	validate_integer UDP_LENGTH "$udp_length"
+	validate_integer IPERF_PACING_US "$iperf_pacing_us"
+	if (( udp_length < 1 || udp_length > 65507 || iperf_pacing_us < 1 )); then
+		echo "UDP_LENGTH must be 1..65507 and IPERF_PACING_US must be positive" >&2
+		return 1
+	fi
+	if [[ -n $iperf_window && ! $iperf_window =~ ^[1-9][0-9]*[kKmMgG]?$ ]]; then
+		echo "IPERF_WINDOW must be a positive byte count, optionally suffixed K, M, or G" >&2
+		return 1
+	fi
+	local iperf_socket_args=()
+	if [[ -n $iperf_window ]]; then
+		iperf_socket_args+=(-w "$iperf_window")
+	fi
 	local iperf_interval=${IPERF_INTERVAL_SECONDS:-0.25}
 	local stall_bps_threshold=${STALL_BPS_THRESHOLD:-0}
 	validate_number IPERF_INTERVAL_SECONDS "$iperf_interval"
@@ -922,6 +939,9 @@ run_trial() {
 		--arg link_profile "$link_profile" \
 		--arg link_schedule "${LINK_SCHEDULE:-}" \
 		--arg workload "$workload" \
+		--arg iperf_window "$iperf_window" \
+		--argjson udp_length "$udp_length" \
+		--argjson iperf_pacing_us "$iperf_pacing_us" \
 		--arg cpu_limit "${WGQ_BENCH_CPUS:-0}" \
 		--arg cpu_set_a "${WGQ_BENCH_CPUSET_A:-}" \
 		--arg cpu_set_b "${WGQ_BENCH_CPUSET_B:-}" \
@@ -958,6 +978,9 @@ run_trial() {
 			link_profile: $link_profile,
 			link_schedule: $link_schedule,
 			workload: $workload,
+			iperf_window: $iperf_window,
+			udp_length: $udp_length,
+			iperf_pacing_us: $iperf_pacing_us,
 			resources: {
 				cpus: $cpu_limit,
 				cpu_set_a: $cpu_set_a,
@@ -998,9 +1021,9 @@ run_trial() {
 		local outer_duration=${OUTER_MEASURE_DURATION:-3}
 		validate_integer OUTER_MEASURE_DURATION "$outer_duration"
 		start_iperf_server "$outer_b" 5200
-		local outer_iperf_args=(-c "$outer_b" -p 5200 -t "$outer_duration" -P 1 --json --get-server-output)
+		local outer_iperf_args=(-c "$outer_b" -p 5200 -t "$outer_duration" -P 1 --json --get-server-output "${iperf_socket_args[@]}")
 		if [[ $workload == udp ]]; then
-			outer_iperf_args+=(-u -b "${offered_mbit}M" -l 1200)
+			outer_iperf_args+=(-u -b "${offered_mbit}M" -l "$udp_length" --pacing-timer "$iperf_pacing_us")
 		fi
 		if compose_timeout "$((outer_duration + ${CONTROL_GRACE_SECONDS:-20}))" \
 			exec -T a iperf3 "${outer_iperf_args[@]}" \
@@ -1035,10 +1058,12 @@ run_trial() {
 	local port=5201
 	start_iperf_server "$destination" "$port"
 	local iperf_args=(-c "$destination" -p "$port" -t "$duration" -P "$parallel" \
-		-i "$iperf_interval" --json --get-server-output)
+		-i "$iperf_interval" --json --get-server-output "${iperf_socket_args[@]}")
 	if [[ $workload == udp || $workload == outer-udp ]]; then
-		iperf_args+=(-u -b "${offered_mbit}M" -l 1200)
+		iperf_args+=(-u -b "${offered_mbit}M" -l "$udp_length" --pacing-timer "$iperf_pacing_us")
 	fi
+	compose_run exec -T a cat /proc/net/snmp >"$trial_dir/snmp-a-before.txt"
+	compose_run exec -T b cat /proc/net/snmp >"$trial_dir/snmp-b-before.txt"
 	init_trial_events "$trial_dir"
 	record_trial_event "$trial_dir" workload_server_ready "$destination:$port"
 	start_link_schedule "$trial_dir"
@@ -1100,6 +1125,8 @@ run_trial() {
 	outer_tx_a_after=$(interface_bytes a eth0 tx)
 	snapshot_status a "$trial_dir/status-a-after.json"
 	snapshot_status b "$trial_dir/status-b-after.json"
+	compose_run exec -T a cat /proc/net/snmp >"$trial_dir/snmp-a-after.txt"
+	compose_run exec -T b cat /proc/net/snmp >"$trial_dir/snmp-b-after.txt"
 	compose_run exec -T a tc -s qdisc show dev eth0 >"$trial_dir/tc-a.txt"
 	compose_run exec -T b tc -s qdisc show dev eth0 >"$trial_dir/tc-b.txt"
 	compose_run exec -T a tc -s filter show dev eth0 egress >"$trial_dir/tc-filter-a.txt" || true

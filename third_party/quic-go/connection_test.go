@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"testing"
 	"testing/synctest"
@@ -886,7 +887,9 @@ func TestConnectionMaxUnprocessedPackets(t *testing.T) {
 			// nothing here should block
 			tc.conn.handlePacket(receivedPacket{data: []byte("foobar")})
 		}
-		tc.conn.handlePacket(receivedPacket{data: []byte("foobar")})
+		droppedBuffer := getPacketBuffer()
+		tc.conn.handlePacket(receivedPacket{data: []byte("foobar"), buffer: droppedBuffer})
+		require.Zero(t, droppedBuffer.refCount, "dropped packet must release its buffer")
 
 		synctest.Wait()
 
@@ -900,6 +903,42 @@ func TestConnectionMaxUnprocessedPackets(t *testing.T) {
 			eventRecorder.Events(qlog.PacketDropped{}),
 		)
 	})
+}
+
+func TestConnectionReceiveBurstSingleP(t *testing.T) {
+	previous := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previous)
+
+	c := &Conn{notifyReceivedPacket: make(chan struct{}, 1)}
+	c.receivedPackets.Init(protocol.MaxConnUnprocessedPackets)
+	packets := make([]receivedPacket, 4*protocol.MaxConnUnprocessedPackets)
+	for i := range packets {
+		buf := getPacketBuffer()
+		buf.Data = append(buf.Data, 0x40)
+		packets[i] = receivedPacket{data: buf.Data, buffer: buf}
+	}
+	started := make(chan struct{})
+	done := make(chan int, 1)
+	go func() {
+		close(started)
+		var received int
+		for range c.notifyReceivedPacket {
+			c.receivedPacketMx.Lock()
+			for !c.receivedPackets.Empty() {
+				p := c.receivedPackets.PopFront()
+				p.buffer.Release()
+				received++
+			}
+			c.receivedPacketMx.Unlock()
+		}
+		done <- received
+	}()
+	<-started
+	for _, p := range packets {
+		c.handlePacket(p)
+	}
+	close(c.notifyReceivedPacket)
+	require.Equal(t, len(packets), <-done, "a runnable consumer must not lose a local receive burst")
 }
 
 func TestConnectionRemoteClose(t *testing.T) {

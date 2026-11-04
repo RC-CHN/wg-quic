@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -2116,14 +2117,23 @@ func (c *Conn) handlePacket(p receivedPacket) {
 			})
 		}
 		c.receivedPacketMx.Unlock()
+		p.buffer.Release()
 		return
 	}
 	c.receivedPackets.PushBack(p)
+	yieldReader := c.receivedPackets.Len() >= protocol.MaxConnUnprocessedPackets/2
 	c.receivedPacketMx.Unlock()
 
 	select {
 	case c.notifyReceivedPacket <- struct{}{}:
 	default:
+	}
+	// A socket reader can stay runnable through a large burst, starving the
+	// connection loop on one P and dropping packets into a full local queue.
+	// Give the notified consumer a turn before that happens. Yield outside the
+	// lock, without blocking this shared reader on any individual connection.
+	if yieldReader && runtime.GOMAXPROCS(0) == 1 {
+		runtime.Gosched()
 	}
 }
 
